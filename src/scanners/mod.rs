@@ -42,7 +42,7 @@ pub struct Vulnerability {
     pub score_impact: i32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum VulnerabilityLevel {
     Critical,
     High,
@@ -51,7 +51,7 @@ pub enum VulnerabilityLevel {
     Info,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum VulnerabilityCategory {
     UserManagement,
     ServiceConfiguration,

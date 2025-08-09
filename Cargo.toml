@@ -91,10 +91,15 @@ nix = "0.27"
 tempdir = "0.3"
 mockall = "0.12"
 pretty_assertions = "1.4"
-criterion = "0.5"
+criterion = { version = "0.5", features = ["html_reports"] }
+tempfile = "3.8"
 
 [[bench]]
-name = "scanner_benchmarks"
+name = "performance_benchmarks"
+harness = false
+
+[[bench]]
+name = "throughput_analysis"
 harness = false
 
 [profile.release]

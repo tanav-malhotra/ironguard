@@ -1,8 +1,26 @@
 # 🖥️ IronGuard Windows Server Support
 
-## 🎯 Server-Specific Vulnerabilities
+## 🎯 Enterprise Windows Server Security
 
-IronGuard now includes comprehensive Windows Server vulnerability detection and fixes:
+IronGuard provides comprehensive Windows Server security scanning and hardening capabilities designed for enterprise environments, CyberPatriot competitions, and cybersecurity education.
+
+### **🏢 Supported Windows Server Versions**
+
+#### **Primary Support (Enterprise Ready):**
+- **Windows Server 2022 (21H2)** - Latest enterprise server platform
+- **Windows Server 2019 (1809, 1903, 1909, 2004)** - Most common enterprise deployment
+- **Windows Server 2016 (1607, 1703, 1709, 1803)** - Stable enterprise foundation
+- **Windows Server 2012 R2** - Legacy enterprise environments
+
+#### **Server Installation Types:**
+- **Server with Desktop Experience** - Full GUI server installation
+- **Server Core** - Minimal installation for security and performance
+- **Nano Server** - Container-optimized minimal installation
+- **Hyper-V Server** - Dedicated virtualization platform
+
+## 🛡️ Server-Specific Vulnerabilities
+
+IronGuard includes comprehensive Windows Server vulnerability detection and fixes:
 
 ### **Active Directory Services**
 - Domain Controller security configuration

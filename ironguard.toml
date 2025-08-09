@@ -1,0 +1,109 @@
+# IronGuard Configuration File
+# Customize this file for specific CyberPatriot competition scenarios
+
+[general]
+# Scanning timeout in seconds
+timeout = 30
+# Maximum concurrent scan tasks
+max_concurrent = 4
+# Enable debug mode for detailed logging
+debug = false
+# Backup directory for changed files (important for rollback)
+backup_dir = "./ironguard_backups"
+
+[scanners]
+# Enable/disable individual scanner modules
+users = true
+services = true
+network = true
+filesystem = true
+software = true
+system = true
+
+# Custom scanner configurations (advanced)
+[scanners.custom]
+# Example: custom_scanner_name = { "param1" = "value1", "param2" = "value2" }
+
+[fixes]
+# DANGER: Enable automatic fixes (use with extreme caution in competition!)
+auto_fix_enabled = false
+# Categories of fixes to apply automatically (when auto_fix_enabled = true)
+auto_fix_categories = []
+# Always prompt before applying fixes (recommended for competition)
+require_confirmation = true
+# Create system restore point before fixes (Windows only)
+create_restore_point = true
+
+[reporting]
+# Include detailed system information in reports
+include_system_info = true
+# Include evidence screenshots (if available)
+include_screenshots = false
+# Report output directory
+output_dir = "./reports"
+# Automatically open reports after generation
+auto_open = false
+
+[competition]
+# Competition-specific settings - CUSTOMIZE THESE FOR EACH ROUND!
+
+# Custom SSH port (if specified in README)
+# custom_ssh_port = 6639
+
+# Required/forbidden services (examples - adjust based on scenario)
+[[competition.custom_services]]
+name = "ssh"
+should_be_running = true
+# custom_config = "/etc/ssh/sshd_config"
+
+[[competition.custom_services]]
+name = "telnet"
+should_be_running = false
+
+# Add more services as needed:
+# [[competition.custom_services]]
+# name = "apache2"
+# should_be_running = true
+
+# Allowed users (based on scenario README)
+allowed_users = [
+    "administrator",  # Common Windows admin
+    "user",          # Common user account
+    "guest",         # Usually should be disabled
+    # Add scenario-specific users here
+]
+
+# Critical files to monitor (scenario-specific)
+critical_files = [
+    "/etc/passwd",
+    "/etc/shadow",
+    "/etc/hosts",
+    "C:\\Windows\\System32\\drivers\\etc\\hosts",
+    # Add more based on scenario
+]
+
+# Required software (install if missing)
+required_software = [
+    # "firefox",
+    # "libreoffice",
+    # Add based on scenario requirements
+]
+
+# Forbidden software (remove if found)
+forbidden_software = [
+    "wireshark",     # Common in scenarios
+    "nmap",          # Security tool
+    "metasploit",    # Penetration testing
+    "john",          # Password cracker
+    "aircrack-ng",   # WiFi security
+    # Add more based on scenario
+]
+
+# Additional competition notes:
+# 1. Always read the README carefully before starting
+# 2. Customize the allowed_users list based on the scenario
+# 3. Check for specific port requirements (custom_ssh_port)
+# 4. Review required/forbidden software lists
+# 5. Test auto-fix in practice environment first
+# 6. Keep backups enabled for rollback capability
+# 7. Run with administrator/root privileges for best results

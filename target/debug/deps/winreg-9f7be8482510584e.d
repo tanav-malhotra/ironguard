@@ -1,0 +1,11 @@
+C:\Users\tanavm\Documents\Coding Projects\School\CyberPatriot\CyberPatriotUtility\target\debug\deps\winreg-9f7be8482510584e.d: C:\Users\tanavm\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\winreg-0.50.0\src\lib.rs C:\Users\tanavm\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\winreg-0.50.0\src\common.rs C:\Users\tanavm\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\winreg-0.50.0\src\enums.rs C:\Users\tanavm\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\winreg-0.50.0\src\reg_key.rs C:\Users\tanavm\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\winreg-0.50.0\src\reg_key_metadata.rs C:\Users\tanavm\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\winreg-0.50.0\src\reg_value.rs C:\Users\tanavm\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\winreg-0.50.0\src\types.rs
+
+C:\Users\tanavm\Documents\Coding Projects\School\CyberPatriot\CyberPatriotUtility\target\debug\deps\libwinreg-9f7be8482510584e.rmeta: C:\Users\tanavm\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\winreg-0.50.0\src\lib.rs C:\Users\tanavm\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\winreg-0.50.0\src\common.rs C:\Users\tanavm\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\winreg-0.50.0\src\enums.rs C:\Users\tanavm\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\winreg-0.50.0\src\reg_key.rs C:\Users\tanavm\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\winreg-0.50.0\src\reg_key_metadata.rs C:\Users\tanavm\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\winreg-0.50.0\src\reg_value.rs C:\Users\tanavm\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\winreg-0.50.0\src\types.rs
+
+C:\Users\tanavm\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\winreg-0.50.0\src\lib.rs:
+C:\Users\tanavm\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\winreg-0.50.0\src\common.rs:
+C:\Users\tanavm\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\winreg-0.50.0\src\enums.rs:
+C:\Users\tanavm\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\winreg-0.50.0\src\reg_key.rs:
+C:\Users\tanavm\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\winreg-0.50.0\src\reg_key_metadata.rs:
+C:\Users\tanavm\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\winreg-0.50.0\src\reg_value.rs:
+C:\Users\tanavm\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\winreg-0.50.0\src\types.rs:

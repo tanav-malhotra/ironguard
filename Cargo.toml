@@ -1,0 +1,44 @@
+[package]
+name = "ironguard-simple"
+version = "0.1.0"
+edition = "2021"
+authors = ["CyberPatriot Team"]
+description = "Simplified IronGuard - CyberPatriot Security Scanner"
+
+[[bin]]
+name = "ironguard"
+path = "src/main_simple.rs"
+
+[dependencies]
+# CLI
+clap = { version = "4.4", features = ["derive"] }
+
+# Async runtime
+tokio = { version = "1.0", features = ["full"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+anyhow = "1.0"
+
+# Random for demos
+rand = "0.8"
+
+# Windows-specific dependencies
+[target.'cfg(windows)'.dependencies]
+winapi = { version = "0.3", features = [
+    "winnt", "processthreadsapi", "handleapi",
+    "securitybaseapi", "winbase"
+] }
+
+# Unix-specific dependencies  
+[target.'cfg(unix)'.dependencies]
+nix = "0.27"
+
+[profile.release]
+lto = true
+strip = true

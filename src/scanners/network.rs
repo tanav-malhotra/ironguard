@@ -8,6 +8,7 @@ use tokio::net::TcpStream;
 use tokio::time::timeout;
 use tracing::{debug, warn};
 
+#[derive(Debug, Clone)]
 pub struct NetworkScanner {
     config: Config,
 }
@@ -75,7 +76,7 @@ impl NetworkScanner {
                         id: format!("open-dangerous-port-{}", port),
                         title: format!("Dangerous port {} ({}) is open", port, service_name),
                         description: format!("Port {} is open and running {} which can be a security risk", port, service_name),
-                        level,
+                        level: level.clone(),
                         category: VulnerabilityCategory::NetworkSecurity,
                         evidence: vec![format!("Port: {} ({}), Status: Open", port, service_name)],
                         remediation: format!("Close port {} or ensure the {} service is properly secured", port, service_name),
@@ -286,7 +287,7 @@ impl NetworkScanner {
                         if !line.trim().is_empty() && !line.starts_with("Share name") && !line.starts_with("The command") {
                             let parts: Vec<&str> = line.split_whitespace().collect();
                             if let Some(share_name) = parts.first() {
-                                if share_name != "ADMIN$" && share_name != "C$" && share_name != "IPC$" {
+                                if *share_name != "ADMIN$" && *share_name != "C$" && *share_name != "IPC$" {
                                     vulnerabilities.push(Vulnerability {
                                         id: format!("network-share-{}", share_name),
                                         title: format!("Network share '{}' is exposed", share_name),

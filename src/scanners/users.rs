@@ -5,6 +5,7 @@ use async_trait::async_trait;
 use std::collections::HashSet;
 use tracing::{debug, warn};
 
+#[derive(Debug, Clone)]
 pub struct UserScanner {
     config: Config,
 }

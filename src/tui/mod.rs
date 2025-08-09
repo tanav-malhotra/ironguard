@@ -202,7 +202,7 @@ impl TuiApp {
         Ok(())
     }
     
-    fn ui<B: Backend>(&mut self, f: &mut Frame<B>) {
+    fn ui(&mut self, f: &mut Frame) {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
@@ -230,7 +230,7 @@ impl TuiApp {
         self.render_status_bar(f, chunks[2]);
     }
     
-    fn render_header<B: Backend>(&self, f: &mut Frame<B>, area: Rect) {
+    fn render_header(&self, f: &mut Frame, area: Rect) {
         let title = Paragraph::new("🛡️  IronGuard - CyberPatriot Security Scanner")
             .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
             .alignment(Alignment::Center)
@@ -238,7 +238,7 @@ impl TuiApp {
         f.render_widget(title, area);
     }
     
-    fn render_main_menu<B: Backend>(&self, f: &mut Frame<B>, area: Rect) {
+    fn render_main_menu(&self, f: &mut Frame, area: Rect) {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
@@ -288,7 +288,7 @@ impl TuiApp {
         f.render_widget(info_block, chunks[1]);
     }
     
-    fn render_scanning<B: Backend>(&self, f: &mut Frame<B>, area: Rect) {
+    fn render_scanning(&self, f: &mut Frame, area: Rect) {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
@@ -333,7 +333,7 @@ impl TuiApp {
         f.render_widget(scanner_list, chunks[1]);
     }
     
-    fn render_results<B: Backend>(&self, f: &mut Frame<B>, area: Rect) {
+    fn render_results(&mut self, f: &mut Frame, area: Rect) {
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
@@ -349,7 +349,7 @@ impl TuiApp {
             let vulnerability_items: Vec<ListItem> = results.vulnerabilities
                 .iter()
                 .enumerate()
-                .map(|(i, vuln)| {
+                .map(|(_i, vuln)| {
                     let level_color = match vuln.level {
                         VulnerabilityLevel::Critical => Color::Red,
                         VulnerabilityLevel::High => Color::LightRed,
@@ -412,14 +412,14 @@ impl TuiApp {
         }
     }
     
-    fn render_vulnerability_detail<B: Backend>(&self, f: &mut Frame<B>, area: Rect) {
+    fn render_vulnerability_detail(&self, f: &mut Frame, area: Rect) {
         // Implementation for detailed vulnerability view
         let placeholder = Paragraph::new("Detailed vulnerability view (TODO)")
             .block(Block::default().title("Vulnerability Detail").borders(Borders::ALL));
         f.render_widget(placeholder, area);
     }
     
-    fn render_fixing<B: Backend>(&self, f: &mut Frame<B>, area: Rect) {
+    fn render_fixing(&self, f: &mut Frame, area: Rect) {
         let data = self.data.lock().unwrap();
         
         if data.fix_progress.is_empty() {
@@ -453,13 +453,13 @@ impl TuiApp {
         }
     }
     
-    fn render_settings<B: Backend>(&self, f: &mut Frame<B>, area: Rect) {
+    fn render_settings(&self, f: &mut Frame, area: Rect) {
         let placeholder = Paragraph::new("Settings configuration (TODO)")
             .block(Block::default().title("Settings").borders(Borders::ALL));
         f.render_widget(placeholder, area);
     }
     
-    fn render_help<B: Backend>(&self, f: &mut Frame<B>, area: Rect) {
+    fn render_help(&self, f: &mut Frame, area: Rect) {
         let help_text = vec![
             "🛡️  IronGuard - CyberPatriot Security Scanner",
             "",
@@ -497,7 +497,7 @@ impl TuiApp {
         f.render_widget(help_paragraph, area);
     }
     
-    fn render_status_bar<B: Backend>(&self, f: &mut Frame<B>, area: Rect) {
+    fn render_status_bar(&self, f: &mut Frame, area: Rect) {
         let data = self.data.lock().unwrap();
         let status_paragraph = Paragraph::new(data.status_message.clone())
             .style(Style::default().fg(Color::Yellow))
@@ -597,7 +597,7 @@ impl TuiApp {
             match ScannerEngine::new(config) {
                 Ok(engine) => {
                     // Simulate progress updates
-                    for (i, scanner_name) in ["Users", "Services", "Network", "FileSystem", "Software", "System"].iter().enumerate() {
+                    for (_i, scanner_name) in ["Users", "Services", "Network", "FileSystem", "Software", "System"].iter().enumerate() {
                         for progress in (0..=100).step_by(20) {
                             let _ = event_tx.send(TuiEvent::ScanProgress {
                                 scanner: scanner_name.to_string(),

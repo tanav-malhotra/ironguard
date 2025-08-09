@@ -4,6 +4,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use tracing::debug;
 
+#[derive(Debug, Clone)]
 pub struct SoftwareScanner {
     config: Config,
 }

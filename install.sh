@@ -27,7 +27,7 @@ show_logo() {
     echo -e "${BOLD}${WHITE}╚═╝╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═══╝ ╚═════╝  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝ ${NC}"
     echo ""
     echo -e "${BOLD}${CYAN}🛡️  ULTIMATE CYBERPATRIOT SECURITY SCANNER 🛡️${NC}"
-    echo -e "${BOLD}${YELLOW}🏆 Your path to 100-point CyberPatriot domination! 🏆${NC}"
+    #echo -e "${BOLD}${YELLOW}🏆 Your path to 100-point CyberPatriot domination! 🏆${NC}"
     echo ""
 }
 

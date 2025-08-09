@@ -1,4 +1,5 @@
 use anyhow::Result;
+use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -47,7 +48,7 @@ pub enum VulnerabilityLevel {
     Info,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum VulnerabilityCategory {
     UserManagement,
     ServiceConfiguration,
@@ -102,6 +103,86 @@ impl fmt::Display for VulnerabilityCategory {
     }
 }
 
+// Scanner enum to avoid dyn trait object issues with async methods
+#[derive(Debug, Clone)]
+pub enum ScannerType {
+    Users(users::UserScanner),
+    Services(services::ServiceScanner),
+    Network(network::NetworkScanner),
+    FileSystem(filesystem::FileSystemScanner),
+    Software(software::SoftwareScanner),
+    System(system::SystemScanner),
+}
+
+impl ScannerType {
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Users(s) => s.name(),
+            Self::Services(s) => s.name(),
+            Self::Network(s) => s.name(),
+            Self::FileSystem(s) => s.name(),
+            Self::Software(s) => s.name(),
+            Self::System(s) => s.name(),
+        }
+    }
+    
+    pub fn description(&self) -> &str {
+        match self {
+            Self::Users(s) => s.description(),
+            Self::Services(s) => s.description(),
+            Self::Network(s) => s.description(),
+            Self::FileSystem(s) => s.description(),
+            Self::Software(s) => s.description(),
+            Self::System(s) => s.description(),
+        }
+    }
+    
+    pub fn category(&self) -> VulnerabilityCategory {
+        match self {
+            Self::Users(s) => s.category(),
+            Self::Services(s) => s.category(),
+            Self::Network(s) => s.category(),
+            Self::FileSystem(s) => s.category(),
+            Self::Software(s) => s.category(),
+            Self::System(s) => s.category(),
+        }
+    }
+    
+    pub async fn scan(&self) -> Result<Vec<Vulnerability>> {
+        match self {
+            Self::Users(s) => s.scan().await,
+            Self::Services(s) => s.scan().await,
+            Self::Network(s) => s.scan().await,
+            Self::FileSystem(s) => s.scan().await,
+            Self::Software(s) => s.scan().await,
+            Self::System(s) => s.scan().await,
+        }
+    }
+    
+    pub async fn fix(&self, vulnerability: &Vulnerability) -> Result<()> {
+        match self {
+            Self::Users(s) => s.fix(vulnerability).await,
+            Self::Services(s) => s.fix(vulnerability).await,
+            Self::Network(s) => s.fix(vulnerability).await,
+            Self::FileSystem(s) => s.fix(vulnerability).await,
+            Self::Software(s) => s.fix(vulnerability).await,
+            Self::System(s) => s.fix(vulnerability).await,
+        }
+    }
+    
+    pub fn can_fix(&self, vulnerability: &Vulnerability) -> bool {
+        match self {
+            Self::Users(s) => s.can_fix(vulnerability),
+            Self::Services(s) => s.can_fix(vulnerability),
+            Self::Network(s) => s.can_fix(vulnerability),
+            Self::FileSystem(s) => s.can_fix(vulnerability),
+            Self::Software(s) => s.can_fix(vulnerability),
+            Self::System(s) => s.can_fix(vulnerability),
+        }
+    }
+}
+
+#[async_trait]
 pub trait Scanner: Send + Sync {
     fn name(&self) -> &str;
     fn description(&self) -> &str;
@@ -114,7 +195,7 @@ pub trait Scanner: Send + Sync {
 
 pub struct ScannerEngine {
     config: Config,
-    scanners: HashMap<String, Box<dyn Scanner>>,
+    scanners: HashMap<String, ScannerType>,
 }
 
 impl ScannerEngine {
@@ -126,33 +207,33 @@ impl ScannerEngine {
         
         // Register all scanners based on configuration
         if config.scanners.users {
-            engine.register_scanner(Box::new(users::UserScanner::new(config.clone())?));
+            engine.register_scanner(ScannerType::Users(users::UserScanner::new(config.clone())?));
         }
         
         if config.scanners.services {
-            engine.register_scanner(Box::new(services::ServiceScanner::new(config.clone())?));
+            engine.register_scanner(ScannerType::Services(services::ServiceScanner::new(config.clone())?));
         }
         
         if config.scanners.network {
-            engine.register_scanner(Box::new(network::NetworkScanner::new(config.clone())?));
+            engine.register_scanner(ScannerType::Network(network::NetworkScanner::new(config.clone())?));
         }
         
         if config.scanners.filesystem {
-            engine.register_scanner(Box::new(filesystem::FileSystemScanner::new(config.clone())?));
+            engine.register_scanner(ScannerType::FileSystem(filesystem::FileSystemScanner::new(config.clone())?));
         }
         
         if config.scanners.software {
-            engine.register_scanner(Box::new(software::SoftwareScanner::new(config.clone())?));
+            engine.register_scanner(ScannerType::Software(software::SoftwareScanner::new(config.clone())?));
         }
         
         if config.scanners.system {
-            engine.register_scanner(Box::new(system::SystemScanner::new(config.clone())?));
+            engine.register_scanner(ScannerType::System(system::SystemScanner::new(config.clone())?));
         }
         
         Ok(engine)
     }
     
-    fn register_scanner(&mut self, scanner: Box<dyn Scanner>) {
+    fn register_scanner(&mut self, scanner: ScannerType) {
         let name = scanner.name().to_string();
         self.scanners.insert(name, scanner);
     }
@@ -171,11 +252,11 @@ impl ScannerEngine {
         
         for (name, scanner) in &self.scanners {
             let scanner_name = name.clone();
-            let scanner_ref = scanner.as_ref();
+            let scanner = scanner.clone();
             
             let task = tokio::spawn(async move {
                 info!("Running {} scanner...", scanner_name);
-                match scanner_ref.scan().await {
+                match scanner.scan().await {
                     Ok(vulns) => {
                         info!("{} scanner found {} vulnerabilities", scanner_name, vulns.len());
                         Ok(vulns)
@@ -269,22 +350,22 @@ impl ScannerEngine {
         Ok(())
     }
     
-    pub async fn fix_specific(&self, vulnerability_id: &str) -> Result<()> {
+    pub async fn fix_specific(&self, _vulnerability_id: &str) -> Result<()> {
         // Implementation would load vulnerability by ID and fix it
         todo!("Implement specific vulnerability fixing")
     }
     
-    pub async fn generate_report(&self, results: &ScanResults) -> Result<()> {
+    pub async fn generate_report(&self, _results: &ScanResults) -> Result<()> {
         // Implementation would generate various report formats
         todo!("Implement report generation")
     }
     
-    pub async fn export_report(&self, format: crate::cli::ReportFormat, output: Option<std::path::PathBuf>) -> Result<()> {
+    pub async fn export_report(&self, _format: crate::cli::ReportFormat, _output: Option<std::path::PathBuf>) -> Result<()> {
         // Implementation would export reports in different formats
         todo!("Implement report export")
     }
     
-    fn find_scanner_for_vulnerability(&self, vulnerability: &Vulnerability) -> Option<&Box<dyn Scanner>> {
+    fn find_scanner_for_vulnerability(&self, vulnerability: &Vulnerability) -> Option<&ScannerType> {
         // Find the appropriate scanner based on vulnerability category
         self.scanners.values().find(|scanner| {
             scanner.category() == vulnerability.category

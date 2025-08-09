@@ -31,7 +31,7 @@ async fn main() -> Result<()> {
             } else {
                 // Run CLI scan
                 let engine = ScannerEngine::new(config)?;
-                let results = engine.scan_all(target).await?;
+                let results = engine.scan_all(Some(target)).await?;
                 
                 if auto_fix {
                     info!("Auto-fixing detected vulnerabilities...");

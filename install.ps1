@@ -24,7 +24,7 @@ function Show-Logo {
     Write-ColorText "╚═╝╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═══╝ ╚═════╝  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝ " "White"
     Write-Host ""
     Write-ColorText "🛡️  ULTIMATE CYBERPATRIOT SECURITY SCANNER 🛡️" "Cyan"
-    Write-ColorText "🏆 Your path to 100-point CyberPatriot domination! 🏆" "Yellow"
+    #Write-ColorText "🏆 Your path to 100-point CyberPatriot domination! 🏆" "Yellow"
     Write-Host ""
 }
 

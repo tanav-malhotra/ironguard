@@ -1,47 +1,101 @@
 [package]
-name = "ironguard-simple"
+name = "ironguard"
 version = "0.1.0"
 edition = "2021"
 authors = ["CyberPatriot Team"]
-description = "Simplified IronGuard - CyberPatriot Security Scanner"
+description = "Ultimate IronGuard - Professional CyberPatriot Security Scanner with Windows Server Support"
 
 [[bin]]
 name = "ironguard"
-path = "src/main_simple.rs"
-
-[lib]
-name = "ironguard_simple"
-path = "src/lib_simple.rs"
+path = "src/main.rs"
 
 [dependencies]
-# CLI
-clap = { version = "4.4", features = ["derive"] }
+# CLI and TUI
+clap = { version = "4.4", features = ["derive", "color"] }
+ratatui = "0.24"
+crossterm = "0.27"
 
 # Async runtime
 tokio = { version = "1.0", features = ["full"] }
+futures = "0.3"
 
-# Serialization
+# Serialization and configuration
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+toml = "0.8"
+config = "0.13"
 
-# Logging
+# System information and process management
+sysinfo = "0.29"
+
+# Network and security
+reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
+trust-dns-resolver = "0.23"
+
+# File system and permissions
+walkdir = "2.4"
+tempfile = "3.8"
+
+# Logging and error handling
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 anyhow = "1.0"
+thiserror = "1.0"
 
-# Random for demos
+# Date and time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Hashing and crypto
+sha2 = "0.10"
+md5 = "0.7"
+
+# Database for results storage
+rusqlite = { version = "0.30", features = ["bundled"] }
+
+# UUID generation
+uuid = { version = "1.6", features = ["v4", "serde"] }
+
+# Async traits
+async-trait = "0.1"
+
+# Random number generation
 rand = "0.8"
+
+# Terminal colors and styling
+colored = "2.1"
+indicatif = "0.17"
+
+# Directory utilities
+dirs = "5.0"
 
 # Windows-specific dependencies
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "0.3", features = [
-    "winnt", "processthreadsapi", "handleapi",
-    "securitybaseapi", "winbase"
+    "winnt", "winsvc", "winreg", "processthreadsapi", "handleapi", "fileapi",
+    "securitybaseapi", "aclapi", "accctrl", "lmaccess", "lmapibuf", "winbase"
+] }
+windows = { version = "0.52", features = [
+    "Win32_Foundation", "Win32_System_Registry", "Win32_System_Services",
+    "Win32_Security", "Win32_NetworkManagement_NetManagement",
+    "Win32_System_SystemInformation"
 ] }
 
 # Unix-specific dependencies  
 [target.'cfg(unix)'.dependencies]
+users = "0.11"
+pam = "0.7"
+procfs = "0.16"
 nix = "0.27"
+
+[dev-dependencies]
+tempdir = "0.3"
+mockall = "0.12"
+pretty_assertions = "1.4"
+criterion = "0.5"
+
+[[bench]]
+name = "scanner_benchmarks"
+harness = false
 
 [profile.release]
 lto = true

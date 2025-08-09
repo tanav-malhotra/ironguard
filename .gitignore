@@ -3,8 +3,6 @@
 **/*.rs.bk
 *.pdb
 
-# Cargo lock file (optional to include/exclude)
-# Cargo.lock
 
 # IDE and editor files
 .vscode/

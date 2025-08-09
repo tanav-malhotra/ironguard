@@ -17,8 +17,16 @@ pub struct Cli {
     #[arg(short, long, default_value = "ironguard.toml")]
     pub config: PathBuf,
 
+    /// Display GPL v3 license text
+    #[arg(long)]
+    pub license: bool,
+
+    /// Display legal disclaimer and liability information
+    #[arg(long)]
+    pub disclaimer: bool,
+
     #[command(subcommand)]
-    pub command: Commands,
+    pub command: Option<Commands>,
 }
 
 #[derive(Subcommand)]

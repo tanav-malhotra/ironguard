@@ -45,6 +45,8 @@ output_dir = "./reports"
 auto_open = false
 
 [competition]
+allowed_users = []
+critical_files = []
 # Competition-specific settings - CUSTOMIZE THESE FOR EACH ROUND!
 
 # Custom SSH port (if specified in README)

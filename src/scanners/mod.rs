@@ -12,6 +12,9 @@ pub mod network;
 pub mod filesystem;
 pub mod software;
 pub mod system;
+pub mod malware;
+pub mod security_tools;
+pub mod competition;
 
 use crate::config::Config;
 
@@ -60,6 +63,10 @@ pub enum VulnerabilityCategory {
     Encryption,
     Logging,
     Malware,
+    SecurityTools,
+    Competition,
+    ProhibitedContent,
+    Forensics,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -99,20 +106,27 @@ impl fmt::Display for VulnerabilityCategory {
             VulnerabilityCategory::Encryption => write!(f, "Encryption"),
             VulnerabilityCategory::Logging => write!(f, "Logging"),
             VulnerabilityCategory::Malware => write!(f, "Malware"),
+            VulnerabilityCategory::SecurityTools => write!(f, "Security Tools"),
+            VulnerabilityCategory::Competition => write!(f, "Competition"),
+            VulnerabilityCategory::ProhibitedContent => write!(f, "Prohibited Content"),
+            VulnerabilityCategory::Forensics => write!(f, "Forensics"),
         }
     }
 }
 
 // Scanner enum to avoid dyn trait object issues with async methods
-#[derive(Debug, Clone)]
-pub enum ScannerType {
-    Users(users::UserScanner),
-    Services(services::ServiceScanner),
-    Network(network::NetworkScanner),
-    FileSystem(filesystem::FileSystemScanner),
-    Software(software::SoftwareScanner),
-    System(system::SystemScanner),
-}
+    #[derive(Debug, Clone)]
+    pub enum ScannerType {
+        Users(users::UserScanner),
+        Services(services::ServiceScanner),
+        Network(network::NetworkScanner),
+        FileSystem(filesystem::FileSystemScanner),
+        Software(software::SoftwareScanner),
+        System(system::SystemScanner),
+        Malware(malware::MalwareScanner),
+        SecurityTools(security_tools::SecurityToolsScanner),
+        Competition(competition::CompetitionScanner),
+    }
 
 impl ScannerType {
     pub fn name(&self) -> &str {
@@ -123,6 +137,9 @@ impl ScannerType {
             Self::FileSystem(s) => s.name(),
             Self::Software(s) => s.name(),
             Self::System(s) => s.name(),
+            Self::Malware(s) => s.name(),
+            Self::SecurityTools(s) => s.name(),
+            Self::Competition(s) => s.name(),
         }
     }
     
@@ -134,6 +151,9 @@ impl ScannerType {
             Self::FileSystem(s) => s.description(),
             Self::Software(s) => s.description(),
             Self::System(s) => s.description(),
+            Self::Malware(s) => s.description(),
+            Self::SecurityTools(s) => s.description(),
+            Self::Competition(s) => s.description(),
         }
     }
     
@@ -145,6 +165,9 @@ impl ScannerType {
             Self::FileSystem(s) => s.category(),
             Self::Software(s) => s.category(),
             Self::System(s) => s.category(),
+            Self::Malware(s) => s.category(),
+            Self::SecurityTools(s) => s.category(),
+            Self::Competition(s) => s.category(),
         }
     }
     
@@ -156,6 +179,9 @@ impl ScannerType {
             Self::FileSystem(s) => s.scan().await,
             Self::Software(s) => s.scan().await,
             Self::System(s) => s.scan().await,
+            Self::Malware(s) => s.scan().await,
+            Self::SecurityTools(s) => s.scan().await,
+            Self::Competition(s) => s.scan().await,
         }
     }
     
@@ -167,6 +193,9 @@ impl ScannerType {
             Self::FileSystem(s) => s.fix(vulnerability).await,
             Self::Software(s) => s.fix(vulnerability).await,
             Self::System(s) => s.fix(vulnerability).await,
+            Self::Malware(s) => s.fix(vulnerability).await,
+            Self::SecurityTools(s) => s.fix(vulnerability).await,
+            Self::Competition(s) => s.fix(vulnerability).await,
         }
     }
     
@@ -178,6 +207,9 @@ impl ScannerType {
             Self::FileSystem(s) => s.can_fix(vulnerability),
             Self::Software(s) => s.can_fix(vulnerability),
             Self::System(s) => s.can_fix(vulnerability),
+            Self::Malware(s) => s.can_fix(vulnerability),
+            Self::SecurityTools(s) => s.can_fix(vulnerability),
+            Self::Competition(s) => s.can_fix(vulnerability),
         }
     }
 }
@@ -193,16 +225,55 @@ pub trait Scanner: Send + Sync {
     fn can_fix(&self, vulnerability: &Vulnerability) -> bool;
 }
 
-pub struct ScannerEngine {
-    config: Config,
-    scanners: HashMap<String, ScannerType>,
-}
+    pub struct ScannerEngine {
+        config: Config,
+        scanners: HashMap<String, ScannerType>,
+        // Professional security tools integration
+        security_tools: SecurityToolsManager,
+    }
+    
+    #[derive(Debug, Clone)]
+    pub struct SecurityToolsManager {
+        pub clamav_available: bool,
+        pub rkhunter_available: bool,
+        pub chkrootkit_available: bool,
+        pub fail2ban_available: bool,
+        pub apparmor_available: bool,
+        pub auditd_available: bool,
+        pub lynis_available: bool,
+        pub suricata_available: bool,
+    }
+
+    impl SecurityToolsManager {
+        pub fn new() -> Self {
+            Self {
+                clamav_available: Self::check_tool_available("clamscan"),
+                rkhunter_available: Self::check_tool_available("rkhunter"),
+                chkrootkit_available: Self::check_tool_available("chkrootkit"),
+                fail2ban_available: Self::check_tool_available("fail2ban-client"),
+                apparmor_available: Self::check_tool_available("apparmor_status"),
+                auditd_available: Self::check_tool_available("auditctl"),
+                lynis_available: Self::check_tool_available("lynis"),
+                suricata_available: Self::check_tool_available("suricata"),
+            }
+        }
+
+        fn check_tool_available(tool: &str) -> bool {
+            std::process::Command::new("which")
+                .arg(tool)
+                .output()
+                .map(|output| output.status.success())
+                .unwrap_or(false)
+        }
+    }
 
 impl ScannerEngine {
     pub fn new(config: Config) -> Result<Self> {
+        let security_tools = SecurityToolsManager::new();
         let mut engine = Self {
             config: config.clone(),
             scanners: HashMap::new(),
+            security_tools,
         };
         
         // Register all scanners based on configuration
@@ -229,6 +300,11 @@ impl ScannerEngine {
         if config.scanners.system {
             engine.register_scanner(ScannerType::System(system::SystemScanner::new(config.clone())?));
         }
+        
+        // Enterprise-grade scanners - always enabled for ULTIMATE tool
+        engine.register_scanner(ScannerType::Malware(malware::MalwareScanner::new(config.clone())?));
+        engine.register_scanner(ScannerType::SecurityTools(security_tools::SecurityToolsScanner::new(config.clone())?));
+        engine.register_scanner(ScannerType::Competition(competition::CompetitionScanner::new(config.clone())?));
         
         Ok(engine)
     }

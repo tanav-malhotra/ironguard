@@ -9,6 +9,10 @@ description = "Simplified IronGuard - CyberPatriot Security Scanner"
 name = "ironguard"
 path = "src/main_simple.rs"
 
+[lib]
+name = "ironguard_simple"
+path = "src/lib_simple.rs"
+
 [dependencies]
 # CLI
 clap = { version = "4.4", features = ["derive"] }

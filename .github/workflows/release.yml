@@ -2,6 +2,7 @@ name: release
 
 on:
   push:
+    branches: [ main ]
     tags:
       - 'v*'
 
@@ -49,7 +50,8 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: dist
-      - name: Extract release notes from CHANGELOG.md
+      - name: Extract release notes from CHANGELOG.md (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
         env:
           VERSION: ${{ github.ref_name }}
         run: |
@@ -62,7 +64,8 @@ jobs:
           if [ ! -s notes.txt ]; then
             echo "No changelog section found for ${VERSION}." > notes.txt
           fi
-      - name: Create GitHub Release
+      - name: Create Release for tag
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           files: |
@@ -70,6 +73,23 @@ jobs:
             dist/windows/ironguard-windows-x86_64.exe
           body_path: notes.txt
           draft: false
+          prerelease: false
+          generate_release_notes: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create prerelease on push to main
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: beta-${{ github.run_number }}
+          name: beta ${{ github.run_number }}
+          files: |
+            dist/linux/ironguard-linux-x86_64
+            dist/windows/ironguard-windows-x86_64.exe
+          body: |
+            Automated prerelease for ${{ github.sha }}
+          draft: false
+          prerelease: true
           generate_release_notes: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

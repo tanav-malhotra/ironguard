@@ -1,0 +1,7 @@
+scripts-ref/** linguist-vendored
+scripts/** linguist-vendored
+*.sh linguist-detectable=false
+*.ps1 linguist-detectable=false
+*.rs linguist-detectable=true
+src/** linguist-language=Rust
+

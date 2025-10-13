@@ -27,7 +27,7 @@ enum Commands {
     /// Run deterministic script-based remediation
     Run {
         #[arg(value_enum)]
-        mode: RunMode,
+        mode: Option<RunMode>,
 
         /// Dry-run: preview commands without executing
         #[arg(long, default_value_t = false)]
@@ -95,8 +95,24 @@ enum Commands {
         script: Option<PathBuf>,
     },
 
-    /// Post-hardening scan (inventory + Lynis + malware checks)
-    Scan,
+    /// Post-hardening scan (installs tools if missing; inventory + security checks)
+    Scan {
+        /// Optional file path to submit hash to VirusTotal (no upload)
+        #[arg(long)]
+        vt_file: Option<PathBuf>,
+
+        /// Optional URL to submit to VirusTotal URL scan
+        #[arg(long)]
+        vt_url: Option<String>,
+
+        /// VirusTotal API key (or use VIRUSTOTAL_API_KEY env var)
+        #[arg(long)]
+        vt_api_key: Option<String>,
+
+        /// Perform extended/full scans where supported
+        #[arg(long, default_value_t = false)]
+        full: bool,
+    },
 
     /// Open ironguard.toml in an editor (creates if missing)
     Config {
@@ -109,7 +125,6 @@ enum Commands {
 #[derive(Copy, Clone, Eq, PartialEq, Debug, ValueEnum)]
 enum RunMode {
     Script,
-    Ai,
 }
 
 pub fn run() -> Result<()> {
@@ -119,6 +134,7 @@ pub fn run() -> Result<()> {
 
     match cli.command {
         Commands::Run { mode, dry_run, config } => {
+            let mode = mode.unwrap_or(RunMode::Script);
             // Load config: explicit path, else ./ironguard.toml, else bail
             let cfg = if let Some(path) = config {
                 config::load_from_path(&path)?
@@ -151,16 +167,6 @@ pub fn run() -> Result<()> {
                         println!("Unsupported OS");
                     }
                     let _ = logger.log_message("end", "mode=script completed");
-                }
-                RunMode::Ai => {
-                    // AI stub (offline by default)
-                    let _ = logger.log_message("start", "mode=ai offline planning");
-                    println!("AI mode stub: planning based on README + config (offline)");
-                    if cfg!(target_os = "linux") {
-                        let opts = engine::EngineOptions { dry_run: true };
-                        tokio::runtime::Handle::current().block_on(engine::linux::run_baseline_with_config(&opts, &config::Config::default()))?;
-                    }
-                    let _ = logger.log_message("end", "mode=ai completed");
                 }
             }
         }
@@ -297,7 +303,7 @@ pub fn run() -> Result<()> {
             }
         }
         Commands::Status => {
-            println!("Status: MVP scaffolding; dry-run only; logs optional");
+            println!("Status: Ironguard MVP ready. Use 'ironguard run script [--dry-run]' or 'ironguard scan'.");
         }
         Commands::Forensics { provider, model, api_key, time_budget, allow_exec, no_tui, readme, script } => {
             let _ = logger.log_message("start", &format!(
@@ -323,12 +329,15 @@ pub fn run() -> Result<()> {
             }
             let _ = logger.log_message("end", "mode=forensics completed");
         }
-        Commands::Scan => {
-            let _ = logger.log_message("start", "mode=scan inventory=true lynis=true malware=true");
+        Commands::Scan { vt_file, vt_url, vt_api_key, full } => {
+            let _ = logger.log_message("start", "mode=scan extended");
             if cfg!(target_os = "linux") {
-                tokio::runtime::Handle::current().block_on(scan_linux(true, true, true, &mut logger))?;
-            } else {
-                println!("Scan currently targets Linux. Windows support pending.");
+                tokio::runtime::Handle::current().block_on(scan_linux_extended(true, true, true, full, &mut logger))?;
+            } else if cfg!(target_os = "windows") {
+                tokio::runtime::Handle::current().block_on(scan_windows_extended(full, &mut logger))?;
+            }
+            if vt_file.is_some() || vt_url.is_some() {
+                tokio::runtime::Handle::current().block_on(scan_virustotal(vt_file, vt_url, vt_api_key, &mut logger))?;
             }
             let _ = logger.log_message("end", "mode=scan completed");
         }
@@ -437,24 +446,8 @@ pub fn run() -> Result<()> {
 
     // Default path (no subcommand): one-shot secure run
     else {
-        // Load config if present, else prompt user to run init
-        let default_path = PathBuf::from("ironguard.toml");
-        if !default_path.exists() {
-            println!("No ./ironguard.toml found. Run 'ironguard init' then edit the file.");
-            return Ok(());
-        }
-        let cfg = config::load_from_path(&default_path)?;
-        config::validate_required_for_current_os(&cfg)?;
-        if cfg!(target_os = "linux") {
-            let effective_dry_run = linux_effective_dry_run(false);
-            let opts = engine::EngineOptions { dry_run: effective_dry_run };
-            tokio::runtime::Handle::current().block_on(engine::linux::run_baseline_with_config(&opts, &cfg))?;
-        } else if cfg!(target_os = "windows") {
-            let opts = engine::EngineOptions { dry_run: false };
-            tokio::runtime::Handle::current().block_on(engine::windows::run_baseline_with_config(&opts, &cfg))?;
-        } else {
-            println!("Unsupported OS");
-        }
+        // Default behavior: launch TUI (AI workflow placeholder)
+        tui::run()?;
     }
 
     Ok(())
@@ -681,7 +674,7 @@ pub mod tui {
             terminal.draw(|f| {
                 let size = f.size();
                 let block = Block::default().title("Ironguard MVP").borders(Borders::ALL);
-                let paragraph = Paragraph::new("Press q to quit\n/run script | /run ai (CLI)")
+                let paragraph = Paragraph::new("Press q to quit\nRun scripts: 'ironguard run'\nAI TBA: this TUI will orchestrate the forensics workflow")
                     .block(block)
                     .alignment(Alignment::Left);
                 f.render_widget(paragraph, size);
@@ -783,4 +776,71 @@ async fn scan_linux(inventory: bool, lynis: bool, malware: bool, logger: &mut lo
     Ok(())
 }
 
+
+#[cfg(target_os = "linux")]
+async fn scan_linux_extended(inventory: bool, lynis: bool, malware: bool, full: bool, logger: &mut logging::LogManager) -> anyhow::Result<()> {
+    use tokio::fs;
+    use tokio::process::Command;
+    let out_dir = logger.session_dir.join("scan");
+    let _ = fs::create_dir_all(&out_dir).await;
+    // Attempt to install tools if missing (best-effort)
+    let _ = Command::new("bash").arg("-lc").arg("command -v apt-get >/dev/null 2>&1 && sudo apt-get -y -q update && sudo apt-get -y -q install lynis clamav chkrootkit rkhunter || true").status().await;
+    let _ = Command::new("bash").arg("-lc").arg("command -v dnf >/dev/null 2>&1 && sudo dnf -y install lynis clamav chkrootkit rkhunter || true").status().await;
+    // Inventory
+    if inventory { scan_linux(true, false, false, logger).await?; }
+    // Lynis
+    if lynis { let _ = Command::new("bash").arg("-lc").arg("command -v lynis >/dev/null 2>&1 && sudo lynis audit system --quiet --no-colors --logfile \"".to_owned() + out_dir.join("lynis.log").to_string_lossy().as_ref() + "\" || true").status().await; }
+    // Malware tools
+    if malware {
+        let clam_cmd = if full { "sudo freshclam && clamscan -r --infected --recursive /" } else { "sudo freshclam && clamscan -r --infected --recursive / 2>/dev/null | head -n 200" };
+        let _ = Command::new("bash").arg("-lc").arg(format!("command -v clamscan >/dev/null 2>&1 && {} > \"{}\" || true", clam_cmd, out_dir.join("clamav.txt").to_string_lossy())).status().await;
+        let _ = Command::new("bash").arg("-lc").arg(format!("command -v chkrootkit >/dev/null 2>&1 && sudo chkrootkit > \"{}\" || true", out_dir.join("chkrootkit.txt").to_string_lossy())).status().await;
+        let _ = Command::new("bash").arg("-lc").arg(format!("command -v rkhunter >/dev/null 2>&1 && sudo rkhunter --check --sk > \"{}\" || true", out_dir.join("rkhunter.txt").to_string_lossy())).status().await;
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+async fn scan_windows_extended(full: bool, logger: &mut logging::LogManager) -> anyhow::Result<()> {
+    use tokio::fs;
+    use tokio::process::Command;
+    let out_dir = logger.session_dir.join("scan");
+    let _ = fs::create_dir_all(&out_dir).await;
+    // Windows Defender quick or full scan
+    if full {
+        let _ = Command::new("powershell").args(["-NoProfile","-ExecutionPolicy","Bypass","-Command","Start-MpScan -ScanType FullScan"]).status().await;
+    } else {
+        let _ = Command::new("powershell").args(["-NoProfile","-ExecutionPolicy","Bypass","-Command","Start-MpScan -ScanType QuickScan"]).status().await;
+    }
+    // Update signatures and output threat history
+    let _ = Command::new("powershell").args(["-NoProfile","-ExecutionPolicy","Bypass","-Command","Update-MpSignature"]).status().await;
+    let threats = Command::new("powershell").args(["-NoProfile","-ExecutionPolicy","Bypass","-Command","(Get-MpThreatDetection | Out-String)"]).output().await;
+    if let Ok(o) = threats { let _ = fs::write(out_dir.join("defender_threats.txt"), o.stdout).await; }
+    Ok(())
+}
+
+async fn scan_virustotal(vt_file: Option<std::path::PathBuf>, vt_url: Option<String>, vt_api_key: Option<String>, logger: &mut logging::LogManager) -> anyhow::Result<()> {
+    use sha2::{Sha256, Digest};
+    let out_dir = logger.session_dir.join("scan");
+    let _ = tokio::fs::create_dir_all(&out_dir).await;
+    let api_key = vt_api_key.or_else(|| std::env::var("VIRUSTOTAL_API_KEY").ok());
+    if api_key.is_none() { return Ok(()); }
+    let api_key = api_key.unwrap();
+    if let Some(p) = vt_file {
+        if let Ok(bytes) = tokio::fs::read(&p).await {
+            let mut hasher = Sha256::new(); hasher.update(&bytes); let hash = format!("{:x}", hasher.finalize());
+            let url = format!("https://www.virustotal.com/api/v3/files/{}", hash);
+            let client = reqwest::Client::new();
+            let res = client.get(&url).header("x-apikey", api_key.clone()).send().await;
+            if let Ok(r) = res { let text = r.text().await.unwrap_or_default(); let _ = tokio::fs::write(out_dir.join("virustotal_file.json"), text).await; }
+        }
+    }
+    if let Some(u) = vt_url {
+        let client = reqwest::Client::new();
+        // URL analyze; VT expects URL-id (base64url) for lookup; for simplicity, use analyze endpoint
+        let res = client.post("https://www.virustotal.com/api/v3/urls").header("x-apikey", api_key).form(&[("url", u.as_str())]).send().await;
+        if let Ok(r) = res { let text = r.text().await.unwrap_or_default(); let _ = tokio::fs::write(out_dir.join("virustotal_url.json"), text).await; }
+    }
+    Ok(())
+}
 

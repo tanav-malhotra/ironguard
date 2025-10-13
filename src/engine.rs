@@ -56,7 +56,7 @@ pub mod linux {
 		let dnssec = dns_security::configure_dnscrypt(opts, cfg);
 		let hyg = software_hygiene::purge_unwanted_software(opts, cfg);
 		let (rp, rs, rssp, rskey, rf, rk, ri, rpa, rld, rfb, raa, rapt, rsud, rusr, raud, rfs, rnft, rids, rkn, rhs, rweb, rnginx, rfb_tune, rsession, rcron, rsvc, rdb, rdock, rdns, rhyg) = tokio::join!(
-			p, s, ssp, skey, f, k, i, pa, ld, fb, aa, apt, sud, usr, aud, fssec, nft, ids, knock, hosts, web, nginx, fail2ban::tune_fail2ban(opts), session_security::configure_screen_timeout(opts), cron_lockdown::configure_cron(opts, cfg), svc, db, docker, dnssec, hyg
+			p, s, ssp, skey, f, k, i, pa, ld, fb, aa, apt, sud, usr, aud, fssec, nft, ids, knock, hosts, web, nginx, fb_tune, session, cron, svc, db, docker, dnssec, hyg
 		);
 		rp?; rs?; rssp?; rskey?; rf?; rk?; ri?; rpa?; rld?; rfb?; raa?; rapt?; rsud?; rusr?; raud?; rfs?; rnft?; rids?; rkn?; rhs?; rweb?; rnginx?; rfb_tune?; rsession?; rcron?; rsvc?; rdb?; rdock?; rdns?; rhyg?;
         Ok(())
@@ -88,6 +88,14 @@ pub mod linux {
                 run_cmd_env(&[("DEBIAN_FRONTEND","noninteractive")], "apt-get", &["-y","-q","upgrade"]).await?;
                 // Ensure terminal editors available
                 let _ = run_cmd_env(&[("DEBIAN_FRONTEND","noninteractive")], "apt-get", &["-y","-q","install","neovim","vim"]).await;
+                // Best-effort install baseline dependencies used by hardening steps
+                let deps = [
+                    "ufw","nftables","fail2ban","apparmor","apparmor-utils","auditd","rsyslog",
+                    // optional tools if present
+                    "dnscrypt-proxy","suricata","clamav","chkrootkit","rkhunter","lynis"
+                ];
+                let mut args = vec!["-y","-q","install"]; args.extend(deps.iter());
+                let _ = run_cmd_env(&[("DEBIAN_FRONTEND","noninteractive")], "apt-get", &args).await;
             } else if which::which("dnf").is_ok() {
                 // Optionally tighten repos: prefer enabled official repos, avoid third-party if detected (placeholder)
                 let _ = run_cmd("bash", &["-lc","if [ -d /etc/yum.repos.d ]; then echo 'repos present'; fi"]).await;
@@ -95,6 +103,12 @@ pub mod linux {
                 run_cmd("dnf", &["-y", "-q", "update"]).await.ok();
                 // Ensure terminal editors available
                 let _ = run_cmd("dnf", &["-y","install","neovim","vim"]).await;
+                // Best-effort dependencies (rpm-based)
+                let deps = [
+                    "firewalld","nftables","fail2ban","audit","rsyslog","dnscrypt-proxy","suricata","clamav","chkrootkit","rkhunter","lynis"
+                ];
+                let mut args = vec!["dnf","-y","install"]; args.extend(deps.iter());
+                let _ = run_cmd("dnf", &args).await;
             } else {
                 println!("[linux:packages] no apt/dnf detected");
             }
@@ -881,6 +895,7 @@ pub mod windows {
     use super::*;
 
     pub async fn run_baseline_with_config(opts: &EngineOptions, cfg: &Config) -> Result<()> {
+        let _ = osinfo::print_os_info(opts).await;
         let a = accounts::apply_password_policy_and_users(opts, cfg);
         let g = guest::disable_guest_login(opts);
         let l = lsa::limit_blank_passwords(opts);
@@ -898,6 +913,29 @@ pub mod windows {
         let (ra, rg, rl, rf, rr, rt, rv6, rau, rup, rsvc, rhyg, rsvr, rossh, rbl) = tokio::join!(a, g, l, f, r, t, v6, au, up, svc, hyg, svr, ssh, bl);
         ra?; rg?; rl?; rf?; rr?; rt?; rv6?; rau?; rup?; rsvc?; rhyg?; rsvr?; rossh?; rbl?;
         Ok(())
+    }
+    
+    mod osinfo {
+        use super::*;
+        pub async fn print_os_info(_opts: &EngineOptions) -> Result<()> {
+            let ps = "(Get-CimInstance Win32_OperatingSystem | Select-Object Caption, Version, BuildNumber, ProductType | Format-List | Out-String).Trim()";
+            let out = run_cmd_capture("powershell", &["-NoProfile","-ExecutionPolicy","Bypass","-Command", ps]).await.unwrap_or_default();
+            let mut caption = "".to_string();
+            let mut version = "".to_string();
+            let mut product_type: u32 = 1;
+            for line in out.lines() {
+                let l = line.trim();
+                if let Some(rest) = l.strip_prefix("Caption :") { caption = rest.trim().to_string(); }
+                if let Some(rest) = l.strip_prefix("Version :") { version = rest.trim().to_string(); }
+                if let Some(rest) = l.strip_prefix("ProductType :") { product_type = rest.trim().parse::<u32>().unwrap_or(1); }
+            }
+            let kind = if matches!(product_type, 2|3) { "Server" } else { "Workstation" };
+            let mut year = None;
+            for y in ["2025","2022","2019","2016","2012","2008","2003"] { if caption.contains(y) { year = Some(y); break; } }
+            if let Some(y) = year { println!("[windows:os] {} ({} | {} {})", caption, version, kind, y); }
+            else { println!("[windows:os] {} ({} | {})", caption, version, kind); }
+            Ok(())
+        }
     }
     mod openssh {
         use super::*;

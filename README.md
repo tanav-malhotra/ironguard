@@ -12,7 +12,7 @@ Cross‑platform, AI‑assisted hardening tool for CyberPatriot competition imag
 
 Linux (requires sudo):
 ```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/tanav-malhotra/ironguard/main/scripts/install.sh)"
+curl -fsSL https://raw.githubusercontent.com/tanav-malhotra/ironguard/main/scripts/install.sh | sudo bash"
 ```
 
 Windows (run from an elevated PowerShell):
@@ -40,12 +40,12 @@ This creates a commented `ironguard.toml` tailored to your OS. Edit it and set a
 
 2) Dry‑run first (no changes):
 ```bash
-ironguard run script --dry-run
+ironguard run --dry-run
 ```
 
 3) Apply:
 ```bash
-ironguard run script
+ironguard run
 ```
 
 
@@ -58,7 +58,7 @@ ironguard forensics --provider gemini --model gemini-2.5-pro --time-budget 3600 
 
 AI mode (planning placeholder):
 ```bash
-ironguard ai
+ironguard
 ```
 
 ## Philosophy

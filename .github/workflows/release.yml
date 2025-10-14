@@ -84,10 +84,25 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Create prerelease on push to main
         if: github.ref == 'refs/heads/main'
+        id: prerelease
+        run: echo "noop"
+      - name: Compute beta tag from Cargo.toml (next patch)
+        if: github.ref == 'refs/heads/main'
+        id: beta
+        run: |
+          VER_LINE=$(grep -m1 '^version\s*=\s*"' Cargo.toml)
+          read MAJOR MINOR PATCH <<<"$(echo "$VER_LINE" | sed -E 's/.*"([0-9]+)\.([0-9]+)\.([0-9]+)".*/\1 \2 \3/')"
+          NEXT=$((PATCH+1))
+          TAG=v${MAJOR}.${MINOR}.${NEXT}-beta.${GITHUB_RUN_NUMBER}
+          NAME=beta\ v${MAJOR}.${MINOR}.${NEXT}
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          echo "name=${NAME}" >> $GITHUB_OUTPUT
+      - name: Create prerelease on push to main (beta)
+        if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: beta-${{ github.run_number }}
-          name: beta ${{ github.run_number }}
+          tag_name: ${{ steps.beta.outputs.tag }}
+          name: ${{ steps.beta.outputs.name }}
           files: |
             dist/linux/ironguard-linux-x86_64
             dist/windows/ironguard-windows-x86_64.exe

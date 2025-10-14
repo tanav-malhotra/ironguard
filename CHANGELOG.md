@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## v0.1.6
+- Attach installers to releases (scripts/install.ps1, scripts/install.sh)
+- CI: grant release write permissions; prerelease on main, full release on tags
+- Keep only x64 builds (Windows, Linux); include Linux/Windows binaries in assets
+- Minor fixes: rename to `ironguard`, tests/imports adjusted, stable builds on both OSes
+
 ## v0.1.3
 - Fix Windows/Linux build errors (match optional subcommands correctly; fix run_cmd_env signature)
 - Add Linux extended scan with tool auto-install and `--full` option

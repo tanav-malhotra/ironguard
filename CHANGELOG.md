@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## v0.1.7
+- Beta prerelease quality: semantic beta tags (vX.Y.(Z+1)-beta.N) and prerelease notes pulled from the latest CHANGELOG section
+- Release assets include installers and x64 binaries only (Windows/Linux)
+- CI reliability: improved artifact upload and release creation with proper permissions
+- Forensics scan: broaden question file detection (accepts names containing "forensic" or "question")
+- Docs: clearer cross-compile instructions and installer naming guidance
+
+## v0.1.7-beta
+- First prerelease for 0.1.7 with semantic beta tagging and CHANGELOG-driven notes
+- Includes x64 Windows/Linux binaries and both installer scripts
+- Verifies CI permissions and artifact paths before final 0.1.7 tag
+
 ## v0.1.6
 - Attach installers to releases (scripts/install.ps1, scripts/install.sh)
 - CI: grant release write permissions; prerelease on main, full release on tags

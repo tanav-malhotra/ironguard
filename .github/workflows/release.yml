@@ -97,6 +97,11 @@ jobs:
           NAME=beta\ v${MAJOR}.${MINOR}.${NEXT}
           echo "tag=${TAG}" >> $GITHUB_OUTPUT
           echo "name=${NAME}" >> $GITHUB_OUTPUT
+      - name: Extract prerelease notes from CHANGELOG.md (latest section)
+        if: github.ref == 'refs/heads/main'
+        run: |
+          awk 'BEGIN{p=0} /^## /{ if (p) exit; p=1; next } p{ print }' CHANGELOG.md > notes.txt || true
+          if [ ! -s notes.txt ]; then echo "Automated prerelease for ${GITHUB_SHA}" > notes.txt; fi
       - name: Create prerelease on push to main (beta)
         if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
@@ -108,8 +113,7 @@ jobs:
             dist/windows/ironguard-windows-x86_64.exe
             scripts/install.ps1
             scripts/install.sh
-          body: |
-            Automated prerelease for ${{ github.sha }}
+          body_path: notes.txt
           draft: false
           prerelease: true
           generate_release_notes: false

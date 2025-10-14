@@ -8,6 +8,16 @@ All notable changes to this project will be documented in this file.
 - Keep only x64 builds (Windows, Linux); include Linux/Windows binaries in assets
 - Minor fixes: rename to `ironguard`, tests/imports adjusted, stable builds on both OSes
 
+## v0.1.5
+- Rename crate and binary from `ironguard_ai` to `ironguard`
+- Fix tests and imports after rename; build succeeds on Windows and Linux
+- Improve release workflow to separate tag releases and main prereleases
+
+## v0.1.4
+- CI: add permissions: contents: write to allow creating releases
+- Fix CHANGELOG extraction awk expression for tagged releases
+- Ensure Windows/Linux artifacts upload reliably across jobs
+
 ## v0.1.3
 - Fix Windows/Linux build errors (match optional subcommands correctly; fix run_cmd_env signature)
 - Add Linux extended scan with tool auto-install and `--full` option

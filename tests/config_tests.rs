@@ -17,7 +17,7 @@ require_number = true
 require_symbol = true
 "#;
 
-    let cfg: ironguard_ai::cli::config::Config = toml::from_str(toml).unwrap();
+    let cfg: ironguard::cli::config::Config = toml::from_str(toml).unwrap();
     cfg.validate().unwrap();
 }
 

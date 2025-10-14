@@ -50,11 +50,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/download-artifact@v4
         with:
           path: dist
       - name: Extract release notes from CHANGELOG.md (tags only)
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
         env:
           VERSION: ${{ github.ref_name }}
         run: |
@@ -63,12 +65,10 @@ jobs:
             if ($0 ~ "^"ver) {found=1; next}
             if (found && $0 ~ /^## /) { exit }
             if (found) print
-          }' CHANGELOG.md > notes.txt || true
-          if [ ! -s notes.txt ]; then
-            echo "No changelog section found for ${VERSION}." > notes.txt
-          fi
+          }' CHANGELOG.md > notes.txt
+          test -s notes.txt || (echo "CHANGELOG missing section ${VERSION}" && exit 1)
       - name: Create Release for tag
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
         uses: softprops/action-gh-release@v2
         with:
           files: |
@@ -86,21 +86,59 @@ jobs:
         if: github.ref == 'refs/heads/main'
         id: prerelease
         run: echo "noop"
-      - name: Compute beta tag from Cargo.toml (next patch)
+      - name: Compute beta tag from repo state
         if: github.ref == 'refs/heads/main'
         id: beta
         run: |
-          VER_LINE=$(grep -m1 '^version\s*=\s*"' Cargo.toml)
-          read MAJOR MINOR PATCH <<<"$(echo "$VER_LINE" | sed -E 's/.*"([0-9]+)\.([0-9]+)\.([0-9]+)".*/\1 \2 \3/')"
-          NEXT=$((PATCH+1))
-          TAG=v${MAJOR}.${MINOR}.${NEXT}-beta.${GITHUB_RUN_NUMBER}
-          NAME=beta\ v${MAJOR}.${MINOR}.${NEXT}
-          echo "tag=${TAG}" >> $GITHUB_OUTPUT
-          echo "name=${NAME}" >> $GITHUB_OUTPUT
+          set -euo pipefail
+          # Version from Cargo.toml (may represent next target release already)
+          VER=$(grep -m1 '^version\s*=' Cargo.toml | sed -E 's/.*"([0-9]+\.[0-9]+\.[0-9]+)".*/\1/')
+          # Latest non-prerelease tag in repo (vX.Y.Z)
+          LATEST_TAG=$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' | sed 's/^v//' | sort -V | tail -n1 || true)
+
+          # Decide base version for prerelease:
+          # If Cargo.toml >= latest tag: use Cargo.toml as base
+          # Else: bump patch of latest tag
+          bump_patch() {
+            IFS=. read -r MA MI PA <<< "$1"
+            echo "${MA}.${MI}.$((PA+1))"
+          }
+
+          if [ -n "${LATEST_TAG}" ]; then
+            MAX=$(printf "%s\n%s\n" "$VER" "$LATEST_TAG" | sed '/^$/d' | sort -V | tail -n1)
+            if [ "$MAX" = "$VER" ]; then
+              BASE="$VER"
+            else
+              BASE="$(bump_patch "$LATEST_TAG")"
+            fi
+          else
+            # No tags yet; if VER exists, bump it to indicate upcoming release, else default
+            if [ -n "${VER:-}" ]; then
+              BASE="$(bump_patch "$VER")"
+            else
+              BASE="0.1.0"
+            fi
+          fi
+
+          BASE_TAG="v${BASE}"
+          COUNT=$(git tag --list "${BASE_TAG}-beta.*" | wc -l | tr -d ' ')
+          N=$((COUNT + 1))
+          TAG="${BASE_TAG}-beta.${N}"
+          NAME="beta ${BASE_TAG}"
+
+          echo "base=${BASE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "name=${NAME}" >> "$GITHUB_OUTPUT"
       - name: Extract prerelease notes from CHANGELOG.md (latest section)
         if: github.ref == 'refs/heads/main'
         run: |
-          awk 'BEGIN{p=0} /^## /{ if (p) exit; p=1; next } p{ print }' CHANGELOG.md > notes.txt || true
+          BASE="${{ steps.beta.outputs.base }}"
+          # Prefer the -beta section matching the base (e.g., ## vX.Y.Z-beta)
+          awk -v ver="## ${BASE}-beta" 'BEGIN{f=0} $0 ~ "^"ver{f=1;next} f && /^## /{exit} f{print}' CHANGELOG.md > notes.txt || true
+          # Fallback to the exact base section (## vX.Y.Z)
+          if [ ! -s notes.txt ]; then
+            awk -v ver="## ${BASE}" 'BEGIN{f=0} $0 ~ "^"ver{f=1;next} f && /^## /{exit} f{print}' CHANGELOG.md >> notes.txt || true
+          fi
           if [ ! -s notes.txt ]; then echo "Automated prerelease for ${GITHUB_SHA}" > notes.txt; fi
       - name: Create prerelease on push to main (beta)
         if: github.ref == 'refs/heads/main'

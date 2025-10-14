@@ -6,7 +6,7 @@ Cross‑platform, AI‑assisted hardening tool for CyberPatriot competition imag
 - This tool makes invasive changes and can break systems, cause data loss, or violate competition rules if misused.
 - Use at your own risk. By using Ironguard you agree that you assume all liability for its use.
 - This tool may get you disqualified if it violates event rules. Confirm with your coach and the rulebook before use.
-- The authors, contributors, and maintainer, Tanav Malhotra, are not responsible for any damages, losses, or penalties arising from the use of this software.
+- The authors, contributors, and maintainer, are not responsible for any damages, losses, or penalties arising from the use of this software.
 
 ## One‑line Install
 

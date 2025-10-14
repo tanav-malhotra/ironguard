@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## v0.1.3
+- Fix Windows/Linux build errors (match optional subcommands correctly; fix run_cmd_env signature)
+- Add Linux extended scan with tool auto-install and `--full` option
+- Add Windows Defender scan workflow and VirusTotal flags to `scan`
+- Make `ironguard` launch TUI; `ironguard run` defaults to script mode
+- Automate GitHub Releases on tag and prereleases on main; pull notes from CHANGELOG
+
 ## v0.1.0 - Initial MVP
 - Unified CyberPatriot hardening tool (Linux and Windows) with async/parallel execution
 - Linux: repo sanity, updates, service whitelist/purge, UFW/nftables firewall, SSH hardening (key-only, port override), PAM/login.defs policies, fail2ban, AppArmor, auditd+rsyslog, filesystem perms, cron lockdown, interface blacklists, optional Suricata/DNSCrypt/Docker hardening, software hygiene

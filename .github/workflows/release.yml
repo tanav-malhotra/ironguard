@@ -74,6 +74,8 @@ jobs:
           files: |
             dist/linux/ironguard-linux-x86_64
             dist/windows/ironguard-windows-x86_64.exe
+            scripts/install.ps1
+            scripts/install.sh
           body_path: notes.txt
           draft: false
           prerelease: false
@@ -89,6 +91,8 @@ jobs:
           files: |
             dist/linux/ironguard-linux-x86_64
             dist/windows/ironguard-windows-x86_64.exe
+            scripts/install.ps1
+            scripts/install.sh
           body: |
             Automated prerelease for ${{ github.sha }}
           draft: false

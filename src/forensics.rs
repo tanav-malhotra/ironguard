@@ -124,8 +124,8 @@ pub async fn scan_for_questions(desktop: &PathBuf) -> Result<Vec<PathBuf>> {
             let p = e.path();
             if let Some(name) = p.file_name().and_then(|s| s.to_str()) {
                 let n = name.to_ascii_lowercase();
-                // Require both forensic(s) and question tokens
-                if (n.contains("forensic") || n.contains("forensics")) && n.contains("question") {
+                // Treat filenames mentioning either forensic(s) or question(s) as candidates
+                if (n.contains("forensic") || n.contains("forensics") || n.contains("question")) {
                     if p.is_file() { out.push(p); }
                 }
             }

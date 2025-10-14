@@ -1282,7 +1282,7 @@ async fn run_cmd<S: AsRef<str>>(prog: S, args: &[S]) -> Result<()> {
     Ok(())
 }
 
-async fn run_cmd_env<S: AsRef<str>>(envs: &[(<&str, &str>)], prog: S, args: &[S]) -> Result<()> {
+async fn run_cmd_env<S: AsRef<str>>(envs: &[(&str, &str)], prog: S, args: &[S]) -> Result<()> {
     let prog_s = prog.as_ref();
     let args_s: Vec<&str> = args.iter().map(|s| s.as_ref()).collect();
     let mut cmd = Command::new(prog_s);

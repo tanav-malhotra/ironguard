@@ -57,7 +57,7 @@ jobs:
         run: |
           echo "Extracting notes for $VERSION"
           awk -v ver="## ${VERSION}" 'BEGIN{found=0} {
-            if ($0 ~ "^"ver"$") {found=1; next}
+            if ($0 ~ "^"ver) {found=1; next}
             if (found && $0 ~ /^## /) { exit }
             if (found) print
           }' CHANGELOG.md > notes.txt || true

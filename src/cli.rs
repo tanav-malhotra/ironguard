@@ -133,7 +133,7 @@ pub fn run() -> Result<()> {
     let mut logger = logging::init(cli.log)?;
 
     match cli.command {
-        Commands::Run { mode, dry_run, config } => {
+        Some(Commands::Run { mode, dry_run, config }) => {
             let mode = mode.unwrap_or(RunMode::Script);
             // Load config: explicit path, else ./ironguard.toml, else bail
             let cfg = if let Some(path) = config {
@@ -170,10 +170,10 @@ pub fn run() -> Result<()> {
                 }
             }
         }
-        Commands::Tui => {
+        Some(Commands::Tui) => {
             tui::run()?;
         }
-        Commands::Init { path, overwrite } => {
+        Some(Commands::Init { path, overwrite }) => {
             use std::fs;
             let out_path = path.unwrap_or_else(|| PathBuf::from("ironguard.toml"));
             if out_path.exists() && !overwrite {
@@ -284,7 +284,7 @@ pub fn run() -> Result<()> {
             fs::write(&out_path, tpl)?;
             println!("Wrote {}", out_path.display());
         }
-        Commands::Readme { path } => {
+        Some(Commands::Readme { path }) => {
             let readme_path = match path {
                 Some(p) => Some(p),
                 None => readme::discover_desktop_readme(),
@@ -302,10 +302,10 @@ pub fn run() -> Result<()> {
                 }
             }
         }
-        Commands::Status => {
+        Some(Commands::Status) => {
             println!("Status: Ironguard MVP ready. Use 'ironguard run script [--dry-run]' or 'ironguard scan'.");
         }
-        Commands::Forensics { provider, model, api_key, time_budget, allow_exec, no_tui, readme, script } => {
+        Some(Commands::Forensics { provider, model, api_key, time_budget, allow_exec, no_tui, readme, script }) => {
             let _ = logger.log_message("start", &format!(
                 "mode=forensics provider={} model={} allow_exec={} tui={} time_budget_s={}",
                 provider, model, allow_exec, !no_tui, time_budget
@@ -329,11 +329,14 @@ pub fn run() -> Result<()> {
             }
             let _ = logger.log_message("end", "mode=forensics completed");
         }
-        Commands::Scan { vt_file, vt_url, vt_api_key, full } => {
+        Some(Commands::Scan { vt_file, vt_url, vt_api_key, full }) => {
             let _ = logger.log_message("start", "mode=scan extended");
-            if cfg!(target_os = "linux") {
+            #[cfg(target_os = "linux")]
+            {
                 tokio::runtime::Handle::current().block_on(scan_linux_extended(true, true, true, full, &mut logger))?;
-            } else if cfg!(target_os = "windows") {
+            }
+            #[cfg(target_os = "windows")]
+            {
                 tokio::runtime::Handle::current().block_on(scan_windows_extended(full, &mut logger))?;
             }
             if vt_file.is_some() || vt_url.is_some() {
@@ -341,7 +344,7 @@ pub fn run() -> Result<()> {
             }
             let _ = logger.log_message("end", "mode=scan completed");
         }
-        Commands::Config { path } => {
+        Some(Commands::Config { path }) => {
             use std::{env, fs, process::Command as StdCommand};
             let out_path = path.unwrap_or_else(|| PathBuf::from("ironguard.toml"));
             if !out_path.exists() {
@@ -442,12 +445,10 @@ pub fn run() -> Result<()> {
                 eprintln!("Editor exited with status: {:?}", status);
             }
         }
-    }
-
-    // Default path (no subcommand): one-shot secure run
-    else {
-        // Default behavior: launch TUI (AI workflow placeholder)
-        tui::run()?;
+        None => {
+            // Default behavior: launch TUI (AI workflow placeholder)
+            tui::run()?;
+        }
     }
 
     Ok(())

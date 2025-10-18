@@ -13,7 +13,41 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+      tag: ${{ steps.ver.outputs.tag }}
+      prev: ${{ steps.prev.outputs.prev }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Fetch tags
+        run: git fetch --tags --prune
+      - name: Read version from Cargo.toml
+        id: ver
+        run: |
+          set -euo pipefail
+          VERSION=$(grep -m1 -Po '^version\s*=\s*"\K[^"]+' Cargo.toml)
+          echo "Detected version: ${VERSION}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
+      - name: "Guard: fail if tag already exists"
+        run: |
+          if git rev-parse -q --verify "refs/tags/${{ steps.ver.outputs.tag }}"; then
+            echo "Tag ${{ steps.ver.outputs.tag }} already exists. Please bump version in Cargo.toml." >&2
+            exit 1
+          fi
+      - name: Determine previous tag
+        id: prev
+        run: |
+          set -euo pipefail
+          PREV_TAG=$(git tag -l 'v*' --sort=version:refname | tail -n 1 || true)
+          echo "Previous tag: ${PREV_TAG}"
+          echo "prev=${PREV_TAG}" >> "$GITHUB_OUTPUT"
   build-linux:
+    needs: preflight
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -31,6 +65,7 @@ jobs:
           path: dist/ironguard-linux-x86_64
 
   build-windows:
+    needs: preflight
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -49,42 +84,19 @@ jobs:
           path: dist/ironguard-windows-x86_64.exe
 
   release:
-    needs: [build-linux, build-windows]
+    needs: [preflight, build-linux, build-windows]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Fetch tags
-        run: git fetch --tags --prune
-      - name: Read version from Cargo.toml
-        id: ver
-        run: |
-          set -euo pipefail
-          VERSION=$(grep -m1 -Po '^version\s*=\s*"\K[^"]+' Cargo.toml)
-          echo "Detected version: ${VERSION}"
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
-      - name: Guard: fail if tag already exists
-        run: |
-          if git rev-parse -q --verify "refs/tags/${{ steps.ver.outputs.tag }}"; then
-            echo "Tag ${{ steps.ver.outputs.tag }} already exists. Please bump version in Cargo.toml." >&2
-            exit 1
-          fi
-      - name: Determine previous tag
-        id: prev
-        run: |
-          set -euo pipefail
-          PREV_TAG=$(git tag -l 'v*' --sort=version:refname | tail -n 1 || true)
-          echo "Previous tag: ${PREV_TAG}"
-          echo "prev=${PREV_TAG}" >> "$GITHUB_OUTPUT"
       - name: Generate release notes and changelog link
         id: notes
         env:
           REPO: ${{ github.repository }}
-          TAG: ${{ steps.ver.outputs.tag }}
-          PREV_TAG: ${{ steps.prev.outputs.prev }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.preflight.outputs.tag }}
+          PREV_TAG: ${{ needs.preflight.outputs.prev }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           NOTES_BODY=notes.txt
@@ -110,7 +122,7 @@ jobs:
           fi
       - name: Create and push tag
         env:
-          TAG: ${{ steps.ver.outputs.tag }}
+          TAG: ${{ needs.preflight.outputs.tag }}
         run: |
           set -euo pipefail
           git config user.name "github-actions"
@@ -127,8 +139,8 @@ jobs:
           cp scripts/install.ps1 dist/
       - name: Create GitHub Release
         env:
-          TAG: ${{ steps.ver.outputs.tag }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.preflight.outputs.tag }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           gh release create "${TAG}" \

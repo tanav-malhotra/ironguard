@@ -96,30 +96,21 @@ jobs:
           REPO: ${{ github.repository }}
           TAG: ${{ needs.preflight.outputs.tag }}
           PREV_TAG: ${{ needs.preflight.outputs.prev }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           NOTES_BODY=notes.txt
           : > "$NOTES_BODY"
           if [ -n "${PREV_TAG}" ]; then
+            RANGE="${PREV_TAG}..${GITHUB_SHA}"
             COMPARE_URL="https://github.com/${REPO}/compare/${PREV_TAG}...${TAG}"
           else
             FIRST=$(git rev-list --max-parents=0 HEAD | tail -n1)
+            RANGE="${FIRST}..${GITHUB_SHA}"
             COMPARE_URL="https://github.com/${REPO}/compare/${FIRST}...${TAG}"
           fi
-          echo "Full changelog: ${COMPARE_URL}" >> "$NOTES_BODY"
-          if [ -n "${PREV_TAG}" ]; then
-            gh api -X POST "repos/${REPO}/releases/generate-notes" \
-              -f tag_name="${TAG}" \
-              -f target_commitish="${GITHUB_SHA}" \
-              -f previous_tag_name="${PREV_TAG}" \
-              --jq '.body' >> "$NOTES_BODY"
-          else
-            gh api -X POST "repos/${REPO}/releases/generate-notes" \
-              -f tag_name="${TAG}" \
-              -f target_commitish="${GITHUB_SHA}" \
-              --jq '.body' >> "$NOTES_BODY"
-          fi
+          git log --no-merges --pretty=format:"- %s (%h)" "$RANGE" >> "$NOTES_BODY" || true
+          echo >> "$NOTES_BODY"
+          echo "Full Changelog: ${COMPARE_URL}" >> "$NOTES_BODY"
       - name: Create and push tag
         env:
           TAG: ${{ needs.preflight.outputs.tag }}

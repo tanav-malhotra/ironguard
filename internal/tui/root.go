@@ -1,0 +1,837 @@
+package tui
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+
+	"github.com/tanav-malhotra/ironguard/internal/agent"
+	"github.com/tanav-malhotra/ironguard/internal/config"
+)
+
+// Run starts the top-level TUI program.
+func Run(cfg config.Config) error {
+	m := newModel(cfg)
+	p := tea.NewProgram(m, tea.WithAltScreen())
+	_, err := p.Run()
+	return err
+}
+
+// AgentEventMsg wraps agent events for the TUI.
+type AgentEventMsg struct {
+	Event agent.Event
+}
+
+// QueuedMessage represents a message waiting to be sent to the AI.
+type QueuedMessage struct {
+	Content   string
+	Interrupt bool // If true, interrupts current AI task
+}
+
+type model struct {
+	cfg config.Config
+
+	// Chat state
+	messages      []Message
+	input         textinput.Model
+	scrollOffset  int
+	messageQueue  []QueuedMessage // queued user messages (Enter=queue, Ctrl+Enter=interrupt)
+	pendingAction *PendingAction
+
+	// Autocomplete state
+	showAutocomplete  bool
+	autocompleteItems []SlashCommand
+	autocompleteIdx   int
+
+	// Confirmation dialog
+	showConfirm    bool
+	confirmAction  *PendingAction
+	confirmMessage string
+	confirmToolID  string
+
+	// API keys (in-memory only)
+	apiKeys map[string]string
+
+	// Layout state
+	quitting     bool
+	ready        bool
+	width        int
+	height       int
+	sidebarWidth int
+
+	// Styling
+	theme  Theme
+	styles Styles
+
+	// Command registry
+	cmdRegistry *CommandRegistry
+
+	// Agent
+	agent       *agent.Agent
+	agentBusy   bool
+	agentStatus string
+
+	// Manual tasks
+	manualTasks *ManualTaskManager
+
+	// AI Todo list (for AI to track its own tasks)
+	aiTodos []AITodo
+
+	// Score tracking
+	currentScore  int
+	previousScore int
+	scoreDelta    int
+
+	// Program reference for sending commands
+	program *tea.Program
+}
+
+// AITodo represents a task the AI created for itself.
+type AITodo struct {
+	ID          int
+	Description string
+	Status      string // "pending", "in_progress", "completed", "cancelled"
+	CreatedAt   string
+}
+
+func newModel(cfg config.Config) model {
+	ti := textinput.New()
+	ti.Placeholder = "Type a message or /command…"
+	ti.Focus()
+	ti.CharLimit = 2000
+	ti.Width = 60
+
+	theme := DefaultTheme()
+	styles := NewStyles(theme)
+
+	// Create agent
+	ag := agent.New(&cfg)
+
+	welcomeMsg := `═══════════════════════════════════════════════════════════
+              ⚔️  IRONGUARD - COMPETITION MODE  ⚔️
+═══════════════════════════════════════════════════════════
+
+Ready to dominate CyberPatriot. Target: 100/100 in <30 min.
+
+QUICK START:
+  1. Set API key:  /key <your-api-key>
+  2. Start AI:     /auto    (autonomous mode - AI does everything)
+     OR:          /harden  (AI assists, you guide)
+
+COMMANDS: /help  |  CHECK SCORE: /score  |  STOP AI: /stop
+
+Mode: AUTOPILOT (AI runs commands automatically)
+Model: claude-opus-4-5 (maximum capability)
+═══════════════════════════════════════════════════════════`
+
+	return model{
+		cfg:          cfg,
+		messages:     []Message{NewSystemMessage(welcomeMsg)},
+		input:        ti,
+		apiKeys:      make(map[string]string),
+		sidebarWidth: 32, // Wider for manual tasks
+		theme:        theme,
+		styles:       styles,
+		cmdRegistry:  NewCommandRegistry(),
+		agent:        ag,
+		manualTasks:  NewManualTaskManager(),
+	}
+}
+
+func (m model) Init() tea.Cmd {
+	return tea.Batch(textinput.Blink, m.listenToAgent())
+}
+
+// listenToAgent creates a command that listens for agent events.
+func (m model) listenToAgent() tea.Cmd {
+	return func() tea.Msg {
+		event := <-m.agent.Events()
+		return AgentEventMsg{Event: event}
+	}
+}
+
+func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		return m.handleKeyMsg(msg)
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		m.input.Width = msg.Width - m.sidebarWidth - 8
+		m.ready = true
+		return m, nil
+	case AgentEventMsg:
+		return m.handleAgentEvent(msg.Event)
+	}
+
+	var cmd tea.Cmd
+	m.input, cmd = m.input.Update(msg)
+
+	// Update autocomplete based on input
+	m.updateAutocomplete()
+
+	return m, cmd
+}
+
+func (m *model) handleAgentEvent(event agent.Event) (tea.Model, tea.Cmd) {
+	switch event.Type {
+	case agent.EventStreamStart:
+		m.agentBusy = true
+		m.agentStatus = "Thinking..."
+		// Add streaming message placeholder
+		m.messages = append(m.messages, StreamingAIMessage())
+
+	case agent.EventStreamDelta:
+		// Append to the last message if it's streaming
+		if len(m.messages) > 0 {
+			last := &m.messages[len(m.messages)-1]
+			if last.Role == RoleAI && last.IsStreaming {
+				last.Content += event.Content
+			}
+		}
+
+	case agent.EventStreamEnd:
+		m.agentBusy = false
+		m.agentStatus = ""
+		// Mark streaming complete
+		if len(m.messages) > 0 {
+			last := &m.messages[len(m.messages)-1]
+			if last.Role == RoleAI && last.IsStreaming {
+				last.IsStreaming = false
+			}
+		}
+		// Process queued messages
+		if len(m.messageQueue) > 0 {
+			nextMsg := m.messageQueue[0]
+			m.messageQueue = m.messageQueue[1:]
+			m.messages = append(m.messages, NewSystemMessage("📤 Sending queued message..."))
+			return m, m.startChat(nextMsg.Content)
+		}
+
+	case agent.EventToolCall:
+		m.agentStatus = fmt.Sprintf("Calling %s...", event.Tool.Name)
+		m.messages = append(m.messages, NewToolMessage(
+			event.Tool.Name,
+			event.Tool.Arguments,
+			"",
+			"",
+		))
+
+	case agent.EventToolResult:
+		// Update the last tool message with output
+		for i := len(m.messages) - 1; i >= 0; i-- {
+			if m.messages[i].Role == RoleTool && m.messages[i].ToolName == event.Tool.Name {
+				m.messages[i].ToolOutput = event.Tool.Output
+				m.messages[i].ToolError = event.Tool.Error
+				break
+			}
+		}
+
+	case agent.EventConfirmRequired:
+		m.showConfirm = true
+		m.confirmMessage = fmt.Sprintf("Execute: %s\nArgs: %s", event.Tool.Name, truncate(event.Tool.Arguments, 100))
+		m.confirmToolID = event.Tool.ID
+
+	case agent.EventError:
+		m.agentBusy = false
+		m.agentStatus = ""
+		m.messages = append(m.messages, NewSystemMessage("Error: "+event.Error.Error()))
+
+	case agent.EventStatusUpdate:
+		m.agentStatus = event.Content
+	}
+
+	// Continue listening for events
+	return m, m.listenToAgent()
+}
+
+func (m *model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Handle confirmation dialog
+	if m.showConfirm {
+		switch msg.String() {
+		case "y", "Y", "enter":
+			m.showConfirm = false
+			m.agent.Confirm(agent.ConfirmResponse{Approved: true, ToolID: m.confirmToolID})
+			m.confirmToolID = ""
+			return m, nil
+		case "n", "N", "esc":
+			m.showConfirm = false
+			m.agent.Confirm(agent.ConfirmResponse{Approved: false, ToolID: m.confirmToolID})
+			m.messages = append(m.messages, NewSystemMessage("Action cancelled."))
+			m.confirmToolID = ""
+			return m, nil
+		}
+		return m, nil
+	}
+
+	switch msg.Type {
+	case tea.KeyCtrlC:
+		if m.agentBusy {
+			m.agent.Cancel()
+			m.messages = append(m.messages, NewSystemMessage("Cancelled."))
+			return m, nil
+		}
+		m.quitting = true
+		return m, tea.Quit
+
+	case tea.KeyEsc:
+		if m.showAutocomplete {
+			m.showAutocomplete = false
+			return m, nil
+		}
+		if m.agentBusy {
+			m.agent.Cancel()
+			m.messages = append(m.messages, NewSystemMessage("Cancelled."))
+			return m, nil
+		}
+		m.quitting = true
+		return m, tea.Quit
+
+	case tea.KeyCtrlL:
+		m.messages = []Message{}
+		m.agent.ClearHistory()
+		return m, nil
+
+	case tea.KeyTab:
+		if m.showAutocomplete && len(m.autocompleteItems) > 0 {
+			m.autocompleteIdx = (m.autocompleteIdx + 1) % len(m.autocompleteItems)
+			selected := m.autocompleteItems[m.autocompleteIdx]
+			m.input.SetValue("/" + selected.Name + " ")
+			m.input.SetCursor(len(m.input.Value()))
+			return m, nil
+		}
+		return m, nil
+
+	case tea.KeyShiftTab:
+		if m.showAutocomplete && len(m.autocompleteItems) > 0 {
+			m.autocompleteIdx--
+			if m.autocompleteIdx < 0 {
+				m.autocompleteIdx = len(m.autocompleteItems) - 1
+			}
+			selected := m.autocompleteItems[m.autocompleteIdx]
+			m.input.SetValue("/" + selected.Name + " ")
+			m.input.SetCursor(len(m.input.Value()))
+			return m, nil
+		}
+		return m, nil
+
+	case tea.KeyUp:
+		if m.showAutocomplete && len(m.autocompleteItems) > 0 {
+			m.autocompleteIdx--
+			if m.autocompleteIdx < 0 {
+				m.autocompleteIdx = len(m.autocompleteItems) - 1
+			}
+			return m, nil
+		}
+		if m.scrollOffset < len(m.messages)-1 {
+			m.scrollOffset++
+		}
+		return m, nil
+
+	case tea.KeyDown:
+		if m.showAutocomplete && len(m.autocompleteItems) > 0 {
+			m.autocompleteIdx = (m.autocompleteIdx + 1) % len(m.autocompleteItems)
+			return m, nil
+		}
+		if m.scrollOffset > 0 {
+			m.scrollOffset--
+		}
+		return m, nil
+
+	case tea.KeyEnter:
+		val := strings.TrimSpace(m.input.Value())
+		if val == "" {
+			return m, nil
+		}
+
+		if m.showAutocomplete && len(m.autocompleteItems) > 0 {
+			selected := m.autocompleteItems[m.autocompleteIdx]
+			m.input.SetValue("/" + selected.Name + " ")
+			m.input.SetCursor(len(m.input.Value()))
+			m.showAutocomplete = false
+			return m, nil
+		}
+
+		m.input.SetValue("")
+		m.showAutocomplete = false
+		m.scrollOffset = 0
+
+		// Handle slash commands (always execute immediately)
+		if strings.HasPrefix(val, "/") {
+			return m.handleSlashCommand(val)
+		}
+
+		// Regular chat message
+		m.messages = append(m.messages, NewUserMessage(val))
+
+		// Queue for AI if agent is busy (Enter = queue)
+		if m.agentBusy {
+			m.messageQueue = append(m.messageQueue, QueuedMessage{Content: val, Interrupt: false})
+			m.messages = append(m.messages, NewSystemMessage("📥 Queued (AI is busy) - Ctrl+Enter to interrupt"))
+			return m, nil
+		}
+
+		return m, m.startChat(val)
+
+	case tea.KeyCtrlJ: // Ctrl+Enter (some terminals send Ctrl+J for Ctrl+Enter)
+		val := strings.TrimSpace(m.input.Value())
+		if val == "" {
+			return m, nil
+		}
+
+		m.input.SetValue("")
+		m.showAutocomplete = false
+		m.scrollOffset = 0
+
+		// Handle slash commands
+		if strings.HasPrefix(val, "/") {
+			return m.handleSlashCommand(val)
+		}
+
+		m.messages = append(m.messages, NewUserMessage(val))
+
+		// Ctrl+Enter = interrupt and send immediately
+		if m.agentBusy {
+			m.agent.Cancel() // Interrupt current task
+			m.messages = append(m.messages, NewSystemMessage("⚡ Interrupted AI - sending your message now"))
+			// Small delay to let cancellation propagate
+			return m, tea.Batch(
+				func() tea.Msg { return nil },
+				m.startChat(val),
+			)
+		}
+
+		return m, m.startChat(val)
+	}
+
+	// Update text input
+	var cmd tea.Cmd
+	m.input, cmd = m.input.Update(msg)
+	m.updateAutocomplete()
+	return m, cmd
+}
+
+func (m *model) startChat(message string) tea.Cmd {
+	return func() tea.Msg {
+		// Expand @ mentions in the message
+		expandedMessage, mentions := ExpandMentionsInMessage(message)
+		
+		// Log mentions for user visibility
+		for _, mention := range mentions {
+			if mention.Type == MentionFile && mention.Content != "" {
+				// File was loaded successfully - the content is in expandedMessage
+			}
+		}
+		
+		go m.agent.Chat(context.Background(), expandedMessage)
+		return nil
+	}
+}
+
+func (m *model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
+	parts := strings.SplitN(input[1:], " ", 2)
+	cmdName := parts[0]
+	args := ""
+	if len(parts) > 1 {
+		args = parts[1]
+	}
+
+	cmd := m.cmdRegistry.Get(cmdName)
+	if cmd == nil {
+		m.messages = append(m.messages, NewSystemMessage("Unknown command: /"+cmdName+"\nType /help for available commands."))
+		return m, nil
+	}
+
+	result := cmd.Handler(m, args)
+	if result != "" {
+		m.messages = append(m.messages, NewSystemMessage(result))
+	}
+
+	if m.quitting {
+		return m, tea.Quit
+	}
+
+	// Handle pending actions
+	if m.pendingAction != nil {
+		if m.cfg.Mode == config.ModeConfirm && m.pendingAction.Type != ActionChat {
+			m.showConfirm = true
+			m.confirmAction = m.pendingAction
+			m.confirmMessage = "Execute: " + m.pendingAction.Description + "?"
+			m.pendingAction = nil
+		} else {
+			action := m.pendingAction
+			m.pendingAction = nil
+			return m, m.executeAction(action)
+		}
+	}
+
+	return m, nil
+}
+
+func (m *model) updateAutocomplete() {
+	val := m.input.Value()
+	if strings.HasPrefix(val, "/") && !strings.Contains(val, " ") {
+		prefix := val[1:]
+		m.autocompleteItems = m.cmdRegistry.Find(prefix)
+		m.showAutocomplete = len(m.autocompleteItems) > 0
+		if m.autocompleteIdx >= len(m.autocompleteItems) {
+			m.autocompleteIdx = 0
+		}
+	} else {
+		m.showAutocomplete = false
+		m.autocompleteItems = nil
+		m.autocompleteIdx = 0
+	}
+}
+
+func (m *model) executeAction(action *PendingAction) tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+		var result string
+		var err error
+
+		switch action.Type {
+		case ActionReadReadme:
+			result, err = m.agent.ExecuteTool(ctx, "read_readme", nil)
+		case ActionReadForensics:
+			result, err = m.agent.ExecuteTool(ctx, "read_forensics", nil)
+		case ActionWriteAnswer:
+			// Parse args: "<question-num> <answer>"
+			parts := strings.SplitN(action.Args, " ", 2)
+			if len(parts) == 2 {
+				result, err = m.agent.ExecuteTool(ctx, "write_answer", map[string]interface{}{
+					"question_file": "Forensics Question " + parts[0] + ".txt",
+					"answer":        parts[1],
+				})
+			} else {
+				err = fmt.Errorf("invalid answer format")
+			}
+		case ActionRunCommand:
+			result, err = m.agent.ExecuteTool(ctx, "run_command", map[string]interface{}{
+				"command": action.Args,
+			})
+		case ActionHarden:
+			go m.agent.Chat(ctx, "Please read the README and start hardening this system. Begin by identifying what needs to be done.")
+		case ActionChat:
+			go m.agent.Chat(ctx, action.Args)
+		case ActionAuto:
+			var targetScore int
+			fmt.Sscanf(action.Args, "%d", &targetScore)
+			go m.agent.StartAutonomous(ctx, targetScore)
+		case ActionCheckScore:
+			result, err = m.agent.ExecuteTool(ctx, "read_score_report", nil)
+		case ActionSearch:
+			result, err = m.agent.ExecuteTool(ctx, "web_search", map[string]interface{}{
+				"query": action.Args,
+			})
+		case ActionScreenshot:
+			result, err = m.agent.ExecuteTool(ctx, "take_screenshot", map[string]interface{}{
+				"region": "full",
+			})
+		case ActionClick:
+			// Parse "x y" from args
+			var x, y int
+			fmt.Sscanf(action.Args, "%d %d", &x, &y)
+			result, err = m.agent.ExecuteTool(ctx, "mouse_click", map[string]interface{}{
+				"x": x,
+				"y": y,
+			})
+		case ActionType_:
+			result, err = m.agent.ExecuteTool(ctx, "keyboard_type", map[string]interface{}{
+				"text": action.Args,
+			})
+		case ActionHotkey:
+			result, err = m.agent.ExecuteTool(ctx, "keyboard_hotkey", map[string]interface{}{
+				"keys": action.Args,
+			})
+		case ActionListWindows:
+			result, err = m.agent.ExecuteTool(ctx, "list_windows", nil)
+		case ActionFocusWindow:
+			result, err = m.agent.ExecuteTool(ctx, "focus_window", map[string]interface{}{
+				"title": action.Args,
+			})
+		}
+
+		if err != nil {
+			return AgentEventMsg{Event: agent.Event{Type: agent.EventError, Error: err}}
+		}
+		if result != "" {
+			return AgentEventMsg{Event: agent.Event{
+				Type: agent.EventToolResult,
+				Tool: &agent.ToolCallInfo{
+					Name:   action.Description,
+					Output: result,
+				},
+			}}
+		}
+		return nil
+	}
+}
+
+func (m model) View() string {
+	if !m.ready {
+		return "Loading ironguard TUI…"
+	}
+
+	chatWidth := m.width - m.sidebarWidth - 3
+	chatHeight := m.height - 6
+
+	sidebar := m.renderSidebar()
+	chat := m.renderChat(chatWidth, chatHeight)
+	inputArea := m.renderInput(chatWidth)
+	statusBar := m.renderStatusBar()
+
+	mainContent := lipgloss.JoinVertical(lipgloss.Left, chat, inputArea)
+	content := lipgloss.JoinHorizontal(lipgloss.Top, mainContent, sidebar)
+
+	return lipgloss.JoinVertical(lipgloss.Left, content, statusBar)
+}
+
+func (m model) renderSidebar() string {
+	var sb strings.Builder
+
+	title := m.styles.Title.Render("⚔ IRONGUARD")
+	sb.WriteString(title + "\n\n")
+
+	// Score display (prominent)
+	sb.WriteString(m.styles.Label.Render("📊 SCORE") + "\n")
+	if m.currentScore > 0 {
+		scoreStr := fmt.Sprintf("  %d/100", m.currentScore)
+		if m.scoreDelta > 0 {
+			scoreStr += m.styles.Success.Render(fmt.Sprintf(" (+%d)", m.scoreDelta))
+		} else if m.scoreDelta < 0 {
+			scoreStr += m.styles.Error.Render(fmt.Sprintf(" (%d)", m.scoreDelta))
+		}
+		sb.WriteString(m.styles.Value.Render(scoreStr) + "\n\n")
+	} else {
+		sb.WriteString(m.styles.Muted.Render("  Not checked") + "\n\n")
+	}
+
+	// Status
+	sb.WriteString(m.styles.Label.Render("Status") + "\n")
+	if m.agentBusy {
+		sb.WriteString(m.styles.Warning.Render("  ● Working") + "\n")
+		if m.agentStatus != "" {
+			status := m.agentStatus
+			if len(status) > 24 {
+				status = status[:21] + "..."
+			}
+			sb.WriteString(m.styles.Muted.Render("  "+status) + "\n")
+		}
+	} else {
+		sb.WriteString(m.styles.Success.Render("  ● Ready") + "\n")
+	}
+	sb.WriteString("\n")
+
+	// Mode badge
+	var modeBadge string
+	if m.cfg.Mode == config.ModeConfirm {
+		modeBadge = m.styles.BadgeConfirm.Render("CONFIRM")
+	} else {
+		modeBadge = m.styles.BadgeAutopilot.Render("AUTO")
+	}
+	sb.WriteString(m.styles.Muted.Render(string(m.cfg.Provider)) + " " + modeBadge + "\n\n")
+
+	// Separator
+	sb.WriteString(m.styles.Muted.Render(strings.Repeat("─", m.sidebarWidth-4)) + "\n\n")
+
+	// Manual tasks section
+	sb.WriteString(m.styles.Label.Render("📋 MANUAL TASKS") + "\n")
+	total, pending, _ := m.manualTasks.Count()
+	if total == 0 {
+		sb.WriteString(m.styles.Muted.Render("  No tasks") + "\n")
+	} else {
+		sb.WriteString(m.styles.Muted.Render(fmt.Sprintf("  %d pending", pending)) + "\n\n")
+		sb.WriteString(m.manualTasks.FormatForSidebar(m.sidebarWidth - 4))
+	}
+
+	// Queue indicator
+	if len(m.messageQueue) > 0 {
+		sb.WriteString("\n" + m.styles.Warning.Render(fmt.Sprintf("⏳ %d queued", len(m.messageQueue))) + "\n")
+	}
+
+	return m.styles.Sidebar.
+		Width(m.sidebarWidth).
+		Height(m.height - 2).
+		Render(sb.String())
+}
+
+func (m model) renderChat(width, height int) string {
+	var lines []string
+
+	for _, msg := range m.messages {
+		line := m.formatMessage(msg, width-4)
+		lines = append(lines, line)
+	}
+
+	visibleLines := lines
+	totalLines := len(lines)
+	if totalLines > height && height > 0 {
+		start := totalLines - height - m.scrollOffset
+		if start < 0 {
+			start = 0
+		}
+		end := start + height
+		if end > totalLines {
+			end = totalLines
+		}
+		visibleLines = lines[start:end]
+	}
+
+	content := strings.Join(visibleLines, "\n")
+
+	if m.scrollOffset > 0 {
+		content += "\n" + m.styles.Muted.Render(fmt.Sprintf("↓ %d more", m.scrollOffset))
+	}
+
+	return m.styles.ChatPane.
+		Width(width).
+		Height(height).
+		Render(content)
+}
+
+func (m model) formatMessage(msg Message, width int) string {
+	switch msg.Role {
+	case RoleUser:
+		prefix := m.styles.UserMessage.Render("You: ")
+		return prefix + msg.Content
+
+	case RoleAI:
+		prefix := m.styles.AIMessage.Bold(true).Render("AI: ")
+		content := msg.Content
+		if msg.IsStreaming {
+			content += m.styles.Muted.Render("▌")
+		}
+		return prefix + content
+
+	case RoleSystem:
+		return m.styles.SystemMessage.Render(msg.Content)
+
+	case RoleTool:
+		var sb strings.Builder
+		sb.WriteString(m.styles.ToolCall.Render("⚡ " + msg.ToolName))
+		if msg.ToolInput != "" {
+			sb.WriteString("\n" + m.styles.Muted.Render("  Input: "+truncate(msg.ToolInput, 60)))
+		}
+		if msg.ToolOutput != "" {
+			sb.WriteString("\n" + m.styles.Value.Render("  Output: "+truncate(msg.ToolOutput, 60)))
+		}
+		if msg.ToolError != "" {
+			sb.WriteString("\n" + m.styles.Error.Render("  Error: "+msg.ToolError))
+		}
+		return sb.String()
+
+	default:
+		return msg.Content
+	}
+}
+
+func (m model) renderInput(width int) string {
+	var sb strings.Builder
+
+	// Show queued messages above input (Claude Code style)
+	if len(m.messageQueue) > 0 {
+		queueBox := m.styles.Muted.Render("📥 QUEUED MESSAGES (will send when AI is ready):\n")
+		for i, qm := range m.messageQueue {
+			prefix := fmt.Sprintf("  %d. ", i+1)
+			content := qm.Content
+			if len(content) > 50 {
+				content = content[:47] + "..."
+			}
+			if qm.Interrupt {
+				queueBox += m.styles.Warning.Render(prefix+"⚡ "+content) + "\n"
+			} else {
+				queueBox += m.styles.Muted.Render(prefix+content) + "\n"
+			}
+		}
+		queueBox += m.styles.Muted.Render("  (Ctrl+Enter to interrupt AI and send immediately)\n")
+		sb.WriteString(m.styles.BorderedBox.Width(width).Render(queueBox) + "\n")
+	}
+
+	if m.showAutocomplete && len(m.autocompleteItems) > 0 {
+		sb.WriteString(m.renderAutocomplete(width) + "\n")
+	}
+
+	if m.showConfirm {
+		confirmBox := m.styles.BorderedBox.
+			BorderForeground(m.theme.Warning).
+			Render(m.confirmMessage + "\n\n" +
+				m.styles.Success.Render("[Y]es") + "  " +
+				m.styles.Error.Render("[N]o"))
+		sb.WriteString(confirmBox + "\n")
+	}
+
+	// Input hint
+	hint := "Enter: queue message | Ctrl+Enter: interrupt & send | /: commands"
+	if !m.agentBusy {
+		hint = "Enter: send message | /: commands"
+	}
+
+	inputStyle := m.styles.InputPane.Width(width)
+	sb.WriteString(inputStyle.Render(m.input.View()))
+	sb.WriteString("\n" + m.styles.Muted.Render(hint))
+
+	return sb.String()
+}
+
+func (m model) renderAutocomplete(width int) string {
+	var lines []string
+	maxShow := 8
+	if len(m.autocompleteItems) < maxShow {
+		maxShow = len(m.autocompleteItems)
+	}
+
+	for i := 0; i < maxShow; i++ {
+		cmd := m.autocompleteItems[i]
+		line := "/" + cmd.Name
+		if cmd.Args != "" {
+			line += " " + cmd.Args
+		}
+		line += " - " + cmd.Description
+
+		if i == m.autocompleteIdx {
+			lines = append(lines, m.styles.CommandSelected.Render(line))
+		} else {
+			lines = append(lines, m.styles.Command.Render(line))
+		}
+	}
+
+	if len(m.autocompleteItems) > maxShow {
+		lines = append(lines, m.styles.Muted.Render(fmt.Sprintf("  ... and %d more", len(m.autocompleteItems)-maxShow)))
+	}
+
+	return m.styles.BorderedBox.
+		Width(width).
+		Render(strings.Join(lines, "\n"))
+}
+
+func (m model) renderStatusBar() string {
+	left := m.styles.KeyHint.Render("Ctrl+C: Quit | Ctrl+L: Clear | Tab: Autocomplete | /help: Commands")
+
+	keyStatus := "🔑 "
+	if m.apiKeys[string(m.cfg.Provider)] != "" {
+		keyStatus += m.styles.Success.Render("●")
+	} else {
+		keyStatus += m.styles.Error.Render("○")
+	}
+
+	right := keyStatus
+
+	padding := m.width - lipgloss.Width(left) - lipgloss.Width(right) - 2
+	if padding < 0 {
+		padding = 0
+	}
+
+	return m.styles.StatusBar.Render(left + strings.Repeat(" ", padding) + right)
+}
+
+func truncate(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max-3] + "..."
+}

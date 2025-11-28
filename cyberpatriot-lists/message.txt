@@ -1,0 +1,84 @@
+Scoring Report
+Forensics Question 1 correct (9PNGT-DFCGV-JTQVB-P894D-PYW9Y) - 5 points
+
+Forensics Question 2 correct (https://cdn.discordapp.com/attachments/720328944875864074/1131427634052612176/Screenshot_2023-07-11-19-20-41-198_com.png) - 5 points
+
+Forensics Question 3 correct (d743fe68cf5e43508d3ce7e056eeaee9@TheShire) - 5 points
+
+Forensics Question 4 correct (20 Jul 2023 19:35:22) - 5 points
+
+Removed unauthorized user sauron - 1 points
+
+Removed unauthorized user saruman - 1 points
+
+Removed unauthorized user wormtongue - 1 points
+
+Removed unauthorized user shelob - 1 points
+
+Removed unauthorized user gollum - 1 points
+
+Removed unauthorized orc user generator - 2 points
+
+User boromir is not an administrator - 1 points
+
+User merry is not an Event Log Reader - 2 points
+
+User pippin is not a Remote Management User - 2 points
+
+Passwords must meet complexity requirements - 2 points
+
+Passwords are not stored using reversible encryption - 2 points
+
+The secure minimum password length of 10 has been set - 2 points
+
+CTRL+ALT+DEL is required for login - 2 points
+
+Audit Credential Validation [success and failure] - 2 points
+
+Users are prevented from installing printer drivers - 2 points
+
+System is not allowed to be shutdown without logon - 2 points
+
+System is not allowed to be shutdown without logon - 2 points
+
+FIPS compliant algorithms for encryption, hashing, and singing are enabled - 2 points
+
+Downloading of print drivers over HTTP is disabled - 2 points
+
+Autoplay is disabled [all drives] - 2 points
+
+Shell protocol protected mode is enabled - 2 points
+
+Plug and Play service has been disabled - 2 points
+
+Windows Defender Firewall service is set to automatic start - 2 points
+
+Print Spooler service is disabled - 2 points
+
+Event Log service is set to automatic start - 2 points
+
+Removed TeamViewer - 2 points
+
+Removed Wireshark - 2 points
+
+Windows Defender Smartscreen has been enabled - 2 points
+
+Web-based programs show a security prompt for Windows installer scripts - 2 points
+
+Windows Defender Antivirus is enabled - 2 points
+
+Windows does not accept remote shell connections - 2 points
+
+Removed unauthorized video file - 2 points
+
+Removed unauthorized audio file - 2 points
+
+Removed unauthorized credit card information file - 2 points
+
+Removed unauthorized plaintext password file - 2 points
+
+Removed unauthorized aspx webshell - 2 points
+
+Progress: 40/47
+Total Points: 86
+ictf{c0mm0n_w1nd0ws_L_b1293c51}

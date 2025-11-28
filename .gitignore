@@ -1,0 +1,42 @@
+# Binaries
+ironguard
+ironguard.exe
+ironguard-*
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+coverage.html
+
+# Go workspace file
+go.work
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Local config (API keys should never be committed)
+.env
+.env.local
+config.local.json
+
+# Build artifacts
+dist/
+build/
+

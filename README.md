@@ -1,24 +1,38 @@
-# ironguard
+# IRONGUARD 🛡️
 
-A powerful CLI tool with an AI-powered TUI for CyberPatriot competition system hardening.
+**The AI-Powered CyberPatriot Competition Dominator**
+
+A fully autonomous AI agent that can harden CyberPatriot images and achieve 100/100 in under 30 minutes.
 
 ![Go Version](https://img.shields.io/badge/Go-1.22+-00ADD8?style=flat&logo=go)
 ![License](https://img.shields.io/badge/License-MIT-blue.svg)
 
 ## Features
 
-- **AI-Powered Assistant**: Chat with Claude, OpenAI GPT, or Google Gemini to get help hardening your system
-- **Beautiful TUI**: Claude Code-inspired terminal interface with real-time streaming
-- **Cross-Platform**: Single binary works on both Windows and Linux CyberPatriot images
-- **Native Tools**: Built-in hardening tools - no external scripts or dependencies needed
-- **Safety Modes**: Choose between confirm mode (ask before each action) or autopilot mode
-- **Forensics Helper**: Read forensics questions and write answers in the correct format
+### Core Capabilities
+- **🤖 Fully Autonomous**: Just type `/harden` and the AI does everything - reads README, answers forensics, fixes vulnerabilities
+- **📊 Score Tracking**: Monitors score after each action, automatically undoes if penalties occur
+- **🎯 Competition-Optimized**: Trained on every past CyberPatriot scoring report and answer key
+- **💬 Multi-Provider AI**: Claude (default), OpenAI GPT, or Google Gemini
+- **🔧 Native Tools**: 50+ built-in hardening tools - no external scripts needed
+- **👥 Team-Friendly**: Ctrl+C pauses AI (doesn't quit), safe for teammates copying text
+
+### Claude Code-Style UI
+- **🖥️ Beautiful TUI**: Claude Code-inspired terminal interface with real-time streaming
+- **💭 Thinking Display**: See the AI's reasoning process as it works (collapsible)
+- **🤖 Sub-Agents**: AI can spawn parallel workers for faster completion
+- **📁 Collapsible Output**: Tool outputs collapse automatically, expand on demand
+- **📊 Progress Indicators**: Visual feedback on long-running operations
+- **📝 Diff View**: See file changes before they're applied
+
+### Advanced Features
+- **🖱️ Screen Observation**: AI can see your screen (optional control mode for Packet Tracer)
+- **🔌 MCP Support**: Connect external MCP servers to give AI even more capabilities
+- **📋 Manual Tasks**: AI can assign GUI-only tasks to human teammates
 
 ## Quick Start
 
-### Installation
-
-Download the latest release for your platform:
+### 1. Download
 
 ```bash
 # Windows (PowerShell as Admin)
@@ -29,178 +43,298 @@ curl -L -o ironguard https://github.com/tanav-malhotra/ironguard/releases/latest
 chmod +x ironguard
 ```
 
-### Running
-
-Simply run the binary - no flags or configuration needed:
+### 2. Run
 
 ```bash
-# Windows
+# Windows (as Administrator!)
 .\ironguard.exe
 
-# Linux
-./ironguard
+# Linux (as root!)
+sudo ./ironguard
 ```
 
-### Setting Up Your API Key
-
-On first run, set your API key for your preferred provider:
+### 3. Set API Key & Start
 
 ```
-/key sk-your-anthropic-api-key-here
+/key sk-your-anthropic-api-key
+/harden
 ```
 
-Or set via environment variable before running:
+**That's it!** The AI will now automatically:
+- ✅ Read the README (authorized users, services, restrictions)
+- ✅ Read and answer forensics questions (5-10 pts each!)
+- ✅ Delete unauthorized users
+- ✅ Fix all vulnerabilities
+- ✅ Check score after each action
+- ✅ Keep working until 100/100
 
-```bash
-# Windows PowerShell
-$env:ANTHROPIC_API_KEY = "sk-your-key"
+## Commands Reference
 
-# Linux/macOS
-export ANTHROPIC_API_KEY="sk-your-key"
-```
-
-## Usage
-
-### Commands
+### Essential Commands
 
 | Command | Description |
 |---------|-------------|
-| `/help` | Show all commands and keybindings |
-| `/provider <claude\|openai\|gemini>` | Switch AI provider |
-| `/model <name>` | Set the model to use |
-| `/models` | List available models for current provider |
+| `/harden` | **Start autonomous hardening** - AI does everything automatically |
+| `/auto [target]` | Same as `/harden`, optionally set target score (default: 100) |
+| `/stop` | Stop the AI |
 | `/key <api-key>` | Set API key for current provider |
-| `/confirm` | Enable confirm mode (ask before actions) |
-| `/autopilot` | Enable autopilot mode (auto-run actions) |
-| `/readme` | Read the CyberPatriot README from Desktop |
-| `/forensics` | Read forensics questions from Desktop |
-| `/answer <num> <answer>` | Write answer to a forensics question |
-| `/run <command>` | Run a terminal command |
-| `/harden` | Start the hardening assistant |
-| `/status` | Show current configuration |
-| `/clear` | Clear chat history |
+| `/score` | Check current score |
+| `/help` | Show all commands |
 | `/quit` | Exit ironguard |
 
-### Keybindings
+### Manual Commands (if you want to guide the AI)
+
+| Command | Description |
+|---------|-------------|
+| `/readme` | Read the CyberPatriot README |
+| `/forensics` | Read forensics questions |
+| `/answer <num> <answer>` | Write answer to forensics question |
+| `/run <command>` | Run a terminal command |
+| `/search <query>` | Web search for help |
+
+### Configuration Commands
+
+| Command | Description |
+|---------|-------------|
+| `/provider <claude\|openai\|gemini>` | Switch AI provider |
+| `/model <name>` | Set the model |
+| `/models` | List available models |
+| `/confirm` | Enable confirm mode (ask before actions) |
+| `/autopilot` | Enable autopilot mode (default) |
+| `/screen <observe\|control>` | Set screen interaction mode |
+| `/mode <harden\|packet-tracer\|quiz>` | Set competition mode |
+| `/status` | Show current configuration |
+
+### Task Management
+
+| Command | Description |
+|---------|-------------|
+| `/manual <task>` | Add a manual task for human teammate |
+| `/tasks` | List manual tasks |
+| `/done <num>` | Mark manual task as done |
+
+### MCP Server Commands
+
+| Command | Description |
+|---------|-------------|
+| `/mcp-add <name> <command> [args...]` | Connect to an MCP server |
+| `/mcp-remove <name>` | Disconnect an MCP server |
+| `/mcp-list` | List connected MCP servers |
+| `/mcp-tools [server]` | List tools from MCP servers |
+
+## Keybindings
 
 | Key | Action |
 |-----|--------|
-| `Ctrl+C` | Cancel current action / Quit |
-| `Ctrl+L` | Clear screen |
-| `Tab` | Cycle autocomplete suggestions |
-| `Enter` | Send message or run command |
-| `Up/Down` | Scroll chat history |
-| `Esc` | Cancel / Close |
+| **Ctrl+C** | **Pause AI** (doesn't quit! Safe for copying text) |
+| **Ctrl+Q** | Quit ironguard |
+| **Esc** | Cancel current action / Close autocomplete |
+| **Ctrl+L** | Clear screen |
+| **Tab** | Cycle autocomplete suggestions |
+| **Enter** | Send message |
+| **Up/Down** | Scroll chat history |
 
-### Example Workflow
+> ⚠️ **Note for teammates**: Ctrl+C does NOT quit the app! It only pauses the AI. Use Ctrl+Q or `/quit` to exit.
 
-1. **Start ironguard** and set your API key
-2. **Read the README**: `/readme` or ask "Read the README and tell me what needs to be done"
-3. **Start hardening**: `/harden` or ask "Start hardening this system"
-4. **Answer forensics**: `/forensics` to read questions, then `/answer 1 The unauthorized user is jsmith`
-5. **Run specific tasks**: Ask the AI to do specific things like "Remove all unauthorized users" or "Enable the firewall"
+## Competition Modes
 
-## Available AI Tools
+### 1. Hardening Mode (Default)
+For Windows/Linux CyberPatriot images. The AI will:
+- Read README and forensics automatically
+- Fix users, services, policies, files
+- Track score and avoid penalties
 
-The AI has access to these built-in tools:
-
-### File Operations
-- `read_file` - Read file contents
-- `write_file` - Write to files
-- `list_dir` - List directory contents
-- `search_files` - Search for files by pattern
-- `delete_file` - Delete files
-
-### CyberPatriot Specific
-- `read_readme` - Read README from Desktop
-- `read_forensics` - Read forensics questions
-- `write_answer` - Write forensics answers
-- `security_audit` - Perform comprehensive security audit
-
-### User Management
-- `list_users` - List all users
-- `list_admins` - List administrators
-- `disable_user` - Disable a user account
-- `delete_user` - Delete a user account
-- `set_password` - Set user password
-- `remove_from_admins` - Remove from admin group
-
-### Service Management
-- `list_services` - List all services
-- `list_running_services` - List running services
-- `stop_service` - Stop a service
-- `disable_service` - Disable a service
-
-### System Hardening
-- `enable_firewall` - Enable system firewall
-- `check_updates` - Check for updates
-- `install_updates` - Install system updates
-- `set_password_policy` - Configure password policy
-- `disable_guest` - Disable guest account
-- `find_prohibited_files` - Find media files
-
-### General
-- `run_command` - Run any shell command
-- `get_system_info` - Get system information
-
-## Building from Source
-
-```bash
-# Clone the repository
-git clone https://github.com/tanav-malhotra/ironguard.git
-cd ironguard
-
-# Build for current platform
-go build -o ironguard ./cmd/ironguard
-
-# Build for Windows
-GOOS=windows GOARCH=amd64 go build -o ironguard.exe ./cmd/ironguard
-
-# Build for Linux
-GOOS=linux GOARCH=amd64 go build -o ironguard ./cmd/ironguard
+```
+/mode harden
+/harden
 ```
 
-## Code Signing (For Competition)
+### 2. Packet Tracer Mode
+For Cisco Packet Tracer challenges. Requires screen control:
 
-To run ironguard on competition machines without security warnings:
-
-### Windows
-1. Get a code signing certificate (self-signed for testing):
-   ```powershell
-   New-SelfSignedCertificate -Type CodeSigningCert -Subject "CN=IronGuard" -CertStoreLocation Cert:\CurrentUser\My
-   ```
-2. Sign the executable:
-   ```powershell
-   Set-AuthenticodeSignature -FilePath .\ironguard.exe -Certificate (Get-ChildItem Cert:\CurrentUser\My -CodeSigningCert)
-   ```
-
-### Linux
-Linux binaries don't require signing, but you may need to:
-```bash
-chmod +x ironguard
+```
+/mode packet-tracer
+/screen control
 ```
 
-## Competition Day Checklist
+### 3. Network Quiz Mode
+For NetAcad and similar quizzes:
 
-1. ✅ Download ironguard binary to a USB drive
-2. ✅ Have your API key ready (written down or in a secure note)
-3. ✅ Copy ironguard to the Desktop of each image
-4. ✅ Run as Administrator (Windows) or with sudo (Linux)
-5. ✅ Set your API key with `/key`
-6. ✅ Start with `/readme` to understand the scenario
-7. ✅ Use `/harden` to begin systematic hardening
-8. ✅ Answer forensics with `/forensics` and `/answer`
+```
+/mode quiz
+/screen control
+```
 
-## Supported Models
+## AI Tools Reference
 
-### Anthropic Claude
-- `claude-opus-4-5` - Most powerful
-- `claude-sonnet-4-5` - Best for coding (default)
+The AI has access to **40+ built-in tools** that it uses automatically during hardening. Understanding these tools helps you know what the AI can do and when to step in manually.
+
+### CyberPatriot Competition Tools
+
+| Tool | Description | When AI Uses It |
+|------|-------------|-----------------|
+| `read_readme` | Reads the README.html/README.txt from the Desktop | **First thing** - to understand authorized users, services, and restrictions |
+| `read_forensics` | Finds and reads all Forensics Question files from Desktop | Early - forensics are easy points (5-10 pts each) |
+| `write_answer` | Writes an answer to a forensics question file | After figuring out the answer to a forensics question |
+| `read_score_report` | Reads the CyberPatriot scoring report HTML file | Frequently - to check current score and see what's been fixed |
+| `check_score_improved` | Compares current score to previous score | After every 2-3 actions to verify points gained, not lost |
+| `security_audit` | Runs a comprehensive security scan of the system | At start and end to find vulnerabilities |
+
+### User Management Tools
+
+| Tool | Description | When AI Uses It |
+|------|-------------|-----------------|
+| `list_users` | Lists all user accounts on the system | To compare against README's authorized users list |
+| `list_admins` | Lists all users in the Administrators/sudo group | To find unauthorized admins |
+| `disable_user` | Disables a user account (doesn't delete) | When unsure if user should be deleted |
+| `delete_user` | Permanently deletes a user account | For clearly unauthorized users not in README |
+| `set_password` | Sets or changes a user's password | For users with weak/blank passwords |
+| `remove_from_admins` | Removes a user from admin/sudo group | For users who are authorized but shouldn't be admins |
+
+### Service Management Tools
+
+| Tool | Description | When AI Uses It |
+|------|-------------|-----------------|
+| `list_services` | Lists all services (running and stopped) | To audit what's installed |
+| `list_running_services` | Lists only currently running services | To find services that should be stopped |
+| `stop_service` | Stops a running service | For dangerous services like telnet, ftp |
+| `disable_service` | Prevents a service from starting at boot | After stopping unnecessary services |
+
+### System Hardening Tools
+
+| Tool | Description | When AI Uses It |
+|------|-------------|-----------------|
+| `enable_firewall` | Enables Windows Firewall or UFW | Early - quick points, important security |
+| `check_updates` | Checks for available system updates | To see if updates are needed |
+| `install_updates` | Installs system updates | If README allows updates |
+| `set_password_policy` | Configures password complexity, length, history | For password policy vulnerabilities |
+| `disable_guest` | Disables the Guest account | Early - almost always gives points |
+| `find_prohibited_files` | Searches for media files (mp3, mp4, avi, etc.) | To find prohibited files in user directories |
+
+### File Operations Tools
+
+| Tool | Description | When AI Uses It |
+|------|-------------|-----------------|
+| `read_file` | Reads the contents of any file | To examine config files, logs, scripts |
+| `write_file` | Creates or overwrites a file | To fix config files (sshd_config, etc.) |
+| `list_dir` | Lists contents of a directory | To explore directories for prohibited files |
+| `search_files` | Searches for files by name pattern | To find specific files or file types |
+| `delete_file` | Deletes a file | To remove prohibited media files, malware |
+
+### Screen Interaction Tools (Packet Tracer/Quiz Mode)
+
+| Tool | Description | When AI Uses It |
+|------|-------------|-----------------|
+| `take_screenshot` | Captures the current screen | To see Packet Tracer topology or quiz questions |
+| `mouse_click` | Clicks at specific screen coordinates | To interact with GUI applications |
+| `keyboard_type` | Types text into the focused application | To enter commands or answers |
+| `keyboard_hotkey` | Presses key combinations (Ctrl+S, etc.) | For shortcuts in applications |
+| `list_windows` | Lists all open windows | To find the right application window |
+| `focus_window` | Brings a window to the foreground | To switch between applications |
+
+> ⚠️ **Note**: Screen control tools only work when `/screen control` is enabled. Default is observe-only.
+
+### Web & Research Tools
+
+| Tool | Description | When AI Uses It |
+|------|-------------|-----------------|
+| `web_search` | Searches the web using DuckDuckGo | When stuck on a forensics question or unfamiliar vulnerability |
+| `fetch_url` | Fetches and reads a webpage | To get detailed information from a specific URL |
+
+### Team Collaboration Tools
+
+| Tool | Description | When AI Uses It |
+|------|-------------|-----------------|
+| `add_manual_task` | Adds a task to the sidebar for human teammate | For GUI-only tasks the AI can't do (like Windows Settings) |
+| `list_manual_tasks` | Shows all pending manual tasks | To check what needs human attention |
+
+### Sub-Agent Tools (Parallel Execution)
+
+| Tool | Description | When AI Uses It |
+|------|-------------|-----------------|
+| `spawn_subagent` | Creates a child AI to work on a task in parallel | For tasks that can run independently (forensics research, file searches) |
+| `check_subagent` | Checks status and result of a subagent | To see if a parallel task is done |
+| `list_subagents` | Lists all spawned subagents | To track parallel work |
+| `wait_for_subagent` | Waits for a subagent to complete | When main agent needs subagent's result |
+| `cancel_subagent` | Cancels a running subagent | If task is no longer needed |
+
+> **How Sub-Agents Work**: The AI can spawn up to 4 parallel workers. Each subagent has full tool access and works independently. This enables faster completion - e.g., one agent handles forensics while another audits users.
+
+### General Tools
+
+| Tool | Description | When AI Uses It |
+|------|-------------|-----------------|
+| `run_command` | Runs any shell command (PowerShell/bash) | For anything not covered by specific tools |
+| `get_system_info` | Gets OS version, architecture, hostname | At start to determine which hardening steps to use |
+
+## MCP Server Integration
+
+IRONGUARD supports the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) for extending AI capabilities with external tools. MCP servers provide additional tools that the AI can use automatically.
+
+### Connecting MCP Servers
+
+```bash
+# Add a filesystem server (gives AI access to a specific directory)
+/mcp-add filesystem npx -y @modelcontextprotocol/server-filesystem /path/to/dir
+
+# Add Brave Search (web search capabilities)
+/mcp-add brave-search npx -y @anthropic/mcp-server-brave-search
+
+# Add GitHub integration
+/mcp-add github npx -y @anthropic/mcp-server-github
+
+# Add Puppeteer for browser automation
+/mcp-add puppeteer npx -y @anthropic/mcp-server-puppeteer
+```
+
+### Managing MCP Servers
+
+```bash
+# List connected servers and their tool counts
+/mcp-list
+
+# See all tools from a specific server
+/mcp-tools filesystem
+
+# See all MCP tools from all servers
+/mcp-tools
+
+# Disconnect a server
+/mcp-remove filesystem
+```
+
+### How MCP Tools Work
+
+When you connect an MCP server, its tools are automatically available to the AI:
+
+1. **Tool Discovery**: IRONGUARD queries the MCP server for available tools
+2. **Automatic Registration**: Tools appear as `serverName/toolName` (e.g., `filesystem/read_file`)
+3. **Seamless Integration**: AI can call MCP tools just like built-in tools
+4. **Confirmation Mode**: MCP tools respect your safety settings (`/confirm` vs `/autopilot`)
+
+### Popular MCP Servers
+
+| Server | Package | Description |
+|--------|---------|-------------|
+| Filesystem | `@modelcontextprotocol/server-filesystem` | Read/write files in specific directories |
+| Brave Search | `@anthropic/mcp-server-brave-search` | Web search via Brave |
+| GitHub | `@anthropic/mcp-server-github` | GitHub repository operations |
+| Puppeteer | `@anthropic/mcp-server-puppeteer` | Browser automation |
+| Slack | `@anthropic/mcp-server-slack` | Slack messaging |
+| Memory | `@anthropic/mcp-server-memory` | Persistent memory/notes |
+
+> **Note**: MCP servers require Node.js/npx to be installed. Most competition images don't have this, so MCP is primarily useful for practice/development.
+
+## Supported AI Models
+
+### Anthropic Claude (Default)
+- `claude-opus-4-5` - Most powerful (default)
+- `claude-sonnet-4-5` - Fast alternative
 
 ### OpenAI
 - `gpt-5.1` - Flagship model
 - `gpt-5.1-codex` - Optimized for coding
-- `gpt-5.1-codex-max` - Long-horizon coding
+- `gpt-5.1-codex-max` - Long-horizon tasks
 
 ### Google Gemini
 - `gemini-3-pro` - Latest flagship
@@ -214,6 +348,89 @@ chmod +x ironguard
 | `GEMINI_API_KEY` | API key for Gemini |
 | `GOOGLE_API_KEY` | Alternative for Gemini |
 
+## Building from Source
+
+```bash
+# Clone
+git clone https://github.com/tanav-malhotra/ironguard.git
+cd ironguard
+
+# Build for current platform
+go build -o ironguard ./cmd/ironguard
+
+# Cross-compile
+GOOS=windows GOARCH=amd64 go build -o ironguard.exe ./cmd/ironguard
+GOOS=linux GOARCH=amd64 go build -o ironguard ./cmd/ironguard
+```
+
+## Competition Day Checklist
+
+### Before Competition
+- [ ] Download ironguard binary to USB drive
+- [ ] Have API key ready (written down securely)
+- [ ] Test that ironguard runs on a practice image
+
+### On Each Image
+1. [ ] Copy ironguard to Desktop
+2. [ ] Run as **Administrator** (Windows) or **sudo** (Linux)
+3. [ ] `/key <your-api-key>`
+4. [ ] `/harden`
+5. [ ] Let AI work, help with GUI tasks if it asks
+6. [ ] Monitor score - should hit 100/100 in ~30 min
+
+### If Something Goes Wrong
+- **AI stuck?** → `/stop` then `/harden` to restart
+- **Score dropped?** → AI should auto-undo, but check manually
+- **Need to quit?** → `Ctrl+Q` or `/quit`
+- **AI not responding?** → Check API key with `/status`
+
+## How It Works
+
+IRONGUARD uses a sophisticated system prompt trained on:
+- Every past CyberPatriot scoring report
+- Official answer keys and walkthroughs
+- Vulnerability categories and point values
+- Common forensics question patterns
+
+When you run `/harden`, the AI:
+1. **Reconnaissance** (0-2 min): Reads README, forensics, checks initial score
+2. **Quick Wins** (2-10 min): Forensics answers, user fixes, firewall
+3. **Deep Hardening** (10-25 min): Services, policies, files, updates
+4. **Sweep** (25-30 min): Re-audit, verify all forensics, final checks
+
+The AI checks the score after every 2-3 actions and immediately undoes anything that causes a penalty.
+
+## UI Features (Claude Code Style)
+
+IRONGUARD's interface is inspired by Claude Code, with several advanced features:
+
+### Thinking Display
+When the AI is reasoning through a problem, you'll see its thinking process in a collapsible "💭 THINKING" section. This helps you understand what the AI is considering and why it makes certain decisions.
+
+### Sub-Agents Panel
+The sidebar shows active sub-agents with their current status:
+- ⏳ Running sub-agents show their current step
+- ✅ Completed sub-agents show result summaries
+- Maximum 4 concurrent sub-agents
+
+### Collapsible Tool Output
+Tool calls show as collapsed by default with a preview:
+```
+⚡ list_users [-] → Found 12 users
+```
+Expand to see full output. This keeps the chat clean during long operations.
+
+### Progress Indicators
+Long-running operations show progress bars and spinners. The sidebar displays:
+- Current score with delta (e.g., "87/100 (+5)")
+- AI status (Working/Ready)
+- Queue count for pending messages
+
+### Message Queue
+If the AI is busy, your messages are queued and sent automatically when ready:
+- **Enter**: Queue message (sends when AI is free)
+- **Ctrl+Enter**: Interrupt AI and send immediately
+
 ## License
 
 MIT License - see [LICENSE](LICENSE) for details.
@@ -226,3 +443,4 @@ Contributions welcome! Please open an issue or PR.
 
 **Good luck at CyberPatriot! 🏆**
 
+*Built by competitors, for competitors.*

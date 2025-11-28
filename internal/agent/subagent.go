@@ -4,54 +4,116 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/tanav-malhotra/ironguard/internal/config"
 	"github.com/tanav-malhotra/ironguard/internal/llm"
+	"github.com/tanav-malhotra/ironguard/internal/tools"
+)
+
+// SubAgentStatus represents the status of a subagent.
+type SubAgentStatus string
+
+const (
+	SubAgentStatusPending   SubAgentStatus = "pending"
+	SubAgentStatusRunning   SubAgentStatus = "running"
+	SubAgentStatusCompleted SubAgentStatus = "completed"
+	SubAgentStatusFailed    SubAgentStatus = "failed"
+	SubAgentStatusCancelled SubAgentStatus = "cancelled"
+)
+
+// SubAgentEvent represents an event from a subagent.
+type SubAgentEvent struct {
+	AgentID   string
+	Type      SubAgentEventType
+	Content   string
+	Tool      *ToolCallInfo
+	Thinking  string
+	Error     error
+}
+
+// SubAgentEventType represents the type of subagent event.
+type SubAgentEventType int
+
+const (
+	SubAgentEventStarted SubAgentEventType = iota
+	SubAgentEventThinking
+	SubAgentEventStreaming
+	SubAgentEventToolCall
+	SubAgentEventToolResult
+	SubAgentEventCompleted
+	SubAgentEventFailed
+	SubAgentEventCancelled
 )
 
 // SubAgent represents a child agent spawned for a specific task.
 type SubAgent struct {
-	ID          string
-	Task        string
-	Model       string
-	Provider    config.Provider
-	Status      string // "running", "completed", "failed", "cancelled"
-	Result      string
-	Error       string
-	StartedAt   time.Time
-	CompletedAt time.Time
+	ID           string
+	ParentID     string // ID of parent agent/subagent that spawned this
+	Task         string
+	SystemPrompt string
+	Model        string
+	Provider     config.Provider
+	Status       SubAgentStatus
+	Result       string
+	Error        string
+	StartedAt    time.Time
+	CompletedAt  time.Time
 	
-	client     llm.Client
-	cancelFunc context.CancelFunc
+	// Progress tracking
+	CurrentStep  string
+	StepsTotal   int
+	StepsDone    int
+	Thinking     string // Current thinking/reasoning
+	
+	// Tool execution history
+	ToolCalls    []ToolCallInfo
+	
+	// Internal
+	client       llm.Client
+	toolRegistry *tools.Registry
+	cancelFunc   context.CancelFunc
+	events       chan SubAgentEvent
+	messages     []llm.Message
+	mu           sync.Mutex
 }
 
 // SubAgentManager manages child agents.
 type SubAgentManager struct {
-	agents    map[string]*SubAgent
-	mu        sync.RWMutex
-	registry  *llm.Registry
-	maxAgents int
+	agents       map[string]*SubAgent
+	mu           sync.RWMutex
+	registry     *llm.Registry
+	toolRegistry *tools.Registry
+	maxAgents    int
+	events       chan SubAgentEvent // Global event channel for all subagent events
 }
 
 // NewSubAgentManager creates a new subagent manager.
-func NewSubAgentManager(registry *llm.Registry) *SubAgentManager {
+func NewSubAgentManager(llmRegistry *llm.Registry, toolRegistry *tools.Registry) *SubAgentManager {
 	return &SubAgentManager{
-		agents:    make(map[string]*SubAgent),
-		registry:  registry,
-		maxAgents: 4, // Max concurrent subagents
+		agents:       make(map[string]*SubAgent),
+		registry:     llmRegistry,
+		toolRegistry: toolRegistry,
+		maxAgents:    4, // Max concurrent subagents
+		events:       make(chan SubAgentEvent, 100),
 	}
 }
 
+// Events returns the event channel for listening to all subagent events.
+func (m *SubAgentManager) Events() <-chan SubAgentEvent {
+	return m.events
+}
+
 // SpawnSubAgent creates a new subagent for a specific task.
-func (m *SubAgentManager) SpawnSubAgent(ctx context.Context, task string, provider config.Provider, model string, systemPrompt string) (*SubAgent, error) {
+func (m *SubAgentManager) SpawnSubAgent(ctx context.Context, task string, systemPrompt string, opts ...SubAgentOption) (*SubAgent, error) {
 	m.mu.Lock()
 	
 	// Check max agents
 	runningCount := 0
 	for _, a := range m.agents {
-		if a.Status == "running" {
+		if a.Status == SubAgentStatusRunning {
 			runningCount++
 		}
 	}
@@ -60,66 +122,273 @@ func (m *SubAgentManager) SpawnSubAgent(ctx context.Context, task string, provid
 		return nil, fmt.Errorf("maximum concurrent subagents (%d) reached", m.maxAgents)
 	}
 	
-	// Get client for the specified provider
-	client, err := m.registry.Get(llm.Provider(provider))
-	if err != nil {
-		m.mu.Unlock()
-		return nil, fmt.Errorf("failed to get client for provider %s: %w", provider, err)
-	}
-	
-	// Create subagent
-	id := fmt.Sprintf("subagent_%d", time.Now().UnixNano())
+	// Create subagent with defaults
+	id := fmt.Sprintf("sub_%d", time.Now().UnixNano()%100000)
 	subCtx, cancel := context.WithCancel(ctx)
 	
 	agent := &SubAgent{
-		ID:         id,
-		Task:       task,
-		Model:      model,
-		Provider:   provider,
-		Status:     "running",
-		StartedAt:  time.Now(),
-		client:     client,
-		cancelFunc: cancel,
+		ID:           id,
+		Task:         task,
+		SystemPrompt: systemPrompt,
+		Provider:     config.ProviderAnthropic,
+		Model:        "claude-sonnet-4-5", // Use faster model for subagents
+		Status:       SubAgentStatusPending,
+		StartedAt:    time.Now(),
+		toolRegistry: m.toolRegistry,
+		cancelFunc:   cancel,
+		events:       make(chan SubAgentEvent, 50),
+		messages:     []llm.Message{},
+		ToolCalls:    []ToolCallInfo{},
 	}
+	
+	// Apply options
+	for _, opt := range opts {
+		opt(agent)
+	}
+	
+	// Get client for the specified provider
+	client, err := m.registry.Get(llm.Provider(agent.Provider))
+	if err != nil {
+		m.mu.Unlock()
+		cancel()
+		return nil, fmt.Errorf("failed to get client for provider %s: %w", agent.Provider, err)
+	}
+	agent.client = client
 	
 	m.agents[id] = agent
 	m.mu.Unlock()
 	
 	// Run the subagent in background
-	go func() {
-		result, err := m.runSubAgent(subCtx, agent, systemPrompt)
-		
-		m.mu.Lock()
-		agent.CompletedAt = time.Now()
-		if err != nil {
-			agent.Status = "failed"
-			agent.Error = err.Error()
-		} else {
-			agent.Status = "completed"
-			agent.Result = result
-		}
-		m.mu.Unlock()
-	}()
+	go m.runSubAgent(subCtx, agent)
 	
 	return agent, nil
 }
 
-// runSubAgent executes the subagent's task.
-func (m *SubAgentManager) runSubAgent(ctx context.Context, agent *SubAgent, systemPrompt string) (string, error) {
-	req := llm.ChatRequest{
-		Messages: []llm.Message{
-			{Role: "user", Content: agent.Task},
-		},
-		SystemPrompt: systemPrompt,
-		MaxTokens:    4096,
+// SubAgentOption configures a subagent.
+type SubAgentOption func(*SubAgent)
+
+// WithProvider sets the provider for the subagent.
+func WithProvider(p config.Provider) SubAgentOption {
+	return func(a *SubAgent) {
+		a.Provider = p
+	}
+}
+
+// WithModel sets the model for the subagent.
+func WithModel(model string) SubAgentOption {
+	return func(a *SubAgent) {
+		a.Model = model
+	}
+}
+
+// WithParent sets the parent ID for the subagent.
+func WithParent(parentID string) SubAgentOption {
+	return func(a *SubAgent) {
+		a.ParentID = parentID
+	}
+}
+
+// runSubAgent executes the subagent's task with full tool support.
+func (m *SubAgentManager) runSubAgent(ctx context.Context, agent *SubAgent) {
+	agent.mu.Lock()
+	agent.Status = SubAgentStatusRunning
+	agent.mu.Unlock()
+	
+	// Emit started event
+	m.emitEvent(SubAgentEvent{
+		AgentID: agent.ID,
+		Type:    SubAgentEventStarted,
+		Content: agent.Task,
+	})
+	
+	// Add initial user message
+	agent.messages = append(agent.messages, llm.Message{
+		Role:    "user",
+		Content: agent.Task,
+	})
+	
+	// Build tool definitions
+	var llmTools []llm.Tool
+	for _, t := range agent.toolRegistry.All() {
+		// Skip certain tools for subagents (like spawning more subagents)
+		if t.Name == "spawn_subagent" {
+			continue
+		}
+		llmTools = append(llmTools, llm.Tool{
+			Name:        t.Name,
+			Description: t.Description,
+			Parameters:  t.Parameters,
+		})
 	}
 	
-	resp, err := agent.client.Chat(ctx, req)
-	if err != nil {
-		return "", err
+	// Conversation loop
+	maxIterations := 20 // Prevent infinite loops
+	for i := 0; i < maxIterations; i++ {
+		select {
+		case <-ctx.Done():
+			agent.mu.Lock()
+			agent.Status = SubAgentStatusCancelled
+			agent.CompletedAt = time.Now()
+			agent.mu.Unlock()
+			m.emitEvent(SubAgentEvent{
+				AgentID: agent.ID,
+				Type:    SubAgentEventCancelled,
+			})
+			return
+		default:
+		}
+		
+		// Call LLM
+		req := llm.ChatRequest{
+			Messages:     agent.messages,
+			Tools:        llmTools,
+			SystemPrompt: agent.SystemPrompt,
+			MaxTokens:    4096,
+		}
+		
+		var contentBuilder strings.Builder
+		var toolCalls []llm.ToolCall
+		var thinkingContent string
+		
+		err := agent.client.ChatStream(ctx, req, func(delta llm.StreamDelta) {
+			if delta.Error != nil {
+				return
+			}
+			if delta.Content != "" {
+				contentBuilder.WriteString(delta.Content)
+				m.emitEvent(SubAgentEvent{
+					AgentID: agent.ID,
+					Type:    SubAgentEventStreaming,
+					Content: delta.Content,
+				})
+			}
+			if delta.Thinking != "" {
+				thinkingContent += delta.Thinking
+				agent.mu.Lock()
+				agent.Thinking = thinkingContent
+				agent.mu.Unlock()
+				m.emitEvent(SubAgentEvent{
+					AgentID:  agent.ID,
+					Type:     SubAgentEventThinking,
+					Thinking: delta.Thinking,
+				})
+			}
+			if len(delta.ToolCalls) > 0 {
+				toolCalls = delta.ToolCalls
+			}
+		})
+		
+		if err != nil {
+			agent.mu.Lock()
+			agent.Status = SubAgentStatusFailed
+			agent.Error = err.Error()
+			agent.CompletedAt = time.Now()
+			agent.mu.Unlock()
+			m.emitEvent(SubAgentEvent{
+				AgentID: agent.ID,
+				Type:    SubAgentEventFailed,
+				Error:   err,
+			})
+			return
+		}
+		
+		// Add assistant response to history
+		assistantMsg := llm.Message{
+			Role:      "assistant",
+			Content:   contentBuilder.String(),
+			ToolCalls: toolCalls,
+		}
+		agent.messages = append(agent.messages, assistantMsg)
+		
+		// If no tool calls, we're done
+		if len(toolCalls) == 0 {
+			agent.mu.Lock()
+			agent.Status = SubAgentStatusCompleted
+			agent.Result = contentBuilder.String()
+			agent.CompletedAt = time.Now()
+			agent.mu.Unlock()
+			m.emitEvent(SubAgentEvent{
+				AgentID: agent.ID,
+				Type:    SubAgentEventCompleted,
+				Content: agent.Result,
+			})
+			return
+		}
+		
+		// Process tool calls
+		for _, tc := range toolCalls {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+			
+			toolInfo := ToolCallInfo{
+				ID:        tc.ID,
+				Name:      tc.Name,
+				Arguments: string(tc.Arguments),
+			}
+			
+			m.emitEvent(SubAgentEvent{
+				AgentID: agent.ID,
+				Type:    SubAgentEventToolCall,
+				Tool:    &toolInfo,
+			})
+			
+			// Execute tool
+			agent.mu.Lock()
+			agent.CurrentStep = fmt.Sprintf("Running %s...", tc.Name)
+			agent.mu.Unlock()
+			
+			output, err := agent.toolRegistry.Execute(ctx, tc.Name, tc.Arguments)
+			if err != nil {
+				toolInfo.Error = err.Error()
+				output = fmt.Sprintf("Error: %s", err.Error())
+			}
+			toolInfo.Output = output
+			
+			// Track tool call
+			agent.mu.Lock()
+			agent.ToolCalls = append(agent.ToolCalls, toolInfo)
+			agent.StepsDone++
+			agent.mu.Unlock()
+			
+			m.emitEvent(SubAgentEvent{
+				AgentID: agent.ID,
+				Type:    SubAgentEventToolResult,
+				Tool:    &toolInfo,
+			})
+			
+			// Add tool result to messages
+			agent.messages = append(agent.messages, llm.Message{
+				Role:       "tool",
+				Content:    output,
+				ToolCallID: tc.ID,
+				Name:       tc.Name,
+			})
+		}
 	}
 	
-	return resp.Content, nil
+	// Max iterations reached
+	agent.mu.Lock()
+	agent.Status = SubAgentStatusCompleted
+	agent.Result = "Task completed (max iterations reached)"
+	agent.CompletedAt = time.Now()
+	agent.mu.Unlock()
+	m.emitEvent(SubAgentEvent{
+		AgentID: agent.ID,
+		Type:    SubAgentEventCompleted,
+		Content: agent.Result,
+	})
+}
+
+// emitEvent sends an event to the global channel.
+func (m *SubAgentManager) emitEvent(event SubAgentEvent) {
+	select {
+	case m.events <- event:
+	default:
+		// Channel full, drop event
+	}
 }
 
 // GetSubAgent returns a subagent by ID.
@@ -142,6 +411,20 @@ func (m *SubAgentManager) ListSubAgents() []*SubAgent {
 	return agents
 }
 
+// ListRunningSubAgents returns only running subagents.
+func (m *SubAgentManager) ListRunningSubAgents() []*SubAgent {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	
+	var agents []*SubAgent
+	for _, a := range m.agents {
+		if a.Status == SubAgentStatusRunning {
+			agents = append(agents, a)
+		}
+	}
+	return agents
+}
+
 // CancelSubAgent cancels a running subagent.
 func (m *SubAgentManager) CancelSubAgent(id string) error {
 	m.mu.Lock()
@@ -152,14 +435,24 @@ func (m *SubAgentManager) CancelSubAgent(id string) error {
 		return fmt.Errorf("subagent %s not found", id)
 	}
 	
-	if agent.Status != "running" {
-		return fmt.Errorf("subagent %s is not running", id)
+	if agent.Status != SubAgentStatusRunning {
+		return fmt.Errorf("subagent %s is not running (status: %s)", id, agent.Status)
 	}
 	
 	agent.cancelFunc()
-	agent.Status = "cancelled"
-	agent.CompletedAt = time.Now()
 	return nil
+}
+
+// CancelAllSubAgents cancels all running subagents.
+func (m *SubAgentManager) CancelAllSubAgents() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	
+	for _, agent := range m.agents {
+		if agent.Status == SubAgentStatusRunning {
+			agent.cancelFunc()
+		}
+	}
 }
 
 // WaitForSubAgent waits for a subagent to complete.
@@ -176,125 +469,90 @@ func (m *SubAgentManager) WaitForSubAgent(ctx context.Context, id string) (*SubA
 			if !ok {
 				return nil, fmt.Errorf("subagent %s not found", id)
 			}
-			if agent.Status != "running" {
+			if agent.Status != SubAgentStatusRunning && agent.Status != SubAgentStatusPending {
 				return agent, nil
 			}
 		}
 	}
 }
 
+// WaitForAllSubAgents waits for all subagents to complete.
+func (m *SubAgentManager) WaitForAllSubAgents(ctx context.Context) error {
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			running := m.ListRunningSubAgents()
+			if len(running) == 0 {
+				return nil
+			}
+		}
+	}
+}
+
+// CleanupCompleted removes completed/failed/cancelled subagents.
+func (m *SubAgentManager) CleanupCompleted() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	
+	count := 0
+	for id, agent := range m.agents {
+		if agent.Status != SubAgentStatusRunning && agent.Status != SubAgentStatusPending {
+			delete(m.agents, id)
+			count++
+		}
+	}
+	return count
+}
+
 // SubAgentResult is returned when checking subagent status.
 type SubAgentResult struct {
-	ID        string `json:"id"`
-	Task      string `json:"task"`
-	Status    string `json:"status"`
-	Result    string `json:"result,omitempty"`
-	Error     string `json:"error,omitempty"`
-	Duration  string `json:"duration,omitempty"`
+	ID          string        `json:"id"`
+	Task        string        `json:"task"`
+	Status      string        `json:"status"`
+	Result      string        `json:"result,omitempty"`
+	Error       string        `json:"error,omitempty"`
+	Duration    string        `json:"duration,omitempty"`
+	CurrentStep string        `json:"current_step,omitempty"`
+	StepsDone   int           `json:"steps_done"`
+	ToolCalls   int           `json:"tool_calls"`
+	Thinking    string        `json:"thinking,omitempty"`
 }
 
 // ToResult converts a SubAgent to a SubAgentResult.
 func (a *SubAgent) ToResult() SubAgentResult {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	
 	result := SubAgentResult{
-		ID:     a.ID,
-		Task:   a.Task,
-		Status: a.Status,
-		Result: a.Result,
-		Error:  a.Error,
+		ID:          a.ID,
+		Task:        a.Task,
+		Status:      string(a.Status),
+		Result:      a.Result,
+		Error:       a.Error,
+		CurrentStep: a.CurrentStep,
+		StepsDone:   a.StepsDone,
+		ToolCalls:   len(a.ToolCalls),
+	}
+	
+	// Truncate thinking for display
+	if len(a.Thinking) > 200 {
+		result.Thinking = a.Thinking[:200] + "..."
+	} else {
+		result.Thinking = a.Thinking
 	}
 	
 	if !a.CompletedAt.IsZero() {
-		result.Duration = a.CompletedAt.Sub(a.StartedAt).String()
-	} else if a.Status == "running" {
-		result.Duration = time.Since(a.StartedAt).String() + " (running)"
+		result.Duration = a.CompletedAt.Sub(a.StartedAt).Round(time.Millisecond).String()
+	} else if a.Status == SubAgentStatusRunning {
+		result.Duration = time.Since(a.StartedAt).Round(time.Millisecond).String() + " (running)"
 	}
 	
 	return result
-}
-
-// RegisterSubAgentTools adds tools for spawning and managing subagents.
-func RegisterSubAgentTools(registry interface{ Register(t interface{}) }, manager *SubAgentManager, allowedProviders []config.Provider) {
-	// Note: This is a placeholder - actual registration would need the tools.Registry type
-	// The tools will be registered in the tools package
-}
-
-// SubAgentToolsJSON returns the JSON schema for subagent tools.
-func SubAgentToolsJSON() []map[string]interface{} {
-	return []map[string]interface{}{
-		{
-			"name":        "spawn_subagent",
-			"description": "Spawn a child AI agent to work on a specific task in parallel. The subagent will work independently and report back when done. Use this for tasks that can be done in parallel.",
-			"parameters": map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"task": map[string]interface{}{
-						"type":        "string",
-						"description": "The task for the subagent to complete",
-					},
-					"provider": map[string]interface{}{
-						"type":        "string",
-						"enum":        []string{"claude", "openai", "gemini"},
-						"description": "Which AI provider to use (default: same as parent)",
-					},
-					"model": map[string]interface{}{
-						"type":        "string",
-						"description": "Which model to use (default: provider's default)",
-					},
-				},
-				"required": []string{"task"},
-			},
-		},
-		{
-			"name":        "check_subagent",
-			"description": "Check the status and result of a spawned subagent.",
-			"parameters": map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"id": map[string]interface{}{
-						"type":        "string",
-						"description": "The subagent ID to check",
-					},
-				},
-				"required": []string{"id"},
-			},
-		},
-		{
-			"name":        "list_subagents",
-			"description": "List all spawned subagents and their status.",
-			"parameters": map[string]interface{}{
-				"type":       "object",
-				"properties": map[string]interface{}{},
-			},
-		},
-		{
-			"name":        "cancel_subagent",
-			"description": "Cancel a running subagent.",
-			"parameters": map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"id": map[string]interface{}{
-						"type":        "string",
-						"description": "The subagent ID to cancel",
-					},
-				},
-				"required": []string{"id"},
-			},
-		},
-		{
-			"name":        "wait_for_subagent",
-			"description": "Wait for a subagent to complete and get its result.",
-			"parameters": map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"id": map[string]interface{}{
-						"type":        "string",
-						"description": "The subagent ID to wait for",
-					},
-				},
-				"required": []string{"id"},
-			},
-		},
-	}
 }
 
 // FormatSubAgentList formats a list of subagents for display.
@@ -303,28 +561,38 @@ func FormatSubAgentList(agents []*SubAgent) string {
 		return "No subagents spawned."
 	}
 	
-	result := "🤖 SUBAGENTS:\n"
+	var sb strings.Builder
+	sb.WriteString("🤖 SUBAGENTS:\n")
+	
 	for _, a := range agents {
+		result := a.ToResult()
+		
 		statusIcon := map[string]string{
+			"pending":   "⏸️",
 			"running":   "⏳",
 			"completed": "✅",
 			"failed":    "❌",
 			"cancelled": "⏹️",
-		}[a.Status]
+		}[result.Status]
 		
-		result += fmt.Sprintf("  %s %s [%s/%s]\n", statusIcon, a.ID, a.Provider, a.Model)
-		result += fmt.Sprintf("     Task: %s\n", truncateString(a.Task, 60))
-		result += fmt.Sprintf("     Status: %s\n", a.Status)
+		sb.WriteString(fmt.Sprintf("\n  %s %s\n", statusIcon, result.ID))
+		sb.WriteString(fmt.Sprintf("     Task: %s\n", truncateString(result.Task, 60)))
+		sb.WriteString(fmt.Sprintf("     Status: %s | Duration: %s | Tools: %d\n", 
+			result.Status, result.Duration, result.ToolCalls))
 		
-		if a.Status == "completed" && a.Result != "" {
-			result += fmt.Sprintf("     Result: %s\n", truncateString(a.Result, 100))
+		if result.CurrentStep != "" && result.Status == "running" {
+			sb.WriteString(fmt.Sprintf("     Current: %s\n", result.CurrentStep))
 		}
-		if a.Status == "failed" && a.Error != "" {
-			result += fmt.Sprintf("     Error: %s\n", a.Error)
+		
+		if result.Status == "completed" && result.Result != "" {
+			sb.WriteString(fmt.Sprintf("     Result: %s\n", truncateString(result.Result, 100)))
+		}
+		if result.Status == "failed" && result.Error != "" {
+			sb.WriteString(fmt.Sprintf("     Error: %s\n", result.Error))
 		}
 	}
 	
-	return result
+	return sb.String()
 }
 
 func truncateString(s string, max int) string {
@@ -338,4 +606,3 @@ func truncateString(s string, max int) string {
 func (a *SubAgent) MarshalJSON() ([]byte, error) {
 	return json.Marshal(a.ToResult())
 }
-

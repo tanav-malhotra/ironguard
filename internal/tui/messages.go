@@ -26,6 +26,13 @@ type Message struct {
 
 	// For streaming
 	IsStreaming bool
+
+	// For AI thinking/reasoning display
+	Thinking        string
+	ThinkingVisible bool // Whether thinking is expanded
+
+	// For collapsible output
+	Collapsed bool
 }
 
 // NewUserMessage creates a user message.

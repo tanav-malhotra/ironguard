@@ -108,6 +108,7 @@ type claudeDelta struct {
 	Type        string `json:"type"`
 	Text        string `json:"text,omitempty"`
 	PartialJSON string `json:"partial_json,omitempty"`
+	Thinking    string `json:"thinking,omitempty"` // For thinking blocks
 }
 
 func (c *ClaudeClient) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
@@ -184,6 +185,7 @@ func (c *ClaudeClient) ChatStream(ctx context.Context, req ChatRequest, callback
 	var currentToolCalls []ToolCall
 	var toolInputBuffer strings.Builder
 	var currentToolIndex int = -1
+	var isThinkingBlock bool = false
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -204,13 +206,21 @@ func (c *ClaudeClient) ChatStream(ctx context.Context, req ChatRequest, callback
 
 		switch event.Type {
 		case "content_block_start":
-			if event.ContentBlock != nil && event.ContentBlock.Type == "tool_use" {
-				currentToolIndex = event.Index
-				currentToolCalls = append(currentToolCalls, ToolCall{
-					ID:   event.ContentBlock.ID,
-					Name: event.ContentBlock.Name,
-				})
-				toolInputBuffer.Reset()
+			if event.ContentBlock != nil {
+				switch event.ContentBlock.Type {
+				case "tool_use":
+					currentToolIndex = event.Index
+					currentToolCalls = append(currentToolCalls, ToolCall{
+						ID:   event.ContentBlock.ID,
+						Name: event.ContentBlock.Name,
+					})
+					toolInputBuffer.Reset()
+					isThinkingBlock = false
+				case "thinking":
+					isThinkingBlock = true
+				default:
+					isThinkingBlock = false
+				}
 			}
 
 		case "content_block_delta":
@@ -218,6 +228,9 @@ func (c *ClaudeClient) ChatStream(ctx context.Context, req ChatRequest, callback
 				switch event.Delta.Type {
 				case "text_delta":
 					callback(StreamDelta{Content: event.Delta.Text})
+				case "thinking_delta":
+					// Stream thinking content
+					callback(StreamDelta{Thinking: event.Delta.Thinking})
 				case "input_json_delta":
 					toolInputBuffer.WriteString(event.Delta.PartialJSON)
 				}
@@ -228,12 +241,14 @@ func (c *ClaudeClient) ChatStream(ctx context.Context, req ChatRequest, callback
 				currentToolCalls[currentToolIndex].Arguments = json.RawMessage(toolInputBuffer.String())
 				currentToolIndex = -1
 			}
+			isThinkingBlock = false
 
 		case "message_stop":
 			callback(StreamDelta{Done: true, ToolCalls: currentToolCalls})
 			return nil
 		}
 	}
+	_ = isThinkingBlock // Suppress unused warning
 
 	if err := scanner.Err(); err != nil {
 		return fmt.Errorf("stream error: %w", err)

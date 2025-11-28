@@ -25,14 +25,30 @@ const (
 	EventConfirmRequired
 	EventError
 	EventStatusUpdate
+	EventThinking        // AI is showing its reasoning
+	EventSubAgentSpawned // A subagent was spawned
+	EventSubAgentUpdate  // Subagent status changed
+	EventScoreUpdate     // Score changed
 )
 
 // Event is sent from the agent to the TUI.
 type Event struct {
-	Type    EventType
-	Content string
-	Tool    *ToolCallInfo
-	Error   error
+	Type     EventType
+	Content  string
+	Tool     *ToolCallInfo
+	Error    error
+	Thinking string       // For EventThinking
+	SubAgent *SubAgentInfo // For EventSubAgentSpawned/Update
+	Score    int          // For EventScoreUpdate
+}
+
+// SubAgentInfo contains information about a subagent for events.
+type SubAgentInfo struct {
+	ID          string
+	Task        string
+	Status      string
+	Result      string
+	CurrentStep string
 }
 
 // ToolCallInfo contains information about a tool call.
@@ -75,17 +91,32 @@ type Agent struct {
 	autonomousMode bool
 	targetScore    int
 	currentScore   int
+
+	// Subagent management
+	subAgentManager *SubAgentManager
 }
 
 // New creates a new agent.
 func New(cfg *config.Config) *Agent {
-	return &Agent{
+	llmReg := llm.NewRegistry()
+	toolReg := tools.NewRegistry()
+	
+	a := &Agent{
 		cfg:          cfg,
-		llmRegistry:  llm.NewRegistry(),
-		toolRegistry: tools.NewRegistry(),
+		llmRegistry:  llmReg,
+		toolRegistry: toolReg,
 		events:       make(chan Event, 100),
 		confirms:     make(chan ConfirmResponse, 10),
 	}
+	
+	// Initialize subagent manager
+	a.subAgentManager = NewSubAgentManager(llmReg, toolReg)
+	
+	// Register subagent manager with tools package
+	adapter := NewSubAgentManagerAdapter(a.subAgentManager)
+	tools.SetSubAgentManager(adapter)
+	
+	return a
 }
 
 // Events returns the event channel for TUI to listen on.
@@ -108,6 +139,34 @@ func (a *Agent) IsBusy() bool {
 	return a.busy
 }
 
+// SubAgentSummary is a simplified view of a subagent for the TUI.
+type SubAgentSummary struct {
+	ID          string
+	Status      string
+	CurrentStep string
+	Task        string
+}
+
+// GetSubAgents returns summaries of all subagents.
+func (a *Agent) GetSubAgents() []SubAgentSummary {
+	if a.subAgentManager == nil {
+		return nil
+	}
+	
+	subAgents := a.subAgentManager.ListSubAgents()
+	summaries := make([]SubAgentSummary, len(subAgents))
+	for i, sa := range subAgents {
+		result := sa.ToResult()
+		summaries[i] = SubAgentSummary{
+			ID:          result.ID,
+			Status:      result.Status,
+			CurrentStep: result.CurrentStep,
+			Task:        result.Task,
+		}
+	}
+	return summaries
+}
+
 // SetAPIKey sets the API key for a provider.
 func (a *Agent) SetAPIKey(provider string, key string) error {
 	return a.llmRegistry.SetAPIKey(llm.Provider(provider), key)
@@ -123,6 +182,11 @@ func (a *Agent) Cancel() {
 	if a.cancel != nil {
 		a.cancel()
 	}
+}
+
+// SetMCPManager sets the MCP manager for external tool support.
+func (a *Agent) SetMCPManager(m tools.MCPManager) {
+	a.toolRegistry.SetMCPManager(m)
 }
 
 // Chat sends a user message and processes the response.

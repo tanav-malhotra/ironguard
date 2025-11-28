@@ -81,6 +81,7 @@ type StreamDelta struct {
 	ToolCalls []ToolCall
 	Done      bool
 	Error     error
+	Thinking  string // Extended thinking/reasoning content
 }
 
 // Client is the interface for LLM providers.

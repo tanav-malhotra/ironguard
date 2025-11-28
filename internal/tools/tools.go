@@ -26,7 +26,41 @@ type ToolHandler func(ctx context.Context, args json.RawMessage) (string, error)
 
 // Registry holds all available tools.
 type Registry struct {
-	tools map[string]*Tool
+	tools      map[string]*Tool
+	mcpManager MCPManager // Optional MCP manager for external tools
+}
+
+// MCPManager interface for MCP tool integration.
+// Implemented by mcp.Manager.
+type MCPManager interface {
+	AllTools() []MCPToolInfo
+	CallToolByFullName(ctx context.Context, fullName string, argsJSON json.RawMessage) (string, error)
+	ListServers() []string
+}
+
+// MCPToolInfo represents a tool from an MCP server.
+type MCPToolInfo struct {
+	ServerName  string
+	Name        string
+	FullName    string
+	Description string
+	InputSchema map[string]interface{}
+}
+
+// MCPToolCount returns the number of MCP tools available.
+func (r *Registry) MCPToolCount() int {
+	if r.mcpManager == nil {
+		return 0
+	}
+	return len(r.mcpManager.AllTools())
+}
+
+// MCPServers returns the list of connected MCP server names.
+func (r *Registry) MCPServers() []string {
+	if r.mcpManager == nil {
+		return nil
+	}
+	return r.mcpManager.ListServers()
 }
 
 // NewRegistry creates a new tool registry with default tools.
@@ -42,6 +76,7 @@ func NewRegistry() *Registry {
 	r.RegisterScreenshotTools()     // Add screenshot and image tools
 	r.RegisterDesktopControlTools() // Add mouse/keyboard control for full desktop interaction
 	r.RegisterAITodoTools()         // Add AI todo list management
+	r.RegisterSubAgentTools()       // Add subagent spawning and management
 	return r
 }
 
@@ -56,13 +91,36 @@ func (r *Registry) Get(name string) (*Tool, bool) {
 	return t, ok
 }
 
-// All returns all registered tools.
+// All returns all registered tools (including MCP tools).
 func (r *Registry) All() []*Tool {
 	var tools []*Tool
 	for _, t := range r.tools {
 		tools = append(tools, t)
 	}
+
+	// Add MCP tools if available
+	if r.mcpManager != nil {
+		for _, mcpTool := range r.mcpManager.AllTools() {
+			tools = append(tools, &Tool{
+				Name:        mcpTool.FullName,
+				Description: fmt.Sprintf("[MCP:%s] %s", mcpTool.ServerName, mcpTool.Description),
+				Parameters:  mcpTool.InputSchema,
+				Mutating:    true, // Assume MCP tools are mutating for safety
+			})
+		}
+	}
+
 	return tools
+}
+
+// SetMCPManager sets the MCP manager for external tool support.
+func (r *Registry) SetMCPManager(m MCPManager) {
+	r.mcpManager = m
+}
+
+// GetMCPManager returns the current MCP manager.
+func (r *Registry) GetMCPManager() MCPManager {
+	return r.mcpManager
 }
 
 // ToLLMTools converts the registry to LLM tool definitions.
@@ -81,10 +139,20 @@ func (r *Registry) ToLLMTools() []map[string]interface{} {
 // Execute runs a tool by name with the given arguments.
 func (r *Registry) Execute(ctx context.Context, name string, args json.RawMessage) (string, error) {
 	tool, ok := r.tools[name]
-	if !ok {
-		return "", fmt.Errorf("unknown tool: %s", name)
+	if ok {
+		return tool.Handler(ctx, args)
 	}
-	return tool.Handler(ctx, args)
+
+	// Check if it's an MCP tool (format: serverName/toolName)
+	if r.mcpManager != nil {
+		for _, mcpTool := range r.mcpManager.AllTools() {
+			if mcpTool.FullName == name {
+				return r.mcpManager.CallToolByFullName(ctx, name, args)
+			}
+		}
+	}
+
+	return "", fmt.Errorf("unknown tool: %s", name)
 }
 
 // IsMutating returns true if the tool modifies system state.

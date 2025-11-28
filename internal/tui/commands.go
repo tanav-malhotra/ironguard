@@ -201,6 +201,30 @@ func (r *CommandRegistry) registerDefaults() {
 			Args:        "<window title>",
 			Handler:     cmdFocusWindow,
 		},
+		// MCP server commands
+		{
+			Name:        "mcp-add",
+			Description: "Add and connect to an MCP server",
+			Args:        "<name> <command> [args...]",
+			Handler:     cmdMCPAdd,
+		},
+		{
+			Name:        "mcp-remove",
+			Description: "Disconnect and remove an MCP server",
+			Args:        "<name>",
+			Handler:     cmdMCPRemove,
+		},
+		{
+			Name:        "mcp-list",
+			Description: "List connected MCP servers and their tools",
+			Handler:     cmdMCPList,
+		},
+		{
+			Name:        "mcp-tools",
+			Description: "List all tools from a specific MCP server",
+			Args:        "<server-name>",
+			Handler:     cmdMCPTools,
+		},
 	}
 }
 
@@ -381,12 +405,45 @@ func cmdRun(m *model, args string) string {
 	return "Running command..."
 }
 
-func cmdHarden(m *model, _ string) string {
-	m.pendingAction = &PendingAction{
-		Type:        ActionHarden,
-		Description: "Start hardening assistant",
+func cmdHarden(m *model, args string) string {
+	// /harden is an alias for /auto 100 - full autonomous mode
+	// The AI will automatically:
+	// 1. Read the README to understand authorized users/services
+	// 2. Read and answer forensics questions
+	// 3. Fix all vulnerabilities autonomously
+	// 4. Check score after each action
+	// 5. Continue until 100/100 is reached
+
+	targetScore := 100
+	if args != "" {
+		if _, err := fmt.Sscanf(args, "%d", &targetScore); err != nil {
+			return "Usage: /harden [target-score]\nExample: /harden 100"
+		}
 	}
-	return "Starting hardening assistant..."
+
+	if m.apiKeys[string(m.cfg.Provider)] == "" {
+		return "⚠️ Set your API key first with /key <api-key>"
+	}
+
+	m.pendingAction = &PendingAction{
+		Type:        ActionAuto,
+		Description: fmt.Sprintf("Start autonomous hardening (target: %d pts)", targetScore),
+		Args:        fmt.Sprintf("%d", targetScore),
+	}
+	return fmt.Sprintf(`🛡️ IRONGUARD AUTONOMOUS HARDENING ACTIVATED
+
+Target: %d/100 points
+
+The AI will now AUTOMATICALLY:
+  ✓ Read the README (authorized users, services, restrictions)
+  ✓ Read and answer forensics questions (easy points!)
+  ✓ Delete unauthorized users
+  ✓ Fix security vulnerabilities
+  ✓ Check score after each action
+  ✓ Continue until target reached
+
+Use /stop to cancel at any time.
+Ctrl+C also pauses the AI (doesn't quit the app).`, targetScore)
 }
 
 func cmdKey(m *model, args string) string {
@@ -619,6 +676,8 @@ const (
 	ActionHotkey
 	ActionListWindows
 	ActionFocusWindow
+	ActionMCPAdd
+	ActionMCPRemove
 )
 
 // PendingAction represents an action waiting to be executed.
@@ -626,4 +685,165 @@ type PendingAction struct {
 	Type        ActionType
 	Description string
 	Args        string
+}
+
+// MCP command handlers
+
+func cmdMCPAdd(m *model, args string) string {
+	if args == "" {
+		return `Usage: /mcp-add <name> <command> [args...]
+Examples:
+  /mcp-add filesystem npx -y @modelcontextprotocol/server-filesystem /path/to/dir
+  /mcp-add brave-search npx -y @anthropic/mcp-server-brave-search
+  /mcp-add github npx -y @anthropic/mcp-server-github`
+	}
+
+	// Parse args: first word is name, rest is command
+	parts := splitArgs(args)
+	if len(parts) < 2 {
+		return "Error: Need at least a name and command.\nUsage: /mcp-add <name> <command> [args...]"
+	}
+
+	name := parts[0]
+	command := parts[1]
+	cmdArgs := []string{}
+	if len(parts) > 2 {
+		cmdArgs = parts[2:]
+	}
+
+	m.pendingAction = &PendingAction{
+		Type:        ActionMCPAdd,
+		Description: fmt.Sprintf("Connect to MCP server: %s (%s)", name, command),
+		Args:        fmt.Sprintf("%s|%s|%s", name, command, joinArgs(cmdArgs)),
+	}
+	return fmt.Sprintf("🔌 Connecting to MCP server '%s'...", name)
+}
+
+func cmdMCPRemove(m *model, args string) string {
+	if args == "" {
+		return "Usage: /mcp-remove <server-name>\nUse /mcp-list to see connected servers."
+	}
+
+	m.pendingAction = &PendingAction{
+		Type:        ActionMCPRemove,
+		Description: fmt.Sprintf("Disconnect MCP server: %s", args),
+		Args:        args,
+	}
+	return fmt.Sprintf("🔌 Disconnecting MCP server '%s'...", args)
+}
+
+func cmdMCPList(m *model, _ string) string {
+	if m.mcpManager == nil {
+		return "No MCP manager configured. MCP servers are not available."
+	}
+
+	servers := m.mcpManager.ListServers()
+	if len(servers) == 0 {
+		return `No MCP servers connected.
+
+Add servers with /mcp-add:
+  /mcp-add filesystem npx -y @modelcontextprotocol/server-filesystem /path
+  /mcp-add brave-search npx -y @anthropic/mcp-server-brave-search
+  /mcp-add github npx -y @anthropic/mcp-server-github`
+	}
+
+	result := "Connected MCP Servers:\n"
+	for _, name := range servers {
+		info, err := m.mcpManager.GetServerInfo(name)
+		if err != nil {
+			result += fmt.Sprintf("  • %s (error: %s)\n", name, err)
+			continue
+		}
+		result += fmt.Sprintf("  • %s - %d tools\n", info.Name, info.ToolCount)
+	}
+
+	totalTools := 0
+	for _, t := range m.mcpManager.AllTools() {
+		_ = t
+		totalTools++
+	}
+	result += fmt.Sprintf("\nTotal MCP tools available: %d", totalTools)
+	result += "\nUse /mcp-tools <server-name> to see tools from a specific server."
+
+	return result
+}
+
+func cmdMCPTools(m *model, args string) string {
+	if m.mcpManager == nil {
+		return "No MCP manager configured."
+	}
+
+	if args == "" {
+		// List all tools from all servers
+		allTools := m.mcpManager.AllTools()
+		if len(allTools) == 0 {
+			return "No MCP tools available. Connect servers with /mcp-add first."
+		}
+
+		result := "All MCP Tools:\n"
+		for _, tool := range allTools {
+			result += fmt.Sprintf("  • %s - %s\n", tool.FullName, truncateString(tool.Description, 60))
+		}
+		return result
+	}
+
+	// List tools from specific server
+	info, err := m.mcpManager.GetServerInfo(args)
+	if err != nil {
+		return fmt.Sprintf("Error: %s", err)
+	}
+
+	result := fmt.Sprintf("Tools from '%s':\n", args)
+	for _, toolName := range info.Tools {
+		result += fmt.Sprintf("  • %s/%s\n", args, toolName)
+	}
+	return result
+}
+
+// Helper functions for MCP commands
+
+func splitArgs(s string) []string {
+	var parts []string
+	var current string
+	inQuote := false
+	quoteChar := rune(0)
+
+	for _, r := range s {
+		if (r == '"' || r == '\'') && !inQuote {
+			inQuote = true
+			quoteChar = r
+		} else if r == quoteChar && inQuote {
+			inQuote = false
+			quoteChar = 0
+		} else if r == ' ' && !inQuote {
+			if current != "" {
+				parts = append(parts, current)
+				current = ""
+			}
+		} else {
+			current += string(r)
+		}
+	}
+	if current != "" {
+		parts = append(parts, current)
+	}
+	return parts
+}
+
+func joinArgs(args []string) string {
+	result := ""
+	for i, arg := range args {
+		if i > 0 {
+			result += ","
+		}
+		result += arg
+	}
+	return result
+}
+
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen-3] + "..."
 }

@@ -11,6 +11,7 @@ import (
 
 	"github.com/tanav-malhotra/ironguard/internal/agent"
 	"github.com/tanav-malhotra/ironguard/internal/config"
+	"github.com/tanav-malhotra/ironguard/internal/mcp"
 )
 
 // Run starts the top-level TUI program.
@@ -86,6 +87,9 @@ type model struct {
 	previousScore int
 	scoreDelta    int
 
+	// MCP server manager
+	mcpManager *mcp.Manager
+
 	// Program reference for sending commands
 	program *tea.Program
 }
@@ -119,14 +123,29 @@ Ready to dominate CyberPatriot. Target: 100/100 in <30 min.
 
 QUICK START:
   1. Set API key:  /key <your-api-key>
-  2. Start AI:     /auto    (autonomous mode - AI does everything)
-     OR:          /harden  (AI assists, you guide)
+  2. Start AI:     /harden  (AI does EVERYTHING automatically)
 
-COMMANDS: /help  |  CHECK SCORE: /score  |  STOP AI: /stop
+The AI will automatically:
+  • Read the README & forensics questions
+  • Answer forensics, delete bad users, fix vulns
+  • Check score after each action
+  • Keep working until 100/100
 
-Mode: AUTOPILOT (AI runs commands automatically)
+CONTROLS:
+  /stop or Ctrl+C  - Pause AI (doesn't quit!)
+  /help            - All commands
+  Ctrl+Q or /quit  - Exit app
+
+Mode: AUTOPILOT | Screen: OBSERVE (AI can't control mouse)
 Model: claude-opus-4-5 (maximum capability)
 ═══════════════════════════════════════════════════════════`
+
+	// Create MCP manager
+	mcpMgr := mcp.NewManager()
+
+	// Connect MCP tools to agent's tool registry
+	mcpAdapter := mcp.NewToolsAdapter(mcpMgr)
+	ag.SetMCPManager(mcpAdapter)
 
 	return model{
 		cfg:          cfg,
@@ -139,6 +158,7 @@ Model: claude-opus-4-5 (maximum capability)
 		cmdRegistry:  NewCommandRegistry(),
 		agent:        ag,
 		manualTasks:  NewManualTaskManager(),
+		mcpManager:   mcpMgr,
 	}
 }
 
@@ -243,6 +263,45 @@ func (m *model) handleAgentEvent(event agent.Event) (tea.Model, tea.Cmd) {
 
 	case agent.EventStatusUpdate:
 		m.agentStatus = event.Content
+
+	case agent.EventThinking:
+		// Update thinking display
+		if len(m.messages) > 0 {
+			last := &m.messages[len(m.messages)-1]
+			if last.Role == RoleAI && last.IsStreaming {
+				last.Thinking += event.Thinking
+			}
+		}
+
+	case agent.EventSubAgentSpawned:
+		if event.SubAgent != nil {
+			m.messages = append(m.messages, NewSystemMessage(
+				fmt.Sprintf("🤖 Subagent spawned: %s\n   Task: %s", event.SubAgent.ID, truncate(event.SubAgent.Task, 60)),
+			))
+		}
+
+	case agent.EventSubAgentUpdate:
+		if event.SubAgent != nil {
+			statusIcon := map[string]string{
+				"running":   "⏳",
+				"completed": "✅",
+				"failed":    "❌",
+				"cancelled": "⏹️",
+			}[event.SubAgent.Status]
+			if statusIcon == "" {
+				statusIcon = "❓"
+			}
+			msg := fmt.Sprintf("%s Subagent %s: %s", statusIcon, event.SubAgent.ID, event.SubAgent.Status)
+			if event.SubAgent.Result != "" {
+				msg += fmt.Sprintf("\n   Result: %s", truncate(event.SubAgent.Result, 80))
+			}
+			m.messages = append(m.messages, NewSystemMessage(msg))
+		}
+
+	case agent.EventScoreUpdate:
+		m.previousScore = m.currentScore
+		m.currentScore = event.Score
+		m.scoreDelta = m.currentScore - m.previousScore
 	}
 
 	// Continue listening for events
@@ -270,11 +329,20 @@ func (m *model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch msg.Type {
 	case tea.KeyCtrlC:
+		// Ctrl+C is commonly used to copy text in terminals - DON'T quit the app!
+		// This prevents teammates from accidentally closing IRONGUARD when they
+		// meant to copy text from the terminal output.
 		if m.agentBusy {
 			m.agent.Cancel()
-			m.messages = append(m.messages, NewSystemMessage("Cancelled."))
+			m.messages = append(m.messages, NewSystemMessage("⏹️ AI paused. Use /harden to resume, or /quit to exit."))
 			return m, nil
 		}
+		// If AI is not busy, Ctrl+C does nothing (safe for copy attempts)
+		// Don't even show a message to avoid confusion
+		return m, nil
+
+	case tea.KeyCtrlQ:
+		// Ctrl+Q is the dedicated quit shortcut
 		m.quitting = true
 		return m, tea.Quit
 
@@ -285,11 +353,11 @@ func (m *model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if m.agentBusy {
 			m.agent.Cancel()
-			m.messages = append(m.messages, NewSystemMessage("Cancelled."))
+			m.messages = append(m.messages, NewSystemMessage("⏹️ AI task cancelled."))
 			return m, nil
 		}
-		m.quitting = true
-		return m, tea.Quit
+		// Esc doesn't quit - just closes autocomplete or cancels AI
+		return m, nil
 
 	case tea.KeyCtrlL:
 		m.messages = []Message{}
@@ -554,6 +622,38 @@ func (m *model) executeAction(action *PendingAction) tea.Cmd {
 			result, err = m.agent.ExecuteTool(ctx, "focus_window", map[string]interface{}{
 				"title": action.Args,
 			})
+		case ActionMCPAdd:
+			// Parse: name|command|arg1,arg2,arg3
+			parts := strings.Split(action.Args, "|")
+			if len(parts) < 2 {
+				err = fmt.Errorf("invalid MCP add args")
+			} else {
+				name := parts[0]
+				command := parts[1]
+				var args []string
+				if len(parts) > 2 && parts[2] != "" {
+					args = strings.Split(parts[2], ",")
+				}
+				err = m.mcpManager.AddServer(mcp.ServerConfig{
+					Name:    name,
+					Command: command,
+					Args:    args,
+				})
+				if err == nil {
+					// Get info about connected server
+					info, _ := m.mcpManager.GetServerInfo(name)
+					if info != nil {
+						result = fmt.Sprintf("✅ Connected to MCP server '%s'\n   Tools available: %d\n   Use /mcp-tools %s to see them.", name, info.ToolCount, name)
+					} else {
+						result = fmt.Sprintf("✅ Connected to MCP server '%s'", name)
+					}
+				}
+			}
+		case ActionMCPRemove:
+			err = m.mcpManager.RemoveServer(action.Args)
+			if err == nil {
+				result = fmt.Sprintf("✅ Disconnected MCP server '%s'", action.Args)
+			}
 		}
 
 		if err != nil {
@@ -639,6 +739,31 @@ func (m model) renderSidebar() string {
 	// Separator
 	sb.WriteString(m.styles.Muted.Render(strings.Repeat("─", m.sidebarWidth-4)) + "\n\n")
 
+	// Subagents section (if any are active)
+	subAgents := m.agent.GetSubAgents()
+	if len(subAgents) > 0 {
+		sb.WriteString(m.styles.Label.Render("🤖 SUBAGENTS") + "\n")
+		runningCount := 0
+		for _, sa := range subAgents {
+			if sa.Status == "running" {
+				runningCount++
+				sb.WriteString(m.styles.SubAgentRunning.Render(fmt.Sprintf("  ⏳ %s", sa.ID)) + "\n")
+				if sa.CurrentStep != "" {
+					step := sa.CurrentStep
+					if len(step) > 20 {
+						step = step[:17] + "..."
+					}
+					sb.WriteString(m.styles.Muted.Render(fmt.Sprintf("     %s", step)) + "\n")
+				}
+			}
+		}
+		completedCount := len(subAgents) - runningCount
+		if completedCount > 0 {
+			sb.WriteString(m.styles.SubAgentDone.Render(fmt.Sprintf("  ✅ %d done", completedCount)) + "\n")
+		}
+		sb.WriteString("\n")
+	}
+
 	// Manual tasks section
 	sb.WriteString(m.styles.Label.Render("📋 MANUAL TASKS") + "\n")
 	total, pending, _ := m.manualTasks.Count()
@@ -647,6 +772,17 @@ func (m model) renderSidebar() string {
 	} else {
 		sb.WriteString(m.styles.Muted.Render(fmt.Sprintf("  %d pending", pending)) + "\n\n")
 		sb.WriteString(m.manualTasks.FormatForSidebar(m.sidebarWidth - 4))
+	}
+
+	// MCP servers section (if any connected)
+	if m.mcpManager != nil {
+		servers := m.mcpManager.ListServers()
+		if len(servers) > 0 {
+			sb.WriteString("\n" + m.styles.Label.Render("🔌 MCP SERVERS") + "\n")
+			for _, s := range servers {
+				sb.WriteString(m.styles.Muted.Render(fmt.Sprintf("  • %s", s)) + "\n")
+			}
+		}
 	}
 
 	// Queue indicator
@@ -701,27 +837,71 @@ func (m model) formatMessage(msg Message, width int) string {
 		return prefix + msg.Content
 
 	case RoleAI:
+		var sb strings.Builder
+		
+		// Show thinking/reasoning if present (Claude Code style)
+		if msg.Thinking != "" {
+			thinkingLines := strings.Split(msg.Thinking, "\n")
+			thinkingPreview := ""
+			if len(thinkingLines) > 3 {
+				thinkingPreview = strings.Join(thinkingLines[:3], "\n") + "..."
+			} else {
+				thinkingPreview = msg.Thinking
+			}
+			
+			if msg.ThinkingVisible {
+				// Expanded view
+				sb.WriteString(m.styles.ThinkingBox.Render("💭 THINKING (click to collapse):\n" + msg.Thinking))
+			} else {
+				// Collapsed view
+				sb.WriteString(m.styles.ThinkingCollapsed.Render("💭 " + truncate(thinkingPreview, 60) + " [expand]"))
+			}
+			sb.WriteString("\n")
+		}
+		
 		prefix := m.styles.AIMessage.Bold(true).Render("AI: ")
 		content := msg.Content
 		if msg.IsStreaming {
 			content += m.styles.Muted.Render("▌")
 		}
-		return prefix + content
+		sb.WriteString(prefix + content)
+		return sb.String()
 
 	case RoleSystem:
 		return m.styles.SystemMessage.Render(msg.Content)
 
 	case RoleTool:
 		var sb strings.Builder
-		sb.WriteString(m.styles.ToolCall.Render("⚡ " + msg.ToolName))
-		if msg.ToolInput != "" {
-			sb.WriteString("\n" + m.styles.Muted.Render("  Input: "+truncate(msg.ToolInput, 60)))
-		}
-		if msg.ToolOutput != "" {
-			sb.WriteString("\n" + m.styles.Value.Render("  Output: "+truncate(msg.ToolOutput, 60)))
-		}
-		if msg.ToolError != "" {
-			sb.WriteString("\n" + m.styles.Error.Render("  Error: "+msg.ToolError))
+		
+		// Tool header with collapse indicator
+		if msg.Collapsed {
+			sb.WriteString(m.styles.ToolCall.Render("⚡ " + msg.ToolName + " [+]"))
+			if msg.ToolOutput != "" {
+				sb.WriteString(m.styles.Muted.Render(" → " + truncate(msg.ToolOutput, 30)))
+			}
+		} else {
+			sb.WriteString(m.styles.ToolCall.Render("⚡ " + msg.ToolName + " [-]"))
+			if msg.ToolInput != "" {
+				inputLines := strings.Split(msg.ToolInput, "\n")
+				if len(inputLines) > 3 {
+					sb.WriteString("\n" + m.styles.Muted.Render("  Input: "+truncate(inputLines[0], 50)+" ("+fmt.Sprintf("%d", len(inputLines))+" lines)"))
+				} else {
+					sb.WriteString("\n" + m.styles.Muted.Render("  Input: "+truncate(msg.ToolInput, 60)))
+				}
+			}
+			if msg.ToolOutput != "" {
+				outputLines := strings.Split(msg.ToolOutput, "\n")
+				if len(outputLines) > 5 {
+					// Show first 3 lines with line count
+					preview := strings.Join(outputLines[:3], "\n  ")
+					sb.WriteString("\n" + m.styles.Value.Render("  Output:\n  "+preview+"\n  ... ("+fmt.Sprintf("%d", len(outputLines))+" total lines)"))
+				} else {
+					sb.WriteString("\n" + m.styles.Value.Render("  Output: "+truncate(msg.ToolOutput, 100)))
+				}
+			}
+			if msg.ToolError != "" {
+				sb.WriteString("\n" + m.styles.Error.Render("  Error: "+msg.ToolError))
+			}
 		}
 		return sb.String()
 
@@ -810,7 +990,7 @@ func (m model) renderAutocomplete(width int) string {
 }
 
 func (m model) renderStatusBar() string {
-	left := m.styles.KeyHint.Render("Ctrl+C: Quit | Ctrl+L: Clear | Tab: Autocomplete | /help: Commands")
+	left := m.styles.KeyHint.Render("Ctrl+Q: Quit | Ctrl+C: Cancel AI | Ctrl+L: Clear | Tab: Autocomplete")
 
 	keyStatus := "🔑 "
 	if m.apiKeys[string(m.cfg.Provider)] != "" {

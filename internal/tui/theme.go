@@ -84,6 +84,25 @@ type Styles struct {
 
 	// Borders
 	BorderedBox lipgloss.Style
+
+	// Thinking/Reasoning display (Claude Code style)
+	ThinkingBox       lipgloss.Style
+	ThinkingCollapsed lipgloss.Style
+
+	// Progress indicators
+	ProgressBar     lipgloss.Style
+	ProgressFilled  lipgloss.Style
+	ProgressEmpty   lipgloss.Style
+
+	// Subagent display
+	SubAgentBox     lipgloss.Style
+	SubAgentRunning lipgloss.Style
+	SubAgentDone    lipgloss.Style
+
+	// Diff view
+	DiffAdd    lipgloss.Style
+	DiffRemove lipgloss.Style
+	DiffHeader lipgloss.Style
 }
 
 // NewStyles creates the style set from a theme.
@@ -183,6 +202,53 @@ func NewStyles(t Theme) Styles {
 			BorderStyle(lipgloss.RoundedBorder()).
 			BorderForeground(t.Border).
 			Padding(1, 2),
+
+		// Thinking/Reasoning (Claude Code style - subtle, collapsible)
+		ThinkingBox: lipgloss.NewStyle().
+			Foreground(t.TextMuted).
+			BorderStyle(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("#3D4450")).
+			Padding(0, 1).
+			MarginBottom(1),
+
+		ThinkingCollapsed: lipgloss.NewStyle().
+			Foreground(t.TextMuted).
+			Italic(true),
+
+		// Progress indicators
+		ProgressBar: lipgloss.NewStyle().
+			Foreground(t.TextMuted),
+
+		ProgressFilled: lipgloss.NewStyle().
+			Foreground(t.Success),
+
+		ProgressEmpty: lipgloss.NewStyle().
+			Foreground(t.TextMuted),
+
+		// Subagent display
+		SubAgentBox: lipgloss.NewStyle().
+			BorderStyle(lipgloss.RoundedBorder()).
+			BorderForeground(t.Secondary).
+			Padding(0, 1),
+
+		SubAgentRunning: lipgloss.NewStyle().
+			Foreground(t.Warning),
+
+		SubAgentDone: lipgloss.NewStyle().
+			Foreground(t.Success),
+
+		// Diff view
+		DiffAdd: lipgloss.NewStyle().
+			Foreground(t.Success).
+			Background(lipgloss.Color("#1a3d1a")),
+
+		DiffRemove: lipgloss.NewStyle().
+			Foreground(t.Error).
+			Background(lipgloss.Color("#3d1a1a")),
+
+		DiffHeader: lipgloss.NewStyle().
+			Foreground(t.Info).
+			Bold(true),
 	}
 }
 

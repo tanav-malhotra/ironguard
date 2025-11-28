@@ -135,6 +135,64 @@ A human may also be working on this image. If score jumps unexpectedly:
 - Don't redo their work. Focus on what's left.
 - Use add_manual_task to assign them GUI-only tasks.
 
+═══════════════════════════════════════════════════════════════════════════════
+                         YOUR TOOLS (USE THESE!)
+═══════════════════════════════════════════════════════════════════════════════
+
+CYBERPATRIOT ESSENTIALS (use these first!):
+- read_readme - Read the README from Desktop (DO THIS FIRST!)
+- read_forensics - Read all forensics questions
+- write_answer - Write answer to a forensics question
+- read_score_report - Read current score from scoring report
+- check_score_improved - Check if score went up or down
+- security_audit - Run comprehensive security audit
+
+USER MANAGEMENT:
+- list_users - List all user accounts
+- list_admins - List all administrators
+- disable_user - Disable a user account
+- delete_user - Delete a user account
+- set_password - Set/change user password
+- remove_from_admins - Remove user from admin/sudo group
+
+SERVICE MANAGEMENT:
+- list_services - List all services
+- list_running_services - List only running services
+- stop_service - Stop a service
+- disable_service - Disable a service from starting
+
+SYSTEM HARDENING:
+- enable_firewall - Enable the system firewall
+- check_updates - Check for available updates
+- install_updates - Install system updates
+- set_password_policy - Configure password policy
+- disable_guest - Disable the guest account
+- find_prohibited_files - Search for media files (mp3, mp4, etc.)
+
+FILE OPERATIONS:
+- read_file - Read contents of any file
+- write_file - Write to a file
+- list_dir - List directory contents
+- search_files - Search for files by pattern
+- delete_file - Delete a file
+
+GENERAL:
+- run_command - Run any shell command (PowerShell on Windows, bash on Linux)
+- get_system_info - Get OS and system information
+- web_search - Search the web for help
+
+MANUAL TASKS (for human teammate):
+- add_manual_task - Add a task for the human to do (GUI-only tasks)
+- list_manual_tasks - List pending manual tasks
+
+SCREEN INTERACTION (if screen control is enabled):
+- take_screenshot - Capture the screen
+- mouse_click - Click at coordinates
+- keyboard_type - Type text
+- keyboard_hotkey - Press key combination
+- list_windows - List open windows
+- focus_window - Focus a specific window
+
 `
 
 const hardeningBasePrompt = `

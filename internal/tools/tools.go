@@ -223,10 +223,10 @@ func (r *Registry) registerDefaults() {
 		Mutating: false,
 	})
 
-	// Run command tool
+	// Run command tool with persistent shell session
 	r.Register(&Tool{
 		Name:        "run_command",
-		Description: "Execute a shell command and return its output. Use PowerShell on Windows, bash on Linux.",
+		Description: "Execute a shell command in a persistent shell session. The shell maintains state (working directory, environment variables, aliases) across commands. Use PowerShell on Windows, bash on Linux. Set new_session=true to start a fresh shell.",
 		Parameters: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -234,11 +234,40 @@ func (r *Registry) registerDefaults() {
 					"type":        "string",
 					"description": "The command to execute",
 				},
+				"new_session": map[string]interface{}{
+					"type":        "boolean",
+					"description": "If true, terminate the current shell and start a fresh session. Useful if the shell gets into a bad state. Default: false",
+					"default":    false,
+				},
 			},
 			"required": []string{"command"},
 		},
 		Handler:  toolRunCommand,
 		Mutating: true,
+	})
+
+	// Get shell working directory tool
+	r.Register(&Tool{
+		Name:        "get_shell_cwd",
+		Description: "Get the current working directory of the persistent shell session",
+		Parameters: map[string]interface{}{
+			"type":       "object",
+			"properties": map[string]interface{}{},
+		},
+		Handler:  toolGetShellCwd,
+		Mutating: false,
+	})
+
+	// Reset shell session tool
+	r.Register(&Tool{
+		Name:        "reset_shell",
+		Description: "Terminate the current shell session and prepare for a fresh start. Use this if the shell gets into a bad state or you need a clean environment.",
+		Parameters: map[string]interface{}{
+			"type":       "object",
+			"properties": map[string]interface{}{},
+		},
+		Handler:  toolResetShell,
+		Mutating: false,
 	})
 
 	// Read README tool (CyberPatriot specific)
@@ -393,31 +422,27 @@ func toolListDir(ctx context.Context, args json.RawMessage) (string, error) {
 
 func toolRunCommand(ctx context.Context, args json.RawMessage) (string, error) {
 	var params struct {
-		Command string `json:"command"`
+		Command    string `json:"command"`
+		NewSession bool   `json:"new_session"`
 	}
 	if err := json.Unmarshal(args, &params); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
 
-	var cmd *exec.Cmd
-	if runtime.GOOS == "windows" {
-		cmd = exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", params.Command)
-	} else {
-		cmd = exec.CommandContext(ctx, "bash", "-c", params.Command)
-	}
+	return RunCommand(ctx, params.Command, params.NewSession)
+}
 
-	output, err := cmd.CombinedOutput()
-	result := string(output)
-
+func toolGetShellCwd(ctx context.Context, args json.RawMessage) (string, error) {
+	cwd, err := GetShellCwd(ctx)
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			result += fmt.Sprintf("\n[Exit code: %d]", exitErr.ExitCode())
-		} else {
-			return result, fmt.Errorf("command failed: %w", err)
-		}
+		return "", err
 	}
+	return fmt.Sprintf("Current shell working directory: %s", cwd), nil
+}
 
-	return result, nil
+func toolResetShell(ctx context.Context, args json.RawMessage) (string, error) {
+	ResetShellSession()
+	return "Shell session has been reset. A fresh shell will be started on the next command.", nil
 }
 
 func toolReadReadme(ctx context.Context, args json.RawMessage) (string, error) {
@@ -669,4 +694,3 @@ func stripHTML(html string) string {
 
 	return strings.TrimSpace(html)
 }
-

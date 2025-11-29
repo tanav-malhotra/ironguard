@@ -21,6 +21,8 @@ func TestNewRegistry(t *testing.T) {
 		"write_file",
 		"list_dir",
 		"run_command",
+		"get_shell_cwd",
+		"reset_shell",
 		"read_readme",
 		"read_forensics",
 		"write_answer",

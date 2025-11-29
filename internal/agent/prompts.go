@@ -139,6 +139,21 @@ A human may also be working on this image. If score jumps unexpectedly:
                          YOUR TOOLS (USE THESE!)
 ═══════════════════════════════════════════════════════════════════════════════
 
+IMPORTANT - PERSISTENT SHELL SESSION:
+The run_command tool maintains a PERSISTENT shell session. This means:
+- Working directory persists: If you "cd /etc" then run "cat passwd", it reads /etc/passwd
+- You can chain directory changes across multiple commands
+- Environment variables set in one command persist to the next
+- Use new_session=true parameter if you need a fresh shell (e.g., if something breaks)
+- Use get_shell_cwd to check current directory if unsure
+- Use reset_shell to completely reset the session
+
+Example workflow:
+1. run_command("cd /home/user")
+2. run_command("ls -la")           <- Lists /home/user
+3. run_command("cd Documents")     <- Now in /home/user/Documents
+4. run_command("pwd")              <- Shows /home/user/Documents
+
 CYBERPATRIOT ESSENTIALS (use these first!):
 - read_readme - Read the README from Desktop (DO THIS FIRST!)
 - read_forensics - Read all forensics questions
@@ -176,8 +191,14 @@ FILE OPERATIONS:
 - search_files - Search for files by pattern
 - delete_file - Delete a file
 
+SHELL SESSION (persistent across commands!):
+- run_command - Run a command in the persistent shell session
+  * Working directory persists: "cd /path" then "ls" will list /path
+  * Use new_session=true parameter to start fresh if shell gets stuck
+- get_shell_cwd - Get current working directory of the shell
+- reset_shell - Reset the shell session to a clean state
+
 GENERAL:
-- run_command - Run any shell command (PowerShell on Windows, bash on Linux)
 - get_system_info - Get OS and system information
 - web_search - Search the web for help
 

@@ -286,11 +286,20 @@ The AI has access to **40+ built-in tools** that it uses automatically during ha
 
 > **How Sub-Agents Work**: The AI can spawn up to 4 parallel workers. Each subagent has full tool access and works independently. This enables faster completion - e.g., one agent handles forensics while another audits users.
 
+### Shell Session Tools
+
+| Tool | Description | When AI Uses It |
+|------|-------------|-----------------|
+| `run_command` | Runs a command in the persistent shell session | For anything not covered by specific tools |
+| `get_shell_cwd` | Gets the current working directory of the shell | To check where commands will run |
+| `reset_shell` | Terminates and resets the shell session | If the shell gets into a bad state |
+
+> **Persistent Shell Sessions**: The `run_command` tool maintains a persistent shell session where the working directory persists across commands. If you `cd /some/path` and then run another command, it will execute in `/some/path`. Use `new_session: true` parameter to start a fresh shell if needed.
+
 ### General Tools
 
 | Tool | Description | When AI Uses It |
 |------|-------------|-----------------|
-| `run_command` | Runs any shell command (PowerShell/bash) | For anything not covered by specific tools |
 | `get_system_info` | Gets OS version, architecture, hostname | At start to determine which hardening steps to use |
 
 ## MCP Server Integration

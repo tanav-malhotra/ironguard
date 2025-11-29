@@ -375,6 +375,28 @@ func (a *Agent) callLLM(ctx context.Context) (*llm.ChatResponse, error) {
 func (a *Agent) buildSystemPrompt() string {
 	now := time.Now().Format("Monday, January 2, 2006 3:04 PM")
 
+	// Build OS info string
+	osInfo := a.cfg.OSInfo
+	osDesc := osInfo.Type.String()
+	if osInfo.Name != "" {
+		osDesc = osInfo.Name
+	}
+	if osInfo.Version != "" && !strings.Contains(osDesc, osInfo.Version) {
+		osDesc += " " + osInfo.Version
+	}
+	if osInfo.IsServer {
+		osDesc += " (Server)"
+	}
+	if osInfo.Kernel != "" {
+		osDesc += " - Kernel: " + osInfo.Kernel
+	}
+
+	// Screen mode info
+	screenModeDesc := "OBSERVE ONLY - Cannot control mouse/keyboard"
+	if a.cfg.ScreenMode == config.ScreenModeControl {
+		screenModeDesc = "CONTROL ENABLED - Can use mouse/keyboard"
+	}
+
 	prompt := fmt.Sprintf(`You are IRONGUARD, an elite autonomous AI competing in CyberPatriot. This is a LIVE competition image and you MUST reach 100/100 points.
 
 ═══════════════════════════════════════════════════════════════
@@ -383,7 +405,9 @@ func (a *Agent) buildSystemPrompt() string {
 
 Current Time: %s
 Target: 100/100 points in under 30 minutes
-Operating System: %s (%s)
+Operating System: %s
+Architecture: %s
+Screen Mode: %s
 Mode: AUTONOMOUS - Do NOT wait for human input
 
 ═══════════════════════════════════════════════════════════════
@@ -471,8 +495,14 @@ SETTINGS:
 
 ═══════════════════════════════════════════════════════════════
 
+SCREEN MODE NOTICE:
+%s
+If you need to use mouse/keyboard tools and they fail, tell the user to run: /screen control
+
+═══════════════════════════════════════════════════════════════
+
 NOW BEGIN. Read the README first, then GO FAST. Do not stop until 100/100.
-`, now, a.cfg.OS, a.cfg.Architecture)
+`, now, osDesc, a.cfg.Architecture, screenModeDesc, screenModeDesc)
 
 	return prompt
 }

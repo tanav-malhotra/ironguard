@@ -2,9 +2,16 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/tanav-malhotra/ironguard/internal/config"
+	"github.com/tanav-malhotra/ironguard/internal/tools"
 )
+
+// syncScreenMode syncs the screen mode between config and tools package.
+func syncScreenMode(mode config.ScreenMode) {
+	tools.SetScreenMode(mode)
+}
 
 // SlashCommand represents a TUI slash command.
 type SlashCommand struct {
@@ -406,32 +413,142 @@ func cmdRun(m *model, args string) string {
 }
 
 func cmdHarden(m *model, args string) string {
-	// /harden is an alias for /auto 100 - full autonomous mode
-	// The AI will automatically:
-	// 1. Read the README to understand authorized users/services
-	// 2. Read and answer forensics questions
-	// 3. Fix all vulnerabilities autonomously
-	// 4. Check score after each action
-	// 5. Continue until 100/100 is reached
-
-	targetScore := 100
-	if args != "" {
-		if _, err := fmt.Sscanf(args, "%d", &targetScore); err != nil {
-			return "Usage: /harden [target-score]\nExample: /harden 100"
-		}
-	}
-
+	// Check for API key first
 	if m.apiKeys[string(m.cfg.Provider)] == "" {
 		return "⚠️ Set your API key first with /key <api-key>"
 	}
 
+	// Parse arguments: /harden [mode] [target-score]
+	// Modes: windows, windows-server, linux, packet-tracer, auto
+	parts := strings.Fields(args)
+	
+	mode := ""
+	targetScore := 100
+	
+	for _, part := range parts {
+		switch strings.ToLower(part) {
+		case "windows", "win", "w":
+			mode = "windows"
+		case "windows-server", "server", "ws":
+			mode = "windows-server"
+		case "linux", "lin", "l":
+			mode = "linux"
+		case "packet-tracer", "pt", "cisco":
+			mode = "packet-tracer"
+		case "auto", "detect":
+			mode = "auto"
+		default:
+			// Try to parse as number
+			if n, err := fmt.Sscanf(part, "%d", &targetScore); n == 1 && err == nil {
+				continue
+			}
+		}
+	}
+
+	// If no mode specified, show selection menu
+	if mode == "" {
+		// Auto-detect OS
+		osInfo := config.DetectOS()
+		m.cfg.OSInfo = osInfo
+		
+		detectedOS := "Unknown"
+		suggestedMode := "auto"
+		
+		switch osInfo.Type {
+		case config.OSTypeWindows10:
+			detectedOS = fmt.Sprintf("Windows 10 (%s)", osInfo.Version)
+			suggestedMode = "windows"
+		case config.OSTypeWindows11:
+			detectedOS = fmt.Sprintf("Windows 11 (%s)", osInfo.Version)
+			suggestedMode = "windows"
+		case config.OSTypeWindowsServer:
+			detectedOS = fmt.Sprintf("Windows Server (%s)", osInfo.Name)
+			suggestedMode = "windows-server"
+		case config.OSTypeUbuntu:
+			detectedOS = fmt.Sprintf("Ubuntu %s", osInfo.Version)
+			suggestedMode = "linux"
+		case config.OSTypeDebian:
+			detectedOS = fmt.Sprintf("Debian %s", osInfo.Version)
+			suggestedMode = "linux"
+		case config.OSTypeLinuxMint:
+			detectedOS = fmt.Sprintf("Linux Mint %s", osInfo.Version)
+			suggestedMode = "linux"
+		case config.OSTypeFedora, config.OSTypeCentOS:
+			detectedOS = osInfo.Name
+			suggestedMode = "linux"
+		case config.OSTypeLinuxOther:
+			detectedOS = osInfo.Name
+			suggestedMode = "linux"
+		}
+
+		return fmt.Sprintf(`🔍 DETECTED SYSTEM: %s
+
+Choose hardening mode:
+
+  /harden windows        - Windows 10/11 desktop
+  /harden windows-server - Windows Server
+  /harden linux          - Ubuntu/Debian/Linux Mint
+  /harden packet-tracer  - Cisco Packet Tracer (needs /screen control)
+  /harden auto           - Auto-detect and start (suggested: %s)
+
+Example: /harden %s 100
+
+💡 Tip: Add target score at the end (default: 100)`, detectedOS, suggestedMode, suggestedMode)
+	}
+
+	// Set competition mode based on selection
+	switch mode {
+	case "windows":
+		m.cfg.CompMode = config.CompModeHarden
+		m.cfg.OSInfo.Type = config.OSTypeWindows10
+	case "windows-server":
+		m.cfg.CompMode = config.CompModeHarden
+		m.cfg.OSInfo.Type = config.OSTypeWindowsServer
+		m.cfg.OSInfo.IsServer = true
+	case "linux":
+		m.cfg.CompMode = config.CompModeHarden
+		// Keep detected Linux type or default to Ubuntu
+		if m.cfg.OSInfo.Type == config.OSTypeUnknown {
+			m.cfg.OSInfo.Type = config.OSTypeUbuntu
+		}
+	case "packet-tracer":
+		m.cfg.CompMode = config.CompModePacketTracer
+		if m.cfg.ScreenMode != config.ScreenModeControl {
+			return `⚠️ PACKET TRACER MODE REQUIRES SCREEN CONTROL
+
+Packet Tracer challenges require the AI to see and interact with the GUI.
+
+Please enable screen control first:
+  /screen control
+
+Then run:
+  /harden packet-tracer
+
+Note: The AI will need to take screenshots frequently to see the topology.`
+		}
+	case "auto":
+		// Use auto-detected OS
+		osInfo := config.DetectOS()
+		m.cfg.OSInfo = osInfo
+		m.cfg.CompMode = config.CompModeHarden
+	}
+
+	// Start autonomous hardening
 	m.pendingAction = &PendingAction{
 		Type:        ActionAuto,
-		Description: fmt.Sprintf("Start autonomous hardening (target: %d pts)", targetScore),
+		Description: fmt.Sprintf("Start autonomous hardening (target: %d pts, mode: %s)", targetScore, mode),
 		Args:        fmt.Sprintf("%d", targetScore),
 	}
+
+	osDesc := m.cfg.OSInfo.Type.String()
+	if m.cfg.OSInfo.Version != "" {
+		osDesc += " " + m.cfg.OSInfo.Version
+	}
+
 	return fmt.Sprintf(`🛡️ IRONGUARD AUTONOMOUS HARDENING ACTIVATED
 
+Mode: %s
+Detected OS: %s
 Target: %d/100 points
 
 The AI will now AUTOMATICALLY:
@@ -443,7 +560,7 @@ The AI will now AUTOMATICALLY:
   ✓ Continue until target reached
 
 Use /stop to cancel at any time.
-Ctrl+C also pauses the AI (doesn't quit the app).`, targetScore)
+Ctrl+C also pauses the AI (doesn't quit the app).`, strings.ToUpper(mode), osDesc, targetScore)
 }
 
 func cmdKey(m *model, args string) string {
@@ -541,9 +658,13 @@ func cmdScreenMode(m *model, args string) string {
 	switch args {
 	case "observe":
 		m.cfg.ScreenMode = config.ScreenModeObserve
+		// Sync with tools package
+		syncScreenMode(config.ScreenModeObserve)
 		return "👁️ Screen mode: OBSERVE\nAI can view the screen but cannot control mouse/keyboard.\nUse /screenshot to capture the screen."
 	case "control":
 		m.cfg.ScreenMode = config.ScreenModeControl
+		// Sync with tools package
+		syncScreenMode(config.ScreenModeControl)
 		return "🖱️ Screen mode: CONTROL\n⚠️ AI now has full mouse/keyboard control!\nAI can click, type, and interact with any application."
 	case "":
 		mode := "OBSERVE"

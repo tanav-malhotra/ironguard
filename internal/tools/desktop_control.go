@@ -401,7 +401,20 @@ func (r *Registry) RegisterDesktopControlTools() {
 
 // Tool implementations
 
+// checkScreenControl returns an error if screen control is not enabled.
+func checkScreenControl() error {
+	if !IsScreenControlEnabled() {
+		return fmt.Errorf(ScreenModeError())
+	}
+	return nil
+}
+
 func toolMouseClick(ctx context.Context, args json.RawMessage) (string, error) {
+	// Check screen mode first
+	if err := checkScreenControl(); err != nil {
+		return "", err
+	}
+
 	var params struct {
 		X      int    `json:"x"`
 		Y      int    `json:"y"`
@@ -507,6 +520,10 @@ func mouseClickLinux(ctx context.Context, x, y int, button string, clicks int) (
 }
 
 func toolMouseMove(ctx context.Context, args json.RawMessage) (string, error) {
+	if err := checkScreenControl(); err != nil {
+		return "", err
+	}
+
 	var params struct {
 		X int `json:"x"`
 		Y int `json:"y"`
@@ -535,6 +552,10 @@ Add-Type -AssemblyName System.Windows.Forms
 }
 
 func toolMouseDrag(ctx context.Context, args json.RawMessage) (string, error) {
+	if err := checkScreenControl(); err != nil {
+		return "", err
+	}
+
 	var params struct {
 		StartX int    `json:"start_x"`
 		StartY int    `json:"start_y"`
@@ -618,6 +639,10 @@ for ($i = 1; $i -le $steps; $i++) {
 }
 
 func toolMouseScroll(ctx context.Context, args json.RawMessage) (string, error) {
+	if err := checkScreenControl(); err != nil {
+		return "", err
+	}
+
 	var params struct {
 		Direction string `json:"direction"`
 		Amount    int    `json:"amount"`
@@ -634,7 +659,9 @@ func toolMouseScroll(ctx context.Context, args json.RawMessage) (string, error) 
 
 	// Move to position if specified
 	if params.X != 0 || params.Y != 0 {
-		toolMouseMove(ctx, json.RawMessage(fmt.Sprintf(`{"x":%d,"y":%d}`, params.X, params.Y)))
+		if _, err := toolMouseMove(ctx, json.RawMessage(fmt.Sprintf(`{"x":%d,"y":%d}`, params.X, params.Y))); err != nil {
+			return "", fmt.Errorf("failed to move mouse before scroll: %w", err)
+		}
 	}
 
 	if runtime.GOOS == "windows" {
@@ -677,6 +704,10 @@ $flags = [MouseOps]::MOUSEEVENTF_%s
 }
 
 func toolKeyboardType(ctx context.Context, args json.RawMessage) (string, error) {
+	if err := checkScreenControl(); err != nil {
+		return "", err
+	}
+
 	var params struct {
 		Text    string `json:"text"`
 		DelayMs int    `json:"delay_ms"`
@@ -686,9 +717,11 @@ func toolKeyboardType(ctx context.Context, args json.RawMessage) (string, error)
 	}
 
 	if runtime.GOOS == "windows" {
-		// Escape special characters for PowerShell
-		escapedText := strings.ReplaceAll(params.Text, "'", "''")
-		escapedText = strings.ReplaceAll(escapedText, "`", "``")
+		// Escape special characters for SendKeys
+		// SendKeys special chars: + (Shift), ^ (Ctrl), % (Alt), ~ (Enter), {}, (), []
+		escapedText := escapeSendKeys(params.Text)
+		// Also escape for PowerShell string
+		escapedText = strings.ReplaceAll(escapedText, "'", "''")
 
 		script := fmt.Sprintf(`
 Add-Type -AssemblyName System.Windows.Forms
@@ -699,7 +732,7 @@ Add-Type -AssemblyName System.Windows.Forms
 			// Type character by character with delay
 			script = `Add-Type -AssemblyName System.Windows.Forms` + "\n"
 			for _, char := range params.Text {
-				charStr := string(char)
+				charStr := escapeSendKeys(string(char))
 				charStr = strings.ReplaceAll(charStr, "'", "''")
 				script += fmt.Sprintf("[System.Windows.Forms.SendKeys]::SendWait('%s')\n", charStr)
 				script += fmt.Sprintf("Start-Sleep -Milliseconds %d\n", params.DelayMs)
@@ -731,6 +764,10 @@ Add-Type -AssemblyName System.Windows.Forms
 }
 
 func toolKeyboardHotkey(ctx context.Context, args json.RawMessage) (string, error) {
+	if err := checkScreenControl(); err != nil {
+		return "", err
+	}
+
 	var params struct {
 		Keys string `json:"keys"`
 	}
@@ -1098,6 +1135,10 @@ $windows | ForEach-Object { Write-Output $_ }
 }
 
 func toolClickText(ctx context.Context, args json.RawMessage) (string, error) {
+	if err := checkScreenControl(); err != nil {
+		return "", err
+	}
+
 	var params struct {
 		Text   string `json:"text"`
 		Button string `json:"button"`
@@ -1113,5 +1154,40 @@ func toolClickText(ctx context.Context, args json.RawMessage) (string, error) {
 	// 4. Click at those coordinates
 
 	return fmt.Sprintf("To click on '%s': 1) Use take_screenshot to see the screen, 2) Identify the coordinates of '%s', 3) Use mouse_click with those coordinates", params.Text, params.Text), nil
+}
+
+// escapeSendKeys escapes special characters for Windows SendKeys.
+// SendKeys uses these characters as modifiers:
+//   - + = Shift
+//   - ^ = Ctrl
+//   - % = Alt
+//   - ~ = Enter
+//
+// And these for grouping/special keys: {}, (), []
+// To type these literally, they must be wrapped in braces: {+}, {^}, etc.
+func escapeSendKeys(text string) string {
+	// Characters that have special meaning in SendKeys
+	specialChars := map[rune]string{
+		'+':  "{+}",
+		'^':  "{^}",
+		'%':  "{%}",
+		'~':  "{~}",
+		'{':  "{{}",
+		'}':  "{}}",
+		'(':  "{(}",
+		')':  "{)}",
+		'[':  "{[}",
+		']':  "{]}",
+	}
+
+	var result strings.Builder
+	for _, char := range text {
+		if escaped, ok := specialChars[char]; ok {
+			result.WriteString(escaped)
+		} else {
+			result.WriteRune(char)
+		}
+	}
+	return result.String()
 }
 

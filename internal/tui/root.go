@@ -12,6 +12,7 @@ import (
 	"github.com/tanav-malhotra/ironguard/internal/agent"
 	"github.com/tanav-malhotra/ironguard/internal/config"
 	"github.com/tanav-malhotra/ironguard/internal/mcp"
+	"github.com/tanav-malhotra/ironguard/internal/tools"
 )
 
 // Run starts the top-level TUI program.
@@ -146,6 +147,9 @@ Model: claude-opus-4-5 (maximum capability)
 	// Connect MCP tools to agent's tool registry
 	mcpAdapter := mcp.NewToolsAdapter(mcpMgr)
 	ag.SetMCPManager(mcpAdapter)
+
+	// Sync screen mode with tools package on startup
+	tools.SetScreenMode(cfg.ScreenMode)
 
 	return model{
 		cfg:          cfg,

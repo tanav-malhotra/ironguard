@@ -25,7 +25,7 @@ func TestDefaultModel(t *testing.T) {
 		expected string
 	}{
 		{ProviderClaude, "claude-opus-4-5"},
-		{ProviderOpenAI, "gpt-5.1-codex-max"},
+		{ProviderOpenAI, "gpt-5.1"}, // gpt-5.1 is first in ModelPresets, so it's the default
 		{ProviderGemini, "gemini-3-pro"},
 	}
 

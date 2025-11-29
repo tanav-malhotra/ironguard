@@ -60,6 +60,19 @@ sudo ./ironguard
 /harden
 ```
 
+When you run `/harden` without arguments, it will **auto-detect your OS** and show options:
+
+```
+🔍 DETECTED SYSTEM: Windows 10 (19045)
+
+Choose hardening mode:
+  /harden windows        - Windows 10/11 desktop
+  /harden windows-server - Windows Server
+  /harden linux          - Ubuntu/Debian/Linux Mint
+  /harden packet-tracer  - Cisco Packet Tracer (needs /screen control)
+  /harden auto           - Auto-detect and start
+```
+
 **That's it!** The AI will now automatically:
 - ✅ Read the README (authorized users, services, restrictions)
 - ✅ Read and answer forensics questions (5-10 pts each!)
@@ -74,8 +87,13 @@ sudo ./ironguard
 
 | Command | Description |
 |---------|-------------|
-| `/harden` | **Start autonomous hardening** - AI does everything automatically |
-| `/auto [target]` | Same as `/harden`, optionally set target score (default: 100) |
+| `/harden` | **Show OS detection and mode selection** |
+| `/harden windows` | Start hardening for Windows 10/11 |
+| `/harden windows-server` | Start hardening for Windows Server |
+| `/harden linux` | Start hardening for Ubuntu/Debian/Linux |
+| `/harden packet-tracer` | Start Packet Tracer mode (requires `/screen control`) |
+| `/harden auto` | Auto-detect OS and start immediately |
+| `/auto [target]` | Same as `/harden auto`, optionally set target score (default: 100) |
 | `/stop` | Stop the AI |
 | `/key <api-key>` | Set API key for current provider |
 | `/score` | Check current score |
@@ -150,12 +168,18 @@ For Windows/Linux CyberPatriot images. The AI will:
 ```
 
 ### 2. Packet Tracer Mode
-For Cisco Packet Tracer challenges. Requires screen control:
+For Cisco Packet Tracer challenges. Requires screen control because the AI needs to see and interact with the GUI:
 
 ```
-/mode packet-tracer
 /screen control
+/harden packet-tracer
 ```
+
+The AI will:
+- Take frequent screenshots to see the topology
+- Click on devices and configure them
+- Use keyboard to enter commands
+- Navigate the Packet Tracer interface
 
 ### 3. Network Quiz Mode
 For NetAcad and similar quizzes:
@@ -233,6 +257,8 @@ The AI has access to **40+ built-in tools** that it uses automatically during ha
 | `focus_window` | Brings a window to the foreground | To switch between applications |
 
 > ⚠️ **Note**: Screen control tools only work when `/screen control` is enabled. Default is observe-only.
+> 
+> If the AI tries to use these tools in observe mode, it will receive a clear error message explaining that screen control is disabled and how to enable it.
 
 ### Web & Research Tools
 

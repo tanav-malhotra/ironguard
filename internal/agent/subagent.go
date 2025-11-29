@@ -509,6 +509,26 @@ func (m *SubAgentManager) CleanupCompleted() int {
 	return count
 }
 
+// SetMaxAgents sets the maximum number of concurrent subagents.
+func (m *SubAgentManager) SetMaxAgents(max int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if max < 1 {
+		max = 1
+	}
+	if max > 10 {
+		max = 10 // Hard cap for safety
+	}
+	m.maxAgents = max
+}
+
+// GetMaxAgents returns the current maximum number of concurrent subagents.
+func (m *SubAgentManager) GetMaxAgents() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.maxAgents
+}
+
 // SubAgentResult is returned when checking subagent status.
 type SubAgentResult struct {
 	ID          string        `json:"id"`

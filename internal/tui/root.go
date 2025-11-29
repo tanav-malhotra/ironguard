@@ -658,6 +658,37 @@ func (m *model) executeAction(action *PendingAction) tea.Cmd {
 			if err == nil {
 				result = fmt.Sprintf("✅ Disconnected MCP server '%s'", action.Args)
 			}
+		case ActionSubAgentLimitChanged:
+			// Send a system message to the AI about the change
+			newMax := action.Args
+			systemMsg := fmt.Sprintf("[SYSTEM] The maximum concurrent subagents limit has been changed to %s. You can now spawn up to %s subagents in parallel.", newMax, newMax)
+			// Queue this as a message to the AI via Chat
+			go func() {
+				ctx := context.Background()
+				m.agent.Chat(ctx, systemMsg)
+			}()
+			result = "" // Don't show tool result, the message will appear in chat
+		case ActionSettingChanged:
+			// Send a system message to the AI about setting changes
+			var systemMsg string
+			switch action.Args {
+			case "confirm":
+				systemMsg = "[SYSTEM] Execution mode changed to CONFIRM. You must now wait for user approval before each action is executed. The user will see a confirmation prompt for every tool call."
+			case "autopilot":
+				systemMsg = "[SYSTEM] Execution mode changed to AUTOPILOT. You can now execute actions automatically without waiting for user approval. Work fast and autonomously!"
+			case "screen_observe":
+				systemMsg = "[SYSTEM] Screen mode changed to OBSERVE. You can take screenshots to see the screen, but you CANNOT use mouse_click, keyboard_type, or keyboard_hotkey. These tools will fail if you try to use them."
+			case "screen_control":
+				systemMsg = "[SYSTEM] Screen mode changed to CONTROL. You now have FULL access to mouse and keyboard! You can use mouse_click, keyboard_type, keyboard_hotkey, focus_window, and all screen interaction tools. Use this power for Packet Tracer, GUI settings, or any task requiring screen interaction."
+			default:
+				systemMsg = fmt.Sprintf("[SYSTEM] Setting changed: %s", action.Description)
+			}
+			// Queue this as a message to the AI via Chat
+			go func() {
+				ctx := context.Background()
+				m.agent.Chat(ctx, systemMsg)
+			}()
+			result = "" // Don't show tool result, the message will appear in chat
 		}
 
 		if err != nil {

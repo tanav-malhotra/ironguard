@@ -167,6 +167,21 @@ func (a *Agent) GetSubAgents() []SubAgentSummary {
 	return summaries
 }
 
+// SetMaxSubAgents sets the maximum number of concurrent subagents.
+func (a *Agent) SetMaxSubAgents(max int) {
+	if a.subAgentManager != nil {
+		a.subAgentManager.SetMaxAgents(max)
+	}
+}
+
+// GetMaxSubAgents returns the current maximum number of concurrent subagents.
+func (a *Agent) GetMaxSubAgents() int {
+	if a.subAgentManager == nil {
+		return 4 // default
+	}
+	return a.subAgentManager.GetMaxAgents()
+}
+
 // SetAPIKey sets the API key for a provider.
 func (a *Agent) SetAPIKey(provider string, key string) error {
 	return a.llmRegistry.SetAPIKey(llm.Provider(provider), key)
@@ -323,7 +338,213 @@ func (a *Agent) Chat(ctx context.Context, userMessage string) {
 	}
 }
 
+// Context management constants
+const (
+	// Approximate token limit before we summarize (conservative to leave room)
+	contextTokenLimit = 150000
+	// Chars per token estimate (conservative)
+	charsPerToken = 3
+	// Number of recent messages to always keep
+	recentMessagesToKeep = 10
+)
+
+// estimateTokens gives a rough estimate of tokens in the message history.
+func (a *Agent) estimateTokens() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	totalChars := 0
+	for _, msg := range a.messages {
+		totalChars += len(msg.Content)
+		for _, tc := range msg.ToolCalls {
+			totalChars += len(tc.Name) + len(tc.Arguments)
+		}
+	}
+	return totalChars / charsPerToken
+}
+
+// summarizeContextIfNeeded checks if context is too large and summarizes if so.
+func (a *Agent) summarizeContextIfNeeded(ctx context.Context) error {
+	estimatedTokens := a.estimateTokens()
+	if estimatedTokens < contextTokenLimit {
+		return nil // No summarization needed
+	}
+
+	a.events <- Event{
+		Type:    EventStatusUpdate,
+		Content: "📝 Context limit approaching, summarizing conversation...",
+	}
+
+	a.mu.Lock()
+	messageCount := len(a.messages)
+
+	// Keep recent messages
+	keepFrom := messageCount - recentMessagesToKeep
+	if keepFrom < 0 {
+		keepFrom = 0
+	}
+
+	// Build summary of older messages
+	var oldMessages []llm.Message
+	if keepFrom > 0 {
+		oldMessages = a.messages[:keepFrom]
+	}
+	recentMessages := a.messages[keepFrom:]
+	a.mu.Unlock()
+
+	if len(oldMessages) == 0 {
+		return nil // Nothing to summarize
+	}
+
+	// Create summary of old messages
+	summary := a.createContextSummary(oldMessages)
+
+	// Build progress report
+	progressReport := a.buildProgressReport()
+
+	// Create new message history with summary
+	summaryMessage := llm.Message{
+		Role: "user",
+		Content: fmt.Sprintf(`[CONTEXT SUMMARY - Previous conversation was summarized to save space]
+
+%s
+
+%s
+
+[END SUMMARY - Recent conversation continues below]`, summary, progressReport),
+	}
+
+	a.mu.Lock()
+	// Replace old messages with summary + recent
+	a.messages = append([]llm.Message{summaryMessage}, recentMessages...)
+	a.mu.Unlock()
+
+	a.events <- Event{
+		Type:    EventStatusUpdate,
+		Content: fmt.Sprintf("✅ Context summarized: %d messages → %d messages", messageCount, len(a.messages)),
+	}
+
+	return nil
+}
+
+// createContextSummary creates a summary of older messages.
+func (a *Agent) createContextSummary(messages []llm.Message) string {
+	var sb strings.Builder
+	sb.WriteString("=== CONVERSATION SUMMARY ===\n\n")
+
+	// Track key information
+	var toolsUsed []string
+	var keyFindings []string
+	var actionsCompleted []string
+	toolCounts := make(map[string]int)
+
+	for _, msg := range messages {
+		switch msg.Role {
+		case "assistant":
+			// Track tool calls
+			for _, tc := range msg.ToolCalls {
+				toolCounts[tc.Name]++
+				if len(toolsUsed) < 20 { // Limit to avoid huge summaries
+					toolsUsed = append(toolsUsed, tc.Name)
+				}
+			}
+			// Extract key content (first 200 chars of significant responses)
+			if len(msg.Content) > 50 && len(keyFindings) < 10 {
+				content := msg.Content
+				if len(content) > 200 {
+					content = content[:200] + "..."
+				}
+				keyFindings = append(keyFindings, content)
+			}
+		case "tool":
+			// Track significant tool results
+			if strings.Contains(msg.Content, "Successfully") ||
+				strings.Contains(msg.Content, "Found") ||
+				strings.Contains(msg.Content, "Score") {
+				if len(actionsCompleted) < 15 {
+					result := msg.Content
+					if len(result) > 150 {
+						result = result[:150] + "..."
+					}
+					actionsCompleted = append(actionsCompleted, fmt.Sprintf("[%s] %s", msg.Name, result))
+				}
+			}
+		}
+	}
+
+	// Write summary
+	sb.WriteString("TOOLS USED:\n")
+	for tool, count := range toolCounts {
+		sb.WriteString(fmt.Sprintf("  - %s: %d times\n", tool, count))
+	}
+
+	if len(actionsCompleted) > 0 {
+		sb.WriteString("\nKEY ACTIONS COMPLETED:\n")
+		for _, action := range actionsCompleted {
+			sb.WriteString(fmt.Sprintf("  • %s\n", action))
+		}
+	}
+
+	if len(keyFindings) > 0 {
+		sb.WriteString("\nKEY FINDINGS/RESPONSES:\n")
+		for _, finding := range keyFindings {
+			sb.WriteString(fmt.Sprintf("  • %s\n", finding))
+		}
+	}
+
+	return sb.String()
+}
+
+// buildProgressReport creates a report of current progress for context continuation.
+func (a *Agent) buildProgressReport() string {
+	var sb strings.Builder
+	sb.WriteString("=== CURRENT PROGRESS ===\n\n")
+
+	// Add score info if available
+	if a.currentScore > 0 {
+		sb.WriteString(fmt.Sprintf("CURRENT SCORE: %d/100\n", a.currentScore))
+		if a.targetScore > 0 {
+			sb.WriteString(fmt.Sprintf("TARGET SCORE: %d/100\n", a.targetScore))
+			remaining := a.targetScore - a.currentScore
+			if remaining > 0 {
+				sb.WriteString(fmt.Sprintf("POINTS NEEDED: %d more\n", remaining))
+			}
+		}
+	}
+
+	// Add subagent status
+	if a.subAgentManager != nil {
+		subagents := a.subAgentManager.ListSubAgents()
+		if len(subagents) > 0 {
+			sb.WriteString("\nSUBAGENT STATUS:\n")
+			for _, sa := range subagents {
+				result := sa.ToResult()
+				sb.WriteString(fmt.Sprintf("  - %s: %s", result.ID, result.Status))
+				if result.Status == "completed" && result.Result != "" {
+					resultPreview := result.Result
+					if len(resultPreview) > 100 {
+						resultPreview = resultPreview[:100] + "..."
+					}
+					sb.WriteString(fmt.Sprintf(" - %s", resultPreview))
+				}
+				sb.WriteString("\n")
+			}
+		}
+	}
+
+	sb.WriteString("\nCONTINUE WORKING - Pick up where you left off!\n")
+	sb.WriteString("Remember to check score periodically and use subagents for parallel work.\n")
+
+	return sb.String()
+}
+
 func (a *Agent) callLLM(ctx context.Context) (*llm.ChatResponse, error) {
+	// Check if we need to summarize context before calling LLM
+	if err := a.summarizeContextIfNeeded(ctx); err != nil {
+		// Log but don't fail - try to continue anyway
+		a.events <- Event{Type: EventStatusUpdate, Content: fmt.Sprintf("Warning: context summarization failed: %v", err)}
+	}
+
 	client := a.llmRegistry.Current()
 
 	// Build tool definitions
@@ -373,8 +594,19 @@ func (a *Agent) callLLM(ctx context.Context) (*llm.ChatResponse, error) {
 }
 
 func (a *Agent) buildSystemPrompt() string {
+	// Use the detailed prompts from prompts.go
+	osName := a.cfg.OSInfo.Name
+	if osName == "" {
+		osName = a.cfg.OS
+	}
+	
+	// Build base prompt from prompts.go
+	builder := NewSystemPromptBuilder(osName, a.cfg.CompMode)
+	basePrompt := builder.Build()
+	
+	// Add dynamic runtime information
 	now := time.Now().Format("Monday, January 2, 2006 3:04 PM")
-
+	
 	// Build OS info string
 	osInfo := a.cfg.OSInfo
 	osDesc := osInfo.Type.String()
@@ -397,114 +629,28 @@ func (a *Agent) buildSystemPrompt() string {
 		screenModeDesc = "CONTROL ENABLED - Can use mouse/keyboard"
 	}
 
-	prompt := fmt.Sprintf(`You are IRONGUARD, an elite autonomous AI competing in CyberPatriot. This is a LIVE competition image and you MUST reach 100/100 points.
+	// Execution mode info
+	execModeDesc := "AUTOPILOT - Actions execute automatically"
+	if a.cfg.Mode == config.ModeConfirm {
+		execModeDesc = "CONFIRM - User must approve each action"
+	}
 
-═══════════════════════════════════════════════════════════════
-                    COMPETITION MODE ACTIVE
-═══════════════════════════════════════════════════════════════
+	dynamicInfo := fmt.Sprintf(`
+═══════════════════════════════════════════════════════════════════════════════
+                         CURRENT SESSION INFO
+═══════════════════════════════════════════════════════════════════════════════
 
 Current Time: %s
-Target: 100/100 points in under 30 minutes
 Operating System: %s
 Architecture: %s
 Screen Mode: %s
-Mode: AUTONOMOUS - Do NOT wait for human input
+Execution Mode: %s
+Max Concurrent Subagents: %d
 
-═══════════════════════════════════════════════════════════════
-                         PRIME DIRECTIVE
-═══════════════════════════════════════════════════════════════
+═══════════════════════════════════════════════════════════════════════════════
+`, now, osDesc, a.cfg.Architecture, screenModeDesc, execModeDesc, a.GetMaxSubAgents())
 
-You are in a RACE. Every second counts. You must:
-1. Work FAST and AUTONOMOUSLY - don't ask for permission
-2. Fix vulnerabilities CONTINUOUSLY until 100%% is reached
-3. NEVER STOP until the score is 100/100
-4. Check the score after each fix to verify points gained
-
-═══════════════════════════════════════════════════════════════
-                      EXECUTION STRATEGY
-═══════════════════════════════════════════════════════════════
-
-PHASE 1 - RECONNAISSANCE (First 2 minutes):
-□ read_readme - Understand the scenario and authorized users
-□ read_forensics - Get forensics questions (EASY POINTS!)
-□ read_score_report - Check starting score
-□ security_audit - Quick system overview
-
-PHASE 2 - QUICK WINS (Minutes 2-10):
-□ Answer ALL forensics questions immediately
-□ Delete/disable unauthorized users (check README for authorized list)
-□ Remove unauthorized users from admin groups
-□ Disable Guest account
-□ Enable firewall
-□ Set strong passwords for all authorized users
-
-PHASE 3 - DEEP HARDENING (Minutes 10-25):
-□ Find and delete prohibited media files (mp3, mp4, avi, mkv, etc.)
-□ Stop and disable unnecessary/dangerous services
-□ Install critical updates
-□ Configure password policies
-□ Fix file permissions
-□ Check for backdoors, unauthorized software, malware
-
-PHASE 4 - SWEEP (Minutes 25-30):
-□ Re-run security_audit
-□ Check for anything missed
-□ Verify all forensics answered
-□ Final score check
-
-═══════════════════════════════════════════════════════════════
-                       CRITICAL RULES
-═══════════════════════════════════════════════════════════════
-
-1. SPEED OVER CAUTION - This is competition, not production
-2. CHECK SCORE FREQUENTLY - After every 2-3 actions, use check_score_improved
-3. IF SCORE DROPS - You caused a penalty! Undo immediately
-4. HUMAN TEAMMATE - A human may also be working. If score jumps unexpectedly, they fixed something. Acknowledge and continue.
-5. NEVER DELETE AUTHORIZED USERS - Read the README carefully!
-6. FORENSICS = FREE POINTS - Answer them FIRST
-
-═══════════════════════════════════════════════════════════════
-                    COMMON VULNERABILITIES
-═══════════════════════════════════════════════════════════════
-
-USERS:
-- Unauthorized users exist (DELETE them)
-- Authorized users in admin group who shouldn't be (REMOVE from admins)
-- Unauthorized users in admin group (DELETE user entirely)
-- Weak/blank passwords (SET strong passwords)
-- Guest account enabled (DISABLE it)
-
-SERVICES (stop and disable these if running):
-- telnet, ftp, tftp (insecure remote access)
-- apache2, nginx, httpd (web servers unless needed)
-- mysql, postgresql (databases unless needed)
-- sshd with root login enabled
-- Remote Desktop with weak settings
-
-FILES:
-- Media files in user directories (mp3, mp4, avi, mkv, wav, flac)
-- Hacking tools
-- Games
-- Unauthorized software
-
-SETTINGS:
-- Firewall disabled
-- Automatic updates disabled
-- Password policy too weak
-- Account lockout not configured
-
-═══════════════════════════════════════════════════════════════
-
-SCREEN MODE NOTICE:
-%s
-If you need to use mouse/keyboard tools and they fail, tell the user to run: /screen control
-
-═══════════════════════════════════════════════════════════════
-
-NOW BEGIN. Read the README first, then GO FAST. Do not stop until 100/100.
-`, now, osDesc, a.cfg.Architecture, screenModeDesc, screenModeDesc)
-
-	return prompt
+	return basePrompt + dynamicInfo
 }
 
 // ClearHistory clears the conversation history.

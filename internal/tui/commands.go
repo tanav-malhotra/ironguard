@@ -208,6 +208,13 @@ func (r *CommandRegistry) registerDefaults() {
 			Args:        "<window title>",
 			Handler:     cmdFocusWindow,
 		},
+		// Subagent commands
+		{
+			Name:        "subagents",
+			Description: "Set max concurrent subagents or show current setting",
+			Args:        "[max-count]",
+			Handler:     cmdSubAgents,
+		},
 		// MCP server commands
 		{
 			Name:        "mcp-add",
@@ -336,11 +343,23 @@ func cmdModels(m *model, _ string) string {
 
 func cmdConfirm(m *model, _ string) string {
 	m.cfg.Mode = config.ModeConfirm
+	// Notify AI of mode change
+	m.pendingAction = &PendingAction{
+		Type:        ActionSettingChanged,
+		Description: "Mode changed to confirm",
+		Args:        "confirm",
+	}
 	return "Confirm mode enabled. I'll ask before running any commands."
 }
 
 func cmdAutopilot(m *model, _ string) string {
 	m.cfg.Mode = config.ModeAutopilot
+	// Notify AI of mode change
+	m.pendingAction = &PendingAction{
+		Type:        ActionSettingChanged,
+		Description: "Mode changed to autopilot",
+		Args:        "autopilot",
+	}
 	return "⚠️ Autopilot mode enabled. Commands will run automatically!"
 }
 
@@ -660,11 +679,23 @@ func cmdScreenMode(m *model, args string) string {
 		m.cfg.ScreenMode = config.ScreenModeObserve
 		// Sync with tools package
 		syncScreenMode(config.ScreenModeObserve)
+		// Notify AI of screen mode change
+		m.pendingAction = &PendingAction{
+			Type:        ActionSettingChanged,
+			Description: "Screen mode changed to observe",
+			Args:        "screen_observe",
+		}
 		return "👁️ Screen mode: OBSERVE\nAI can view the screen but cannot control mouse/keyboard.\nUse /screenshot to capture the screen."
 	case "control":
 		m.cfg.ScreenMode = config.ScreenModeControl
 		// Sync with tools package
 		syncScreenMode(config.ScreenModeControl)
+		// Notify AI of screen mode change
+		m.pendingAction = &PendingAction{
+			Type:        ActionSettingChanged,
+			Description: "Screen mode changed to control",
+			Args:        "screen_control",
+		}
 		return "🖱️ Screen mode: CONTROL\n⚠️ AI now has full mouse/keyboard control!\nAI can click, type, and interact with any application."
 	case "":
 		mode := "OBSERVE"
@@ -799,6 +830,8 @@ const (
 	ActionFocusWindow
 	ActionMCPAdd
 	ActionMCPRemove
+	ActionSubAgentLimitChanged
+	ActionSettingChanged
 )
 
 // PendingAction represents an action waiting to be executed.
@@ -806,6 +839,48 @@ type PendingAction struct {
 	Type        ActionType
 	Description string
 	Args        string
+}
+
+// Subagent command handlers
+
+func cmdSubAgents(m *model, args string) string {
+	if args == "" {
+		max := m.agent.GetMaxSubAgents()
+		running := len(m.agent.GetSubAgents())
+		return fmt.Sprintf(`🤖 SUBAGENT SETTINGS
+
+Current max concurrent subagents: %d
+Currently running: %d
+
+Usage: /subagents <max-count>
+Example: /subagents 6
+
+Valid range: 1-10
+Default: 4
+
+💡 More subagents = more parallel work but higher API costs`, max, running)
+	}
+
+	var newMax int
+	if _, err := fmt.Sscanf(args, "%d", &newMax); err != nil {
+		return "Invalid number. Usage: /subagents <max-count>\nExample: /subagents 6"
+	}
+
+	if newMax < 1 || newMax > 10 {
+		return "Max subagents must be between 1 and 10."
+	}
+
+	oldMax := m.agent.GetMaxSubAgents()
+	m.agent.SetMaxSubAgents(newMax)
+
+	// Queue a system message to inform the AI about the change
+	m.pendingAction = &PendingAction{
+		Type:        ActionSubAgentLimitChanged,
+		Description: fmt.Sprintf("Max subagents changed from %d to %d", oldMax, newMax),
+		Args:        fmt.Sprintf("%d", newMax),
+	}
+
+	return fmt.Sprintf("✅ Max concurrent subagents changed: %d → %d\nThe AI has been notified of this change.", oldMax, newMax)
 }
 
 // MCP command handlers

@@ -121,6 +121,7 @@ Choose hardening mode:
 | `/autopilot` | Enable autopilot mode (default) |
 | `/screen <observe\|control>` | Set screen interaction mode |
 | `/mode <harden\|packet-tracer\|quiz>` | Set competition mode |
+| `/subagents [max]` | Set max concurrent subagents (1-10, default: 4) |
 | `/status` | Show current configuration |
 
 ### Task Management
@@ -446,7 +447,7 @@ When the AI is reasoning through a problem, you'll see its thinking process in a
 The sidebar shows active sub-agents with their current status:
 - ⏳ Running sub-agents show their current step
 - ✅ Completed sub-agents show result summaries
-- Maximum 4 concurrent sub-agents
+- Maximum concurrent sub-agents is configurable via `/subagents <max>` (default: 4, range: 1-10)
 
 ### Collapsible Tool Output
 Tool calls show as collapsed by default with a preview:
@@ -465,6 +466,20 @@ Long-running operations show progress bars and spinners. The sidebar displays:
 If the AI is busy, your messages are queued and sent automatically when ready:
 - **Enter**: Queue message (sends when AI is free)
 - **Ctrl+Enter**: Interrupt AI and send immediately
+
+### Context Management
+IRONGUARD automatically manages conversation context to prevent hitting token limits:
+- Monitors estimated token usage during long sessions
+- When approaching limits (~150k tokens), automatically summarizes older conversation
+- Preserves recent messages and key findings
+- Maintains progress information (score, subagent status) across summarization
+- AI continues working seamlessly without losing track of the task
+
+### Persistent Shell Sessions
+The `run_command` tool maintains a persistent shell session:
+- Working directory persists across commands (`cd /path` then `ls` works correctly)
+- Use `new_session: true` parameter to start a fresh shell if needed
+- Use `/subagents` to configure parallel execution capacity
 
 ## License
 

@@ -72,13 +72,37 @@ The AI can spawn child agents to work in parallel:
 - `wait_for_subagent` - Block until complete
 - `cancel_subagent` - Cancel a running subagent
 
+**Spawning Options:**
+
+1. **Preset Focus** - Use predefined prompts optimized for common tasks:
+   ```
+   spawn_subagent(task="Answer Forensics Q1...", focus="forensics")
+   spawn_subagent(task="Audit all users", focus="users")
+   spawn_subagent(task="Find media files", focus="files")
+   spawn_subagent(task="Check running services", focus="services")
+   ```
+
+2. **Custom Instructions** - Full flexibility for any task:
+   ```
+   spawn_subagent(
+     task="Research vsftpd hardening",
+     custom_instructions="Use web_search to find vsftpd security guides. Summarize key config changes needed."
+   )
+   
+   spawn_subagent(
+     task="Check SSH configuration",
+     custom_instructions="Read /etc/ssh/sshd_config. Check for: PermitRootLogin, PasswordAuthentication, X11Forwarding. Report security issues."
+   )
+   ```
+
 **Strategy:**
 ```
 Main Agent spawns:
-├── Subagent 1: Answer Forensics Q1
-├── Subagent 2: Answer Forensics Q2
-├── Subagent 3: Audit user accounts
-└── Subagent 4: Search for prohibited files
+├── Subagent 1: Answer Forensics Q1 (focus="forensics")
+├── Subagent 2: Answer Forensics Q2 (focus="forensics")
+├── Subagent 3: Audit user accounts (focus="users")
+├── Subagent 4: Research MySQL hardening (custom_instructions="...")
+└── Subagent 5: Check cron jobs for backdoors (custom_instructions="...")
 
 All work simultaneously while main agent handles quick wins!
 ```

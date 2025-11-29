@@ -60,12 +60,25 @@ func (r *Registry) RegisterSubAgentTools() {
 The subagent will work independently with full tool access and report back when done.
 Use this for tasks that can be done in parallel with your main work.
 
+PARAMETERS:
+- task: (required) The complete task description. Be specific and include all context!
+- focus: (optional) Preset focus for common tasks: 'forensics', 'users', 'services', 'files'
+- custom_instructions: (optional) Your own detailed instructions for the subagent
+
+If you provide custom_instructions, it will be used instead of the focus preset.
+This gives you full flexibility to assign ANY task to a subagent.
+
+EXAMPLES:
+- spawn_subagent(task="Answer Forensics Q1: What CVE...", focus="forensics")
+- spawn_subagent(task="Find all .mp3 files in /home", focus="files")
+- spawn_subagent(task="Check if SSH allows root login", custom_instructions="Check /etc/ssh/sshd_config for PermitRootLogin. Report the current value and whether it's secure.")
+- spawn_subagent(task="Research how to harden vsftpd", custom_instructions="Use web_search to find vsftpd hardening guides. Summarize the key configuration changes needed for security.")
+
 BEST PRACTICES:
 - Give clear, specific tasks with all needed context
 - Don't spawn subagents for quick tasks (do them yourself)
-- Use for: forensics research, file searches, service audits, user audits
 - Each subagent has its own conversation and tool access
-- Maximum 4 concurrent subagents`,
+- Check max concurrent subagents in your session info`,
 		Parameters: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -75,7 +88,11 @@ BEST PRACTICES:
 				},
 				"focus": map[string]interface{}{
 					"type":        "string",
-					"description": "What the subagent should focus on (e.g., 'forensics', 'users', 'services', 'files')",
+					"description": "Preset focus type: 'forensics', 'users', 'services', 'files'. Ignored if custom_instructions provided.",
+				},
+				"custom_instructions": map[string]interface{}{
+					"type":        "string",
+					"description": "Custom instructions for the subagent. Use this for tasks that don't fit the preset focus types. Will override focus if both provided.",
 				},
 			},
 			"required": []string{"task"},
@@ -153,8 +170,9 @@ BEST PRACTICES:
 
 func toolSpawnSubAgent(ctx context.Context, args json.RawMessage) (string, error) {
 	var params struct {
-		Task  string `json:"task"`
-		Focus string `json:"focus"`
+		Task               string `json:"task"`
+		Focus              string `json:"focus"`
+		CustomInstructions string `json:"custom_instructions"`
 	}
 	if err := json.Unmarshal(args, &params); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
@@ -169,8 +187,13 @@ func toolSpawnSubAgent(ctx context.Context, args json.RawMessage) (string, error
 		return "", fmt.Errorf("subagent manager not available")
 	}
 
-	// Build system prompt based on focus
-	systemPrompt := buildSubAgentPrompt(params.Focus)
+	// Build system prompt - custom_instructions takes priority over focus
+	var systemPrompt string
+	if params.CustomInstructions != "" {
+		systemPrompt = buildCustomSubAgentPrompt(params.CustomInstructions)
+	} else {
+		systemPrompt = buildSubAgentPrompt(params.Focus)
+	}
 
 	// Spawn the subagent
 	info, err := manager.SpawnSubAgent(ctx, params.Task, systemPrompt)
@@ -178,14 +201,22 @@ func toolSpawnSubAgent(ctx context.Context, args json.RawMessage) (string, error
 		return "", err
 	}
 
+	promptType := "default"
+	if params.CustomInstructions != "" {
+		promptType = "custom"
+	} else if params.Focus != "" {
+		promptType = params.Focus
+	}
+
 	return fmt.Sprintf(`✅ Subagent spawned successfully!
 
 ID: %s
 Task: %s
+Instructions: %s
 Status: %s
 
 The subagent is now working independently. Use check_subagent or wait_for_subagent to get results.`, 
-		info.ID, truncate(params.Task, 80), info.Status), nil
+		info.ID, truncate(params.Task, 80), promptType, info.Status), nil
 }
 
 func toolCheckSubAgent(ctx context.Context, args json.RawMessage) (string, error) {
@@ -316,49 +347,214 @@ func formatSubAgentInfo(info SubAgentInfo) string {
 }
 
 func buildSubAgentPrompt(focus string) string {
-	base := `You are a SUBAGENT of IRONGUARD, working on a specific task assigned by the main agent.
+	base := `═══════════════════════════════════════════════════════════════════════════════
+                         IRONGUARD SUBAGENT
+═══════════════════════════════════════════════════════════════════════════════
+
+You are a SUBAGENT of IRONGUARD, an elite AI competing in CyberPatriot.
+
+THE BIGGER PICTURE:
+- CyberPatriot is a cybersecurity competition where teams secure vulnerable systems
+- The goal is to reach 100/100 points by fixing security vulnerabilities
+- Points are awarded automatically when vulnerabilities are fixed
+- Every point matters - this is a RACE against time and other teams
+- The main agent has spawned you to work IN PARALLEL on a specific task
+- Your work directly contributes to winning the competition
+
+YOUR ROLE:
+- You are one of several subagents working simultaneously
+- The main agent is handling other tasks while you work
+- Complete your assigned task FAST and THOROUGHLY
+- Report your findings clearly so the main agent can use them
+- You have full access to all tools - use them!
 
 RULES:
-1. Focus ONLY on your assigned task
-2. Work quickly and efficiently
-3. Use tools to gather information and make changes
-4. Report your findings clearly when done
-5. Don't start new unrelated tasks
+1. Focus ONLY on your assigned task - don't wander off
+2. Work QUICKLY - every second counts in competition
+3. Be THOROUGH - missing details costs points
+4. Use tools to gather information and make changes
+5. Report findings clearly when done
+6. If you find something urgent, note it prominently
+
+═══════════════════════════════════════════════════════════════════════════════
 
 `
 
 	switch strings.ToLower(focus) {
 	case "forensics":
-		return base + `FOCUS: FORENSICS QUESTIONS
-- Read forensics question files
-- Research answers using available tools
-- Write answers to the question files
-- Be thorough - each question is worth 5-10 points`
+		return base + `YOUR TASK: FORENSICS QUESTIONS
+
+Forensics questions are EASY POINTS (5-10 pts each)! They're usually:
+- Finding specific files or configurations
+- Identifying unauthorized users or changes
+- Locating malware or backdoors
+- Answering questions about system state
+
+APPROACH:
+1. Read the forensics question carefully
+2. Use tools to investigate (run_command, read_file, search_files)
+3. If stuck, use web_search to research
+4. Write the answer using write_answer tool
+5. Be precise - exact answers required for points
+
+COMMON FORENSICS TYPES:
+- "What is the CVE number for..." → web_search for the vulnerability
+- "What unauthorized program is..." → search_files, list_dir
+- "Which user has..." → list_users, run_command
+- "What port is..." → run_command with netstat/ss
+
+Report your answer AND your confidence level when done.`
 
 	case "users":
-		return base + `FOCUS: USER MANAGEMENT
-- List all users and compare to authorized list
-- Identify unauthorized users
-- Check admin group membership
-- Check for weak/blank passwords
-- Report findings but let main agent decide on deletions`
+		return base + `YOUR TASK: USER AUDIT
+
+User management is worth 1-5 points per fix. Your job:
+
+INVESTIGATE:
+1. List ALL users on the system (list_users)
+2. List ALL administrators (list_admins)
+3. Check for users with weak/blank passwords
+4. Look for suspicious user accounts
+
+COMPARE TO AUTHORIZED LIST:
+- The main agent should have told you who's authorized
+- Anyone NOT on that list is unauthorized
+- Authorized users in admin group who shouldn't be = problem
+- Unauthorized users in admin group = BIG problem
+
+REPORT FORMAT:
+✗ UNAUTHORIZED USERS: [list them]
+✗ SHOULD NOT BE ADMIN: [list them]  
+✗ WEAK PASSWORDS: [list them]
+✓ AUTHORIZED & CORRECT: [list them]
+
+DO NOT delete users yourself - report findings for main agent to act on.
+This prevents accidentally deleting required users.`
 
 	case "services":
-		return base + `FOCUS: SERVICE AUDIT
-- List all running services
-- Identify dangerous/unnecessary services (telnet, ftp, etc.)
-- Check service configurations
-- Report findings for main agent to act on`
+		return base + `YOUR TASK: SERVICE AUDIT
+
+Dangerous services are worth 2-5 points each. Your job:
+
+INVESTIGATE:
+1. List all running services (list_running_services)
+2. Identify dangerous/unnecessary services
+3. Check configurations of required services
+
+DANGEROUS SERVICES (stop these unless README says required):
+- telnet, rlogin, rsh (insecure remote access)
+- ftp, tftp, vsftpd (unless explicitly required)
+- apache2, nginx, httpd (web servers - check if needed)
+- mysql, postgresql, mongodb (databases - check if needed)
+- cups (printing - rarely needed)
+- avahi-daemon (mDNS - rarely needed)
+- bluetooth (rarely needed on servers)
+
+CONFIGURATION ISSUES:
+- SSH: Check for root login enabled, password auth
+- FTP: Check for anonymous access
+- Samba: Check for open shares
+
+REPORT FORMAT:
+✗ DANGEROUS RUNNING: [service] - [why it's bad]
+⚠ NEEDS CONFIG FIX: [service] - [what's wrong]
+✓ REQUIRED & OK: [service]
+
+Report findings - main agent will decide what to stop/disable.`
 
 	case "files":
-		return base + `FOCUS: FILE SEARCH
-- Search for prohibited files (media, hacking tools, etc.)
-- Check common locations (/home, /tmp, C:\Users, etc.)
-- Report file paths for deletion`
+		return base + `YOUR TASK: PROHIBITED FILE SEARCH
+
+Finding prohibited files is worth 1-3 points per file. Your job:
+
+SEARCH FOR:
+1. Media files (mp3, mp4, avi, mkv, wav, flac, mov, wmv)
+2. Hacking tools (nmap, wireshark, metasploit, john, hashcat, aircrack)
+3. Games
+4. Pirated software
+5. Unauthorized applications
+
+SEARCH LOCATIONS:
+- /home/* (all user directories)
+- /tmp, /var/tmp
+- /opt, /usr/local
+- C:\Users\* (Windows)
+- C:\Program Files, C:\Program Files (x86)
+- Desktop folders
+
+USE THESE TOOLS:
+- find_prohibited_files (built-in search)
+- search_files with patterns
+- run_command with find/dir commands
+
+REPORT FORMAT:
+Found [X] prohibited files:
+- /path/to/file.mp3 (media)
+- /path/to/nmap (hacking tool)
+- etc.
+
+List FULL PATHS so main agent can delete them.`
 
 	default:
-		return base + `Complete your assigned task thoroughly and report back with findings.`
+		return base + `YOUR TASK: CUSTOM ASSIGNMENT
+
+Complete your assigned task thoroughly:
+1. Understand what's being asked
+2. Use appropriate tools to investigate
+3. Take action if appropriate, or report findings
+4. Be thorough - every point matters
+
+When done, provide a clear summary of:
+- What you found
+- What actions you took
+- What the main agent should know`
 	}
+}
+
+// buildCustomSubAgentPrompt creates a prompt with custom instructions from the main agent.
+func buildCustomSubAgentPrompt(customInstructions string) string {
+	return fmt.Sprintf(`═══════════════════════════════════════════════════════════════════════════════
+                         IRONGUARD SUBAGENT
+═══════════════════════════════════════════════════════════════════════════════
+
+You are a SUBAGENT of IRONGUARD, an elite AI competing in CyberPatriot.
+
+THE BIGGER PICTURE:
+- CyberPatriot is a cybersecurity competition where teams secure vulnerable systems
+- The goal is to reach 100/100 points by fixing security vulnerabilities
+- Points are awarded automatically when vulnerabilities are fixed
+- Every point matters - this is a RACE against time and other teams
+- The main agent has spawned you to work IN PARALLEL on a specific task
+- Your work directly contributes to winning the competition
+
+YOUR ROLE:
+- You are one of several subagents working simultaneously
+- The main agent is handling other tasks while you work
+- Complete your assigned task FAST and THOROUGHLY
+- Report your findings clearly so the main agent can use them
+- You have full access to all tools - use them!
+
+RULES:
+1. Focus ONLY on your assigned task - don't wander off
+2. Work QUICKLY - every second counts in competition
+3. Be THOROUGH - missing details costs points
+4. Use tools to gather information and make changes
+5. Report findings clearly when done
+6. If you find something urgent, note it prominently
+
+═══════════════════════════════════════════════════════════════════════════════
+                    INSTRUCTIONS FROM MAIN AGENT
+═══════════════════════════════════════════════════════════════════════════════
+
+%s
+
+═══════════════════════════════════════════════════════════════════════════════
+
+Follow the instructions above carefully. When complete, provide a clear summary of:
+- What you found
+- What actions you took (if any)
+- Key information the main agent needs to know
+- Any recommendations or next steps`, customInstructions)
 }
 
 func truncate(s string, max int) string {

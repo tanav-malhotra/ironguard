@@ -128,7 +128,11 @@ run_command("pwd")              # Shows /home/user/Documents
 Automatic handling of long conversations:
 
 - Monitors token usage during sessions
-- When approaching limits (~150k tokens), automatically summarizes
+- Triggers summarization at 90% of provider's context limit
+- Provider-specific limits:
+  - Gemini: 1M tokens (gemini-3-pro)
+  - Claude: 200K tokens (opus-4-5 main model)
+  - OpenAI: 272K tokens (gpt-5.1)
 - Preserves:
   - Recent messages (last 10)
   - Key actions completed
@@ -136,6 +140,53 @@ Automatic handling of long conversations:
   - Current score and target
   - Subagent status
 - AI continues seamlessly without losing track
+
+**Summarization Modes:**
+- **Smart** (default): Uses provider's largest-context model for intelligent summarization
+  - Claude: Uses Sonnet 4.5 (1M context) even when Opus is main model
+  - Gemini: Uses Gemini 3 Pro (1M+ context)
+  - OpenAI: Uses GPT-5.1 (272K context)
+- **Fast**: Programmatic extraction (saves tokens)
+
+Toggle with `/summarize smart` or `/summarize fast`.
+
+**Token Tracking:**
+- Status bar shows: `📊 45k/200k` (current/limit)
+- `/tokens` command shows detailed statistics
+- Tracks tokens saved by summarization
+
+### 7. Persistent Memory 🧠
+Remember information across sessions:
+
+**AI Tools:**
+- `remember(category, content, os)` - Save to memory
+- `recall(query, category, os)` - Search memory
+- `list_memories(category)` - List all memories
+- `forget(id)` - Delete a memory
+
+**User Commands:**
+- `/remember <category> <content>` - Save to memory
+- `/recall [query]` - Search memory
+- `/forget` - Clear all memories
+
+**Categories:** vulnerability, config, command, finding, tip, pattern
+
+**Storage:** `~/.ironguard/memory.json`
+
+### 8. Undo System ↩️
+Every file edit is automatically checkpointed:
+
+- `/undo` - Revert the last file change
+- `/history` - Show undoable actions
+- Supports file edits, creates, and deletes
+- AI is notified when user undoes something
+
+### 9. Compact Mode 📝
+Toggle brief AI responses:
+
+- `/compact on` - Brief, concise responses
+- `/compact off` - Detailed responses (default)
+- AI is notified via [SYSTEM] message
 
 ### 7. Setting Change Notifications 📢
 AI is automatically notified when user changes settings:
@@ -222,8 +273,20 @@ AI is automatically notified when user changes settings:
 | `/screen <observe\|control>` | Set screen interaction mode |
 | `/mode <harden\|packet-tracer\|quiz>` | Set competition mode |
 | `/subagents [max]` | Set max concurrent subagents (1-10, default: 4) |
+| `/compact [on\|off]` | Toggle brief AI responses |
+| `/summarize <smart\|fast>` | Set context summarization mode |
 | `/status` | Show current configuration |
 | `/clear` | Clear chat history |
+
+### Undo & Memory
+| Command | Description |
+|---------|-------------|
+| `/undo` | Revert the last file edit |
+| `/history` | Show undoable actions |
+| `/remember <cat> <text>` | Save to persistent memory |
+| `/recall [query]` | Search persistent memory |
+| `/forget` | Clear all memories |
+| `/tokens` | Show token usage statistics |
 
 ### Task Management
 | Command | Description |
@@ -314,6 +377,14 @@ AI is automatically notified when user changes settings:
 |------|-------------|
 | `web_search` | Search the web for information |
 | `fetch_url` | Fetch and parse URL content |
+
+### Persistent Memory
+| Tool | Description |
+|------|-------------|
+| `remember` | Save information to persistent memory |
+| `recall` | Search memory for previously saved info |
+| `list_memories` | List all memory entries |
+| `forget` | Delete a memory entry by ID |
 
 ### Screen Interaction
 | Tool | Description |

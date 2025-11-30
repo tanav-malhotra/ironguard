@@ -263,8 +263,14 @@ func (c *ClaudeClient) buildRequest(req ChatRequest, stream bool) claudeRequest 
 		maxTokens = 128000 // Maximum output for extended thinking responses
 	}
 
+	// Use provided model or default to opus-4-5
+	model := req.Model
+	if model == "" {
+		model = "claude-opus-4-5" // Most powerful model for competition
+	}
+
 	claudeReq := claudeRequest{
-		Model:     "claude-opus-4-5", // Most powerful model for competition
+		Model:     model,
 		MaxTokens: maxTokens,
 		System:    req.SystemPrompt,
 		Stream:    stream,

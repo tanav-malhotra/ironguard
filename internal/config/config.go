@@ -74,6 +74,16 @@ type OSInfo struct {
 	Kernel       string // Kernel version (Linux only)
 }
 
+// SummarizeMode controls how context summarization is performed.
+type SummarizeMode string
+
+const (
+	// SummarizeSmart uses an LLM to intelligently summarize context (default).
+	SummarizeSmart SummarizeMode = "smart"
+	// SummarizeFast uses programmatic extraction (saves tokens).
+	SummarizeFast SummarizeMode = "fast"
+)
+
 // Config holds the in-memory runtime configuration for ironguard.
 // For competition use we intentionally avoid mandatory config files.
 type Config struct {
@@ -92,6 +102,10 @@ type Config struct {
 
 	// Logging / UX
 	LogVerbose bool
+	CompactMode bool // When true, AI gives brief responses
+
+	// Context management
+	SummarizeMode SummarizeMode
 
 	// Environment detection (basic)
 	OS           string
@@ -105,14 +119,16 @@ type Config struct {
 // Uses the most powerful model and autopilot mode for autonomous operation.
 func DefaultConfig() Config {
 	return Config{
-		Provider:     ProviderAnthropic,
-		Model:        "claude-opus-4-5", // Most powerful model for competition
-		Mode:         ModeAutopilot,     // Autopilot for autonomous operation
-		ScreenMode:   ScreenModeObserve, // Observe by default, user can enable control
-		CompMode:     CompModeHarden,    // Default to hardening mode
-		LogVerbose:   false,
-		OS:           runtime.GOOS,
-		Architecture: runtime.GOARCH,
+		Provider:      ProviderAnthropic,
+		Model:         "claude-opus-4-5", // Most powerful model for competition
+		Mode:          ModeAutopilot,     // Autopilot for autonomous operation
+		ScreenMode:    ScreenModeObserve, // Observe by default, user can enable control
+		CompMode:      CompModeHarden,    // Default to hardening mode
+		LogVerbose:    false,
+		CompactMode:   false,             // Verbose by default
+		SummarizeMode: SummarizeSmart,    // Smart LLM summarization by default
+		OS:            runtime.GOOS,
+		Architecture:  runtime.GOARCH,
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -94,6 +95,19 @@ type Agent struct {
 
 	// Subagent management
 	subAgentManager *SubAgentManager
+	
+	// Pending system messages (queued to be processed after current step)
+	pendingSystemMsgs []string
+	pendingMsgsMu     sync.Mutex
+	
+	// Token tracking
+	tokenUsage *TokenUsage
+	
+	// Checkpoint/Undo system
+	checkpoints *CheckpointManager
+	
+	// Persistent memory
+	memory *Memory
 }
 
 // New creates a new agent.
@@ -107,14 +121,32 @@ func New(cfg *config.Config) *Agent {
 		toolRegistry: toolReg,
 		events:       make(chan Event, 100),
 		confirms:     make(chan ConfirmResponse, 10),
+		tokenUsage:   NewTokenUsage(),
+		checkpoints:  NewCheckpointManager(),
+		memory:       NewMemory(),
+	}
+	
+	// Load persistent memory
+	if err := a.memory.Load(); err != nil {
+		// Non-fatal, just log
+		a.events <- Event{Type: EventStatusUpdate, Content: "Note: Could not load memory from previous sessions"}
 	}
 	
 	// Initialize subagent manager
 	a.subAgentManager = NewSubAgentManager(llmReg, toolReg)
 	
+	// Set up completion callback to notify main AI when subagents finish
+	a.subAgentManager.SetCompletionCallback(func(id, task string, status SubAgentStatus, result string) {
+		a.handleSubAgentCompletion(id, task, status, result)
+	})
+	
 	// Register subagent manager with tools package
 	adapter := NewSubAgentManagerAdapter(a.subAgentManager)
 	tools.SetSubAgentManager(adapter)
+	
+	// Register memory manager with tools package
+	memAdapter := NewMemoryManagerAdapter(a.memory)
+	tools.SetMemoryManager(memAdapter)
 	
 	return a
 }
@@ -182,6 +214,103 @@ func (a *Agent) GetMaxSubAgents() int {
 	return a.subAgentManager.GetMaxAgents()
 }
 
+// GetTokenStats returns current token usage statistics.
+func (a *Agent) GetTokenStats() TokenStats {
+	return a.tokenUsage.GetStats()
+}
+
+// GetCheckpointManager returns the checkpoint manager.
+func (a *Agent) GetCheckpointManager() *CheckpointManager {
+	return a.checkpoints
+}
+
+// GetMemory returns the memory manager.
+func (a *Agent) GetMemory() *Memory {
+	return a.memory
+}
+
+// SaveMemory saves the memory to disk.
+func (a *Agent) SaveMemory() error {
+	return a.memory.Save()
+}
+
+// SetCompactMode sets whether the AI should give brief responses.
+func (a *Agent) SetCompactMode(compact bool) {
+	a.cfg.CompactMode = compact
+}
+
+// IsCompactMode returns whether compact mode is enabled.
+func (a *Agent) IsCompactMode() bool {
+	return a.cfg.CompactMode
+}
+
+// SetSummarizeMode sets the summarization mode.
+func (a *Agent) SetSummarizeMode(mode config.SummarizeMode) {
+	a.cfg.SummarizeMode = mode
+}
+
+// GetSummarizeMode returns the current summarization mode.
+func (a *Agent) GetSummarizeMode() config.SummarizeMode {
+	return a.cfg.SummarizeMode
+}
+
+// handleSubAgentCompletion is called when a subagent finishes and injects a notification into the chat.
+func (a *Agent) handleSubAgentCompletion(id, task string, status SubAgentStatus, result string) {
+	// Truncate task and result for the notification
+	taskPreview := task
+	if len(taskPreview) > 80 {
+		taskPreview = taskPreview[:77] + "..."
+	}
+	
+	resultPreview := result
+	if len(resultPreview) > 200 {
+		resultPreview = resultPreview[:197] + "..."
+	}
+	
+	var statusEmoji string
+	var statusText string
+	switch status {
+	case SubAgentStatusCompleted:
+		statusEmoji = "✅"
+		statusText = "COMPLETED"
+	case SubAgentStatusFailed:
+		statusEmoji = "❌"
+		statusText = "FAILED"
+	case SubAgentStatusCancelled:
+		statusEmoji = "🚫"
+		statusText = "CANCELLED"
+	default:
+		statusEmoji = "ℹ️"
+		statusText = string(status)
+	}
+	
+	notification := fmt.Sprintf(`[SYSTEM] %s SUBAGENT %s (%s)
+Task: %s
+Result Preview: %s
+
+Use check_subagent("%s") to see full results, or cleanup_subagent("%s") to free the slot.`, 
+		statusEmoji, statusText, id, taskPreview, resultPreview, id, id)
+	
+	// Inject as a user message so the AI sees it
+	a.mu.Lock()
+	a.messages = append(a.messages, llm.Message{
+		Role:    "user",
+		Content: notification,
+	})
+	a.mu.Unlock()
+	
+	// Also send an event to the TUI
+	a.events <- Event{
+		Type: EventSubAgentUpdate,
+		SubAgent: &SubAgentInfo{
+			ID:     id,
+			Task:   task,
+			Status: string(status),
+			Result: resultPreview,
+		},
+	}
+}
+
 // SetAPIKey sets the API key for a provider.
 func (a *Agent) SetAPIKey(provider string, key string) error {
 	return a.llmRegistry.SetAPIKey(llm.Provider(provider), key)
@@ -196,6 +325,49 @@ func (a *Agent) SetProvider(provider string) error {
 func (a *Agent) Cancel() {
 	if a.cancel != nil {
 		a.cancel()
+	}
+}
+
+// QueueSystemMessage queues a system message to be sent after the current AI step completes.
+// This does NOT interrupt the AI - the message will be processed when the AI is ready.
+func (a *Agent) QueueSystemMessage(msg string) {
+	a.pendingMsgsMu.Lock()
+	a.pendingSystemMsgs = append(a.pendingSystemMsgs, msg)
+	a.pendingMsgsMu.Unlock()
+	
+	// If AI is not busy, process immediately
+	if !a.IsBusy() {
+		a.processPendingSystemMessages()
+	}
+}
+
+// processPendingSystemMessages processes any queued system messages.
+func (a *Agent) processPendingSystemMessages() {
+	a.pendingMsgsMu.Lock()
+	msgs := a.pendingSystemMsgs
+	a.pendingSystemMsgs = nil
+	a.pendingMsgsMu.Unlock()
+	
+	if len(msgs) == 0 {
+		return
+	}
+	
+	// Add all pending messages to conversation
+	a.mu.Lock()
+	for _, msg := range msgs {
+		a.messages = append(a.messages, llm.Message{
+			Role:    "user",
+			Content: msg,
+		})
+	}
+	a.mu.Unlock()
+	
+	// Notify TUI that messages were added
+	for _, msg := range msgs {
+		a.events <- Event{
+			Type:    EventStatusUpdate,
+			Content: fmt.Sprintf("📨 System message queued: %s", truncateString(msg, 50)),
+		}
 	}
 }
 
@@ -219,6 +391,9 @@ func (a *Agent) Chat(ctx context.Context, userMessage string) {
 		a.busyMu.Lock()
 		a.busy = false
 		a.busyMu.Unlock()
+		
+		// Process any pending system messages now that AI is done
+		a.processPendingSystemMessages()
 	}()
 
 	// Create cancellable context
@@ -314,10 +489,46 @@ func (a *Agent) Chat(ctx context.Context, userMessage string) {
 			// Execute tool
 			a.events <- Event{Type: EventStatusUpdate, Content: fmt.Sprintf("Running %s...", tc.Name)}
 
+			// Create checkpoint for file-modifying operations
+			var checkpoint *Checkpoint
+			if tc.Name == "write_file" || tc.Name == "edit_file" || tc.Name == "search_replace" {
+				// Extract file path from arguments
+				var fileArgs struct {
+					Path     string `json:"path"`
+					FilePath string `json:"file_path"`
+				}
+				if err := json.Unmarshal(tc.Arguments, &fileArgs); err == nil {
+					filePath := fileArgs.Path
+					if filePath == "" {
+						filePath = fileArgs.FilePath
+					}
+					if filePath != "" {
+						checkpoint, _ = a.checkpoints.CreateFileCheckpoint(filePath, fmt.Sprintf("Edit %s", filePath))
+					}
+				}
+			}
+
 			output, err := a.toolRegistry.Execute(ctx, tc.Name, tc.Arguments)
 			if err != nil {
 				toolInfo.Error = err.Error()
 				output = fmt.Sprintf("Error: %s", err.Error())
+			} else if checkpoint != nil {
+				// Update checkpoint with new content
+				var fileArgs struct {
+					Path     string `json:"path"`
+					FilePath string `json:"file_path"`
+				}
+				if err := json.Unmarshal(tc.Arguments, &fileArgs); err == nil {
+					filePath := fileArgs.Path
+					if filePath == "" {
+						filePath = fileArgs.FilePath
+					}
+					if filePath != "" {
+						if newContent, err := os.ReadFile(filePath); err == nil {
+							a.checkpoints.UpdateCheckpointNewContent(checkpoint.ID, newContent)
+						}
+					}
+				}
 			}
 			toolInfo.Output = output
 
@@ -340,13 +551,59 @@ func (a *Agent) Chat(ctx context.Context, userMessage string) {
 
 // Context management constants
 const (
-	// Approximate token limit before we summarize (conservative to leave room)
-	contextTokenLimit = 150000
 	// Chars per token estimate (conservative)
 	charsPerToken = 3
 	// Number of recent messages to always keep
 	recentMessagesToKeep = 10
+	// Percentage of context limit at which to trigger summarization (90%)
+	summarizationThreshold = 0.90
 )
+
+// getContextLimit returns the context limit for the current provider.
+// This is based on the MAIN model being used (e.g., opus-4-5 for Claude).
+// For summarization, we may use a different model with larger context.
+func getContextLimit(provider config.Provider) int {
+	switch provider {
+	case config.ProviderGemini:
+		return 1000000 // gemini-3-pro: 1M tokens
+	case config.ProviderAnthropic:
+		return 200000 // claude-opus-4-5: 200K tokens (main model)
+	case config.ProviderOpenAI:
+		return 272000 // gpt-5.1: 272K tokens
+	default:
+		return 150000 // Conservative default
+	}
+}
+
+// Summarization model configuration per provider.
+// These are the models with the LARGEST context windows for each provider.
+// Used specifically for summarization to ensure all context fits.
+const (
+	// Claude: Use sonnet-4-5 for summarization (1M context with extended pricing)
+	// even though opus-4-5 is the main model (only 200K context)
+	// TODO: Switch to opus-4-5 when Anthropic increases its context to 1M
+	claudeSummarizationModel = "claude-sonnet-4-5"
+	
+	// Gemini: gemini-3-pro has 1M+ context
+	geminiSummarizationModel = "gemini-3-pro"
+	
+	// OpenAI: gpt-5.1 has 272K context
+	openaiSummarizationModel = "gpt-5.1"
+)
+
+// getSummarizationModel returns the model to use for summarization for the given provider.
+func getSummarizationModel(provider llm.Provider) string {
+	switch provider {
+	case llm.ProviderGemini:
+		return geminiSummarizationModel
+	case llm.ProviderClaude:
+		return claudeSummarizationModel
+	case llm.ProviderOpenAI:
+		return openaiSummarizationModel
+	default:
+		return "" // Use provider's default
+	}
+}
 
 // estimateTokens gives a rough estimate of tokens in the message history.
 func (a *Agent) estimateTokens() int {
@@ -366,13 +623,27 @@ func (a *Agent) estimateTokens() int {
 // summarizeContextIfNeeded checks if context is too large and summarizes if so.
 func (a *Agent) summarizeContextIfNeeded(ctx context.Context) error {
 	estimatedTokens := a.estimateTokens()
-	if estimatedTokens < contextTokenLimit {
+	
+	// Get context limit for current provider
+	contextLimit := getContextLimit(a.cfg.Provider)
+	triggerThreshold := int(float64(contextLimit) * summarizationThreshold)
+	
+	// Update token tracking
+	a.tokenUsage.SetContextLimit(contextLimit)
+	a.tokenUsage.AddInput(estimatedTokens)
+	
+	if estimatedTokens < triggerThreshold {
 		return nil // No summarization needed
 	}
 
+	modeStr := "smart (LLM)"
+	if a.cfg.SummarizeMode == config.SummarizeFast {
+		modeStr = "fast (programmatic)"
+	}
+	
 	a.events <- Event{
 		Type:    EventStatusUpdate,
-		Content: "📝 Context limit approaching, summarizing conversation...",
+		Content: fmt.Sprintf("📝 Context limit approaching, summarizing conversation (%s)...", modeStr),
 	}
 
 	a.mu.Lock()
@@ -396,11 +667,34 @@ func (a *Agent) summarizeContextIfNeeded(ctx context.Context) error {
 		return nil // Nothing to summarize
 	}
 
-	// Create summary of old messages
-	summary := a.createContextSummary(oldMessages)
+	// Create summary based on mode
+	var summary string
+	var err error
+	
+	if a.cfg.SummarizeMode == config.SummarizeSmart {
+		// Use LLM for intelligent summarization
+		summary, err = a.createSmartSummary(ctx, oldMessages)
+		if err != nil {
+			// Fall back to fast mode on error
+			a.events <- Event{Type: EventStatusUpdate, Content: fmt.Sprintf("⚠️ Smart summary failed (%v), using fast mode", err)}
+			summary = a.createFastSummary(oldMessages)
+		}
+	} else {
+		// Fast programmatic summarization
+		summary = a.createFastSummary(oldMessages)
+	}
 
 	// Build progress report
 	progressReport := a.buildProgressReport()
+
+	// Calculate tokens saved
+	oldTokens := 0
+	for _, msg := range oldMessages {
+		oldTokens += EstimateTokens(msg.Content)
+	}
+	newTokens := EstimateTokens(summary)
+	tokensSaved := oldTokens - newTokens
+	a.tokenUsage.RecordSummary(tokensSaved)
 
 	// Create new message history with summary
 	summaryMessage := llm.Message{
@@ -421,31 +715,180 @@ func (a *Agent) summarizeContextIfNeeded(ctx context.Context) error {
 
 	a.events <- Event{
 		Type:    EventStatusUpdate,
-		Content: fmt.Sprintf("✅ Context summarized: %d messages → %d messages", messageCount, len(a.messages)),
+		Content: fmt.Sprintf("✅ Context summarized: %d messages → %d messages (saved ~%d tokens)", messageCount, len(a.messages), tokensSaved),
 	}
 
 	return nil
 }
 
-// createContextSummary creates a summary of older messages.
-func (a *Agent) createContextSummary(messages []llm.Message) string {
+// createSmartSummary uses an LLM with large context window to intelligently summarize.
+func (a *Agent) createSmartSummary(ctx context.Context, messages []llm.Message) (string, error) {
+	// Build the conversation text to summarize
+	var conversationText strings.Builder
+	conversationText.WriteString("Summarize this CyberPatriot hardening session conversation. Preserve:\n")
+	conversationText.WriteString("1. ALL [SYSTEM] messages (setting changes, subagent notifications)\n")
+	conversationText.WriteString("2. Files that were edited and what changes were made\n")
+	conversationText.WriteString("3. Vulnerabilities found and fixed\n")
+	conversationText.WriteString("4. Current score progress\n")
+	conversationText.WriteString("5. Pending tasks or issues\n")
+	conversationText.WriteString("6. Key commands run and their results\n")
+	conversationText.WriteString("7. Subagent tasks and results\n\n")
+	conversationText.WriteString("=== CONVERSATION TO SUMMARIZE ===\n\n")
+	
+	for _, msg := range messages {
+		role := msg.Role
+		if role == "assistant" {
+			role = "AI"
+		} else if role == "user" {
+			role = "USER"
+		} else if role == "tool" {
+			role = fmt.Sprintf("TOOL[%s]", msg.Name)
+		}
+		
+		conversationText.WriteString(fmt.Sprintf("[%s]: %s\n", role, msg.Content))
+		
+		// Include tool calls
+		for _, tc := range msg.ToolCalls {
+			conversationText.WriteString(fmt.Sprintf("  → Called: %s\n", tc.Name))
+		}
+	}
+	
+	// Use the current provider for summarization, but with the largest context model.
+	// This ensures the full conversation (at 90% of main model's limit) fits.
+	//
+	// Summarization models per provider (largest context, high reasoning):
+	// - Gemini:    gemini-3-pro (1M+ tokens)
+	// - Claude:    claude-sonnet-4-5 (1M tokens with extended pricing)
+	//              Note: opus-4-5 is the main model but only has 200K context
+	//              TODO: Switch to opus-4-5 when Anthropic increases its context to 1M
+	// - OpenAI:    gpt-5.1 (272K tokens)
+	currentProvider := llm.Provider(a.cfg.Provider)
+	summarizeClient, err := a.llmRegistry.Get(currentProvider)
+	if err != nil {
+		return "", fmt.Errorf("no summarization client available: %w", err)
+	}
+	
+	// Get the appropriate summarization model for this provider
+	summarizeModel := getSummarizationModel(currentProvider)
+	
+	req := llm.ChatRequest{
+		Messages: []llm.Message{
+			{Role: "user", Content: conversationText.String()},
+		},
+		Model:          summarizeModel, // Use the large-context model for summarization
+		MaxTokens:      4000,
+		ReasoningLevel: llm.ReasoningHigh, // Always use high reasoning for accurate summarization
+		SystemPrompt: `You are summarizing a CyberPatriot cybersecurity competition session.
+Create a comprehensive but concise summary that allows the AI to continue working without losing context.
+
+CRITICAL - ALWAYS PRESERVE:
+- [SYSTEM] messages verbatim (these are user setting changes)
+- Subagent completion notifications
+- Current score and progress
+- Files that were edited (with paths)
+- Vulnerabilities found and their status (fixed/pending)
+- Any errors or issues encountered
+
+FORMAT:
+=== SESSION SUMMARY ===
+
+SETTING CHANGES:
+• [list any [SYSTEM] messages about settings]
+
+SCORE PROGRESS:
+• Current: X/100, Target: Y/100
+
+SUBAGENTS:
+• [list subagent tasks and results]
+
+FILES MODIFIED:
+• /path/to/file - [what was changed]
+
+VULNERABILITIES ADDRESSED:
+• [list what was found and fixed]
+
+KEY ACTIONS:
+• [important commands and results]
+
+PENDING/ISSUES:
+• [anything still to do or problems]
+
+Be thorough but concise. The AI needs this to continue the session effectively.`,
+	}
+	
+	resp, err := summarizeClient.Chat(ctx, req)
+	if err != nil {
+		return "", fmt.Errorf("summarization request failed: %w", err)
+	}
+	
+	return resp.Content, nil
+}
+
+// createFastSummary creates a programmatic summary of older messages (no LLM call).
+func (a *Agent) createFastSummary(messages []llm.Message) string {
 	var sb strings.Builder
 	sb.WriteString("=== CONVERSATION SUMMARY ===\n\n")
 
 	// Track key information
-	var toolsUsed []string
-	var keyFindings []string
-	var actionsCompleted []string
+	var systemMessages []string      // [SYSTEM] notifications - ALWAYS preserve
+	var filesEdited []string         // Files that were modified
+	var filesChecked []string        // Files that were read/analyzed  
+	var actionsCompleted []string    // Successful actions
+	var keyFindings []string         // Important discoveries
+	var settingChanges []string      // User setting changes
+	var subagentNotifications []string // Subagent completions
 	toolCounts := make(map[string]int)
 
 	for _, msg := range messages {
 		switch msg.Role {
+		case "user":
+			// Preserve ALL [SYSTEM] messages - these are critical notifications
+			if strings.HasPrefix(msg.Content, "[SYSTEM]") {
+				// Categorize system messages
+				if strings.Contains(msg.Content, "SUBAGENT") {
+					if len(subagentNotifications) < 20 {
+						subagentNotifications = append(subagentNotifications, msg.Content)
+					}
+				} else if strings.Contains(msg.Content, "mode changed") || 
+				          strings.Contains(msg.Content, "changed to") ||
+				          strings.Contains(msg.Content, "limit has been") {
+					if len(settingChanges) < 10 {
+						settingChanges = append(settingChanges, msg.Content)
+					}
+				} else {
+					if len(systemMessages) < 15 {
+						systemMessages = append(systemMessages, msg.Content)
+					}
+				}
+			}
 		case "assistant":
 			// Track tool calls
 			for _, tc := range msg.ToolCalls {
 				toolCounts[tc.Name]++
-				if len(toolsUsed) < 20 { // Limit to avoid huge summaries
-					toolsUsed = append(toolsUsed, tc.Name)
+				argsStr := string(tc.Arguments)
+				
+				// Track file operations specifically
+				if tc.Name == "write_file" || tc.Name == "edit_file" || tc.Name == "search_replace" {
+					// Try to extract filename from arguments
+					if strings.Contains(argsStr, "file") {
+						if len(filesEdited) < 30 {
+							// Extract a preview of what was edited
+							preview := argsStr
+							if len(preview) > 100 {
+								preview = preview[:100] + "..."
+							}
+							filesEdited = append(filesEdited, preview)
+						}
+					}
+				}
+				if tc.Name == "read_file" {
+					if len(filesChecked) < 30 {
+						preview := argsStr
+						if len(preview) > 80 {
+							preview = preview[:80] + "..."
+						}
+						filesChecked = append(filesChecked, preview)
+					}
 				}
 			}
 			// Extract key content (first 200 chars of significant responses)
@@ -460,8 +903,11 @@ func (a *Agent) createContextSummary(messages []llm.Message) string {
 			// Track significant tool results
 			if strings.Contains(msg.Content, "Successfully") ||
 				strings.Contains(msg.Content, "Found") ||
-				strings.Contains(msg.Content, "Score") {
-				if len(actionsCompleted) < 15 {
+				strings.Contains(msg.Content, "Score") ||
+				strings.Contains(msg.Content, "Created") ||
+				strings.Contains(msg.Content, "Deleted") ||
+				strings.Contains(msg.Content, "Modified") {
+				if len(actionsCompleted) < 20 {
 					result := msg.Content
 					if len(result) > 150 {
 						result = result[:150] + "..."
@@ -472,21 +918,77 @@ func (a *Agent) createContextSummary(messages []llm.Message) string {
 		}
 	}
 
-	// Write summary
+	// Write summary - CRITICAL INFO FIRST
+	
+	// 1. System messages (most critical - user setting changes, notifications)
+	if len(settingChanges) > 0 {
+		sb.WriteString("SETTING CHANGES (from user):\n")
+		for _, change := range settingChanges {
+			sb.WriteString(fmt.Sprintf("  • %s\n", change))
+		}
+		sb.WriteString("\n")
+	}
+	
+	// 2. Subagent status
+	if len(subagentNotifications) > 0 {
+		sb.WriteString("SUBAGENT NOTIFICATIONS:\n")
+		for _, notif := range subagentNotifications {
+			sb.WriteString(fmt.Sprintf("  • %s\n", notif))
+		}
+		sb.WriteString("\n")
+	}
+	
+	// 3. Other system messages
+	if len(systemMessages) > 0 {
+		sb.WriteString("SYSTEM MESSAGES:\n")
+		for _, msg := range systemMessages {
+			sb.WriteString(fmt.Sprintf("  • %s\n", msg))
+		}
+		sb.WriteString("\n")
+	}
+	
+	// 4. Files edited (critical for knowing what was changed)
+	if len(filesEdited) > 0 {
+		sb.WriteString("FILES EDITED:\n")
+		for _, f := range filesEdited {
+			sb.WriteString(fmt.Sprintf("  • %s\n", f))
+		}
+		sb.WriteString("\n")
+	}
+	
+	// 5. Files checked
+	if len(filesChecked) > 0 {
+		sb.WriteString("FILES ANALYZED:\n")
+		// Group by unique file paths to reduce noise
+		seen := make(map[string]bool)
+		for _, f := range filesChecked {
+			if !seen[f] {
+				seen[f] = true
+				sb.WriteString(fmt.Sprintf("  • %s\n", f))
+			}
+		}
+		sb.WriteString("\n")
+	}
+
+	// 6. Tool usage summary
 	sb.WriteString("TOOLS USED:\n")
 	for tool, count := range toolCounts {
 		sb.WriteString(fmt.Sprintf("  - %s: %d times\n", tool, count))
 	}
+	sb.WriteString("\n")
 
+	// 7. Actions completed
 	if len(actionsCompleted) > 0 {
-		sb.WriteString("\nKEY ACTIONS COMPLETED:\n")
+		sb.WriteString("KEY ACTIONS COMPLETED:\n")
 		for _, action := range actionsCompleted {
 			sb.WriteString(fmt.Sprintf("  • %s\n", action))
 		}
+		sb.WriteString("\n")
 	}
 
+	// 8. Key findings
 	if len(keyFindings) > 0 {
-		sb.WriteString("\nKEY FINDINGS/RESPONSES:\n")
+		sb.WriteString("KEY FINDINGS/RESPONSES:\n")
 		for _, finding := range keyFindings {
 			sb.WriteString(fmt.Sprintf("  • %s\n", finding))
 		}

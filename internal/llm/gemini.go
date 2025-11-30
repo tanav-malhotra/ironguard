@@ -115,7 +115,11 @@ func (c *GeminiClient) Chat(ctx context.Context, req ChatRequest) (*ChatResponse
 		return nil, fmt.Errorf("GEMINI_API_KEY not set")
 	}
 
-	model := "gemini-3-pro" // Latest Gemini 3 Pro
+	// Use provided model or default to gemini-3-pro (1M+ context)
+	model := req.Model
+	if model == "" {
+		model = "gemini-3-pro" // Default: Latest Gemini 3 Pro with 1M+ context
+	}
 	url := fmt.Sprintf("%s/%s:generateContent?key=%s", geminiAPIURL, model, c.apiKey)
 
 	geminiReq := c.buildRequest(req)
@@ -155,7 +159,11 @@ func (c *GeminiClient) ChatStream(ctx context.Context, req ChatRequest, callback
 		return fmt.Errorf("GEMINI_API_KEY not set")
 	}
 
-	model := "gemini-3-pro" // Latest Gemini 3 Pro
+	// Use provided model or default to gemini-3-pro (1M+ context)
+	model := req.Model
+	if model == "" {
+		model = "gemini-3-pro" // Default: Latest Gemini 3 Pro with 1M+ context
+	}
 	url := fmt.Sprintf("%s/%s:streamGenerateContent?key=%s&alt=sse", geminiAPIURL, model, c.apiKey)
 
 	geminiReq := c.buildRequest(req)

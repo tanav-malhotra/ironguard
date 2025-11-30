@@ -3,7 +3,9 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
+	"github.com/tanav-malhotra/ironguard/internal/agent"
 	"github.com/tanav-malhotra/ironguard/internal/config"
 	"github.com/tanav-malhotra/ironguard/internal/tools"
 )
@@ -238,6 +240,53 @@ func (r *CommandRegistry) registerDefaults() {
 			Description: "List all tools from a specific MCP server",
 			Args:        "<server-name>",
 			Handler:     cmdMCPTools,
+		},
+		// Context and token management
+		{
+			Name:        "compact",
+			Description: "Toggle compact mode (brief AI responses)",
+			Args:        "[on|off]",
+			Handler:     cmdCompact,
+		},
+		{
+			Name:        "summarize",
+			Description: "Set summarization mode",
+			Args:        "<smart|fast>",
+			Handler:     cmdSummarize,
+		},
+		{
+			Name:        "tokens",
+			Description: "Show token usage statistics",
+			Handler:     cmdTokens,
+		},
+		// Undo/checkpoint commands
+		{
+			Name:        "undo",
+			Description: "Undo the last action",
+			Handler:     cmdUndo,
+		},
+		{
+			Name:        "history",
+			Description: "Show action history (checkpoints)",
+			Handler:     cmdHistory,
+		},
+		// Memory commands
+		{
+			Name:        "remember",
+			Description: "Save something to persistent memory",
+			Args:        "<category> <content>",
+			Handler:     cmdRemember,
+		},
+		{
+			Name:        "recall",
+			Description: "Search persistent memory",
+			Args:        "[query]",
+			Handler:     cmdRecall,
+		},
+		{
+			Name:        "forget",
+			Description: "Clear persistent memory",
+			Handler:     cmdForget,
 		},
 	}
 }
@@ -1042,4 +1091,267 @@ func truncateString(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen-3] + "..."
+}
+
+// Compact mode command
+func cmdCompact(m *model, args string) string {
+	args = strings.ToLower(strings.TrimSpace(args))
+	
+	switch args {
+	case "on", "true", "1":
+		m.agent.SetCompactMode(true)
+		// Notify AI
+		m.agent.QueueSystemMessage("[SYSTEM] Compact mode ENABLED. Give brief, concise responses. Avoid verbose explanations unless asked.")
+		return "✅ Compact mode enabled - AI will give brief responses"
+	case "off", "false", "0":
+		m.agent.SetCompactMode(false)
+		m.agent.QueueSystemMessage("[SYSTEM] Compact mode DISABLED. You can give detailed responses again.")
+		return "✅ Compact mode disabled - AI will give detailed responses"
+	case "":
+		// Toggle
+		if m.agent.IsCompactMode() {
+			m.agent.SetCompactMode(false)
+			m.agent.QueueSystemMessage("[SYSTEM] Compact mode DISABLED. You can give detailed responses again.")
+			return "✅ Compact mode disabled - AI will give detailed responses"
+		} else {
+			m.agent.SetCompactMode(true)
+			m.agent.QueueSystemMessage("[SYSTEM] Compact mode ENABLED. Give brief, concise responses. Avoid verbose explanations unless asked.")
+			return "✅ Compact mode enabled - AI will give brief responses"
+		}
+	default:
+		return "Usage: /compact [on|off]\nToggles compact mode for brief AI responses."
+	}
+}
+
+// Summarize mode command
+func cmdSummarize(m *model, args string) string {
+	args = strings.ToLower(strings.TrimSpace(args))
+	
+	switch args {
+	case "smart":
+		m.agent.SetSummarizeMode(config.SummarizeSmart)
+		return "✅ Summarization mode: SMART (uses LLM with large context for intelligent summaries)"
+	case "fast":
+		m.agent.SetSummarizeMode(config.SummarizeFast)
+		return "✅ Summarization mode: FAST (programmatic extraction, saves tokens)"
+	case "":
+		// Show current mode
+		mode := m.agent.GetSummarizeMode()
+		if mode == config.SummarizeSmart {
+			return "Current summarization mode: SMART (LLM-based)\nUse /summarize fast to switch to token-saving mode."
+		}
+		return "Current summarization mode: FAST (programmatic)\nUse /summarize smart to switch to LLM-based mode."
+	default:
+		return "Usage: /summarize <smart|fast>\n  smart - Uses LLM for intelligent summaries (default)\n  fast  - Programmatic extraction (saves tokens)"
+	}
+}
+
+// Token usage command
+func cmdTokens(m *model, args string) string {
+	stats := m.agent.GetTokenStats()
+	
+	return fmt.Sprintf(`📊 Token Usage Statistics
+
+Current Context:
+  • Tokens: ~%d / %d (%.1f%% of limit)
+
+Session Totals:
+  • Input tokens:  %d
+  • Output tokens: %d
+  • Total tokens:  %d
+
+Summarization:
+  • Times summarized: %d
+  • Tokens saved:     ~%d
+
+Note: Token counts are estimates (~3-4 chars per token).`,
+		stats.CurrentContext,
+		stats.ContextLimit,
+		stats.ContextPercentage,
+		stats.TotalInputTokens,
+		stats.TotalOutputTokens,
+		stats.TotalTokens,
+		stats.SummaryCount,
+		stats.TokensSavedBySummary,
+	)
+}
+
+// Undo command
+func cmdUndo(m *model, args string) string {
+	cp, err := m.agent.GetCheckpointManager().Undo()
+	if err != nil {
+		return fmt.Sprintf("❌ Cannot undo: %s", err)
+	}
+	
+	// Notify AI about the undo
+	m.agent.QueueSystemMessage(fmt.Sprintf("[SYSTEM] User used /undo to revert: %s", cp.Description))
+	
+	result := fmt.Sprintf("✅ Undone: %s\n", cp.Description)
+	
+	switch cp.Type {
+	case "file_edit", "file_create":
+		if cp.FileExisted {
+			result += fmt.Sprintf("   Restored: %s", cp.FilePath)
+		} else {
+			result += fmt.Sprintf("   Deleted: %s (was newly created)", cp.FilePath)
+		}
+	case "file_delete":
+		result += fmt.Sprintf("   Restored: %s", cp.FilePath)
+	case "command":
+		if cp.UndoCommand != "" {
+			result += fmt.Sprintf("   Run this to fully undo: %s", cp.UndoCommand)
+		}
+	}
+	
+	return result
+}
+
+// History command - show checkpoints
+func cmdHistory(m *model, args string) string {
+	checkpoints := m.agent.GetCheckpointManager().ListUndoable()
+	
+	if len(checkpoints) == 0 {
+		return "No actions to undo. History is empty."
+	}
+	
+	result := fmt.Sprintf("📜 Action History (%d undoable):\n\n", len(checkpoints))
+	
+	for i, cp := range checkpoints {
+		if i >= 10 {
+			result += fmt.Sprintf("   ... and %d more\n", len(checkpoints)-10)
+			break
+		}
+		
+		typeIcon := "📝"
+		switch cp.Type {
+		case "file_edit":
+			typeIcon = "✏️"
+		case "file_create":
+			typeIcon = "📄"
+		case "file_delete":
+			typeIcon = "🗑️"
+		case "command":
+			typeIcon = "⚡"
+		case "user_create", "user_delete", "user_modify":
+			typeIcon = "👤"
+		case "service":
+			typeIcon = "⚙️"
+		case "firewall":
+			typeIcon = "🔥"
+		}
+		
+		timeAgo := formatTimeAgo(cp.Timestamp)
+		result += fmt.Sprintf("  %d. %s %s (%s)\n", i+1, typeIcon, cp.Description, timeAgo)
+	}
+	
+	result += "\nUse /undo to revert the most recent action."
+	return result
+}
+
+// Remember command - save to persistent memory
+func cmdRemember(m *model, args string) string {
+	parts := strings.SplitN(args, " ", 2)
+	if len(parts) < 2 {
+		return `Usage: /remember <category> <content>
+
+Categories: vulnerability, config, command, finding, tip
+Example: /remember vulnerability "SSH allows root login by default on Ubuntu"
+Example: /remember command "net user /add creates a new user on Windows"`
+	}
+	
+	category := strings.ToLower(parts[0])
+	content := parts[1]
+	
+	// Get current OS
+	osType := m.cfg.OS
+	if m.cfg.OSInfo.Name != "" {
+		osType = m.cfg.OSInfo.Name
+	}
+	
+	entry := m.agent.GetMemory().Add(category, content, "user", osType)
+	
+	// Save to disk
+	if err := m.agent.SaveMemory(); err != nil {
+		return fmt.Sprintf("⚠️ Remembered but failed to save: %s", err)
+	}
+	
+	return fmt.Sprintf("✅ Remembered [%s]: %s\n   ID: %s", category, truncateString(content, 50), entry.ID)
+}
+
+// Recall command - search persistent memory
+func cmdRecall(m *model, args string) string {
+	memory := m.agent.GetMemory()
+	
+	if memory.Count() == 0 {
+		return "No memories saved yet. Use /remember to save information."
+	}
+	
+	var entries []agent.MemoryEntry
+	if args == "" {
+		// Show all
+		entries = memory.Entries
+	} else {
+		// Search
+		entries = memory.Search(args, "", "")
+	}
+	
+	if len(entries) == 0 {
+		return fmt.Sprintf("No memories found matching '%s'", args)
+	}
+	
+	result := fmt.Sprintf("🧠 Memories (%d found):\n\n", len(entries))
+	for i, mem := range entries {
+		if i >= 15 {
+			result += fmt.Sprintf("   ... and %d more\n", len(entries)-15)
+			break
+		}
+		result += fmt.Sprintf("  [%s] %s\n    OS: %s | Used: %d times\n\n", 
+			mem.Category, truncateString(mem.Content, 60), mem.OS, mem.UsedCount)
+	}
+	
+	return result
+}
+
+// Forget command - clear memory
+func cmdForget(m *model, args string) string {
+	memory := m.agent.GetMemory()
+	count := memory.Count()
+	
+	if count == 0 {
+		return "No memories to forget."
+	}
+	
+	memory.Clear()
+	if err := m.agent.SaveMemory(); err != nil {
+		return fmt.Sprintf("⚠️ Cleared but failed to save: %s", err)
+	}
+	
+	return fmt.Sprintf("🧹 Cleared %d memories from persistent storage.", count)
+}
+
+// Helper for time formatting
+func formatTimeAgo(t time.Time) string {
+	duration := time.Since(t)
+	
+	if duration < time.Minute {
+		return "just now"
+	} else if duration < time.Hour {
+		mins := int(duration.Minutes())
+		if mins == 1 {
+			return "1 min ago"
+		}
+		return fmt.Sprintf("%d mins ago", mins)
+	} else if duration < 24*time.Hour {
+		hours := int(duration.Hours())
+		if hours == 1 {
+			return "1 hour ago"
+		}
+		return fmt.Sprintf("%d hours ago", hours)
+	}
+	return t.Format("Jan 2 15:04")
+}
+
+// Helper to convert checkpoint type to string for display
+func checkpointTypeString(ct agent.CheckpointType) string {
+	return string(ct)
 }

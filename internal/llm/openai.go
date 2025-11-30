@@ -274,8 +274,14 @@ func (c *OpenAIClient) ChatStream(ctx context.Context, req ChatRequest, callback
 }
 
 func (c *OpenAIClient) buildRequest(req ChatRequest, stream bool) openaiRequest {
+	// Use provided model or default to gpt-5.1
+	model := req.Model
+	if model == "" {
+		model = "gpt-5.1" // Latest flagship model (272K context)
+	}
+	
 	openaiReq := openaiRequest{
-		Model:           "gpt-5.1", // Latest flagship model
+		Model:           model,
 		MaxTokens:       req.MaxTokens,
 		Temperature:     req.Temperature,
 		Stream:          stream,

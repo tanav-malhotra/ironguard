@@ -80,14 +80,18 @@ type SubAgent struct {
 	mu           sync.Mutex
 }
 
+// SubAgentCompletionCallback is called when a subagent completes.
+type SubAgentCompletionCallback func(id string, task string, status SubAgentStatus, result string)
+
 // SubAgentManager manages child agents.
 type SubAgentManager struct {
-	agents       map[string]*SubAgent
-	mu           sync.RWMutex
-	registry     *llm.Registry
-	toolRegistry *tools.Registry
-	maxAgents    int
-	events       chan SubAgentEvent // Global event channel for all subagent events
+	agents             map[string]*SubAgent
+	mu                 sync.RWMutex
+	registry           *llm.Registry
+	toolRegistry       *tools.Registry
+	maxAgents          int
+	events             chan SubAgentEvent // Global event channel for all subagent events
+	completionCallback SubAgentCompletionCallback
 }
 
 // NewSubAgentManager creates a new subagent manager.
@@ -104,6 +108,13 @@ func NewSubAgentManager(llmRegistry *llm.Registry, toolRegistry *tools.Registry)
 // Events returns the event channel for listening to all subagent events.
 func (m *SubAgentManager) Events() <-chan SubAgentEvent {
 	return m.events
+}
+
+// SetCompletionCallback sets the callback that is called when subagents complete.
+func (m *SubAgentManager) SetCompletionCallback(cb SubAgentCompletionCallback) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.completionCallback = cb
 }
 
 // SpawnSubAgent creates a new subagent for a specific task.
@@ -229,11 +240,14 @@ func (m *SubAgentManager) runSubAgent(ctx context.Context, agent *SubAgent) {
 			agent.mu.Lock()
 			agent.Status = SubAgentStatusCancelled
 			agent.CompletedAt = time.Now()
+			task := agent.Task
 			agent.mu.Unlock()
 			m.emitEvent(SubAgentEvent{
 				AgentID: agent.ID,
 				Type:    SubAgentEventCancelled,
 			})
+			// Notify main agent
+			m.notifyCompletion(agent.ID, task, SubAgentStatusCancelled, "Cancelled")
 			return
 		default:
 		}
@@ -283,12 +297,16 @@ func (m *SubAgentManager) runSubAgent(ctx context.Context, agent *SubAgent) {
 			agent.Status = SubAgentStatusFailed
 			agent.Error = err.Error()
 			agent.CompletedAt = time.Now()
+			task := agent.Task
+			errMsg := agent.Error
 			agent.mu.Unlock()
 			m.emitEvent(SubAgentEvent{
 				AgentID: agent.ID,
 				Type:    SubAgentEventFailed,
 				Error:   err,
 			})
+			// Notify main agent
+			m.notifyCompletion(agent.ID, task, SubAgentStatusFailed, errMsg)
 			return
 		}
 		
@@ -306,12 +324,16 @@ func (m *SubAgentManager) runSubAgent(ctx context.Context, agent *SubAgent) {
 			agent.Status = SubAgentStatusCompleted
 			agent.Result = contentBuilder.String()
 			agent.CompletedAt = time.Now()
+			task := agent.Task
+			result := agent.Result
 			agent.mu.Unlock()
 			m.emitEvent(SubAgentEvent{
 				AgentID: agent.ID,
 				Type:    SubAgentEventCompleted,
-				Content: agent.Result,
+				Content: result,
 			})
+			// Notify main agent
+			m.notifyCompletion(agent.ID, task, SubAgentStatusCompleted, result)
 			return
 		}
 		
@@ -374,12 +396,16 @@ func (m *SubAgentManager) runSubAgent(ctx context.Context, agent *SubAgent) {
 	agent.Status = SubAgentStatusCompleted
 	agent.Result = "Task completed (max iterations reached)"
 	agent.CompletedAt = time.Now()
+	task := agent.Task
+	result := agent.Result
 	agent.mu.Unlock()
 	m.emitEvent(SubAgentEvent{
 		AgentID: agent.ID,
 		Type:    SubAgentEventCompleted,
-		Content: agent.Result,
+		Content: result,
 	})
+	// Notify main agent
+	m.notifyCompletion(agent.ID, task, SubAgentStatusCompleted, result)
 }
 
 // emitEvent sends an event to the global channel.
@@ -388,6 +414,17 @@ func (m *SubAgentManager) emitEvent(event SubAgentEvent) {
 	case m.events <- event:
 	default:
 		// Channel full, drop event
+	}
+}
+
+// notifyCompletion calls the completion callback if set.
+func (m *SubAgentManager) notifyCompletion(id, task string, status SubAgentStatus, result string) {
+	m.mu.RLock()
+	cb := m.completionCallback
+	m.mu.RUnlock()
+	
+	if cb != nil {
+		cb(id, task, status, result)
 	}
 }
 

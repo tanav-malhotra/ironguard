@@ -132,6 +132,19 @@ Configure the maximum number of concurrent sub-agents with `/subagents <max>` (d
 | `/autopilot` | Enable autonomous mode (default) |
 | `/screen <mode>` | Set screen interaction (observe, control) |
 | `/subagents [max]` | Set max concurrent sub-agents |
+| `/compact [on\|off]` | Toggle brief AI responses |
+| `/summarize <smart\|fast>` | Set context summarization mode |
+
+### Undo & Memory
+
+| Command | Description |
+|---------|-------------|
+| `/undo` | Revert the last file edit |
+| `/history` | Show undoable actions |
+| `/remember <cat> <text>` | Save to persistent memory |
+| `/recall [query]` | Search persistent memory |
+| `/forget` | Clear all memories |
+| `/tokens` | Show token usage statistics |
 
 ### Manual Interaction
 
@@ -150,11 +163,8 @@ Configure the maximum number of concurrent sub-agents with `/subagents <max>` (d
 
 | Key | Action |
 |-----|--------|
-| `Ctrl+C` | Pause AI (does not quit—safe for copying text) |
-| `Ctrl+Q` | Quit IRONGUARD |
 | `Ctrl+L` | Clear screen |
 | `Tab` | Cycle autocomplete suggestions |
-| `Esc` | Cancel current action |
 
 ---
 
@@ -172,7 +182,32 @@ Long sessions are handled automatically. When the conversation approaches token 
 - Current score and progress
 - Sub-agent status
 
-The AI continues seamlessly without losing track of the task.
+**Summarization Modes:**
+- **Smart** (default): Uses the provider's largest-context model for intelligent summarization
+  - Claude: Uses Sonnet 4.5 (1M context) even when Opus is the main model
+  - Gemini: Uses Gemini 3 Pro (1M+ context)
+  - OpenAI: Uses GPT-5.1 (272K context)
+- **Fast**: Programmatic extraction (saves tokens, slightly less intelligent)
+
+Change with `/summarize smart` or `/summarize fast`.
+
+### Persistent Memory
+
+The AI can remember information across sessions:
+- Vulnerabilities discovered
+- Useful commands learned
+- Configuration patterns that work
+- Tips from web searches
+
+Memory is stored in `~/.ironguard/memory.json` and persists between sessions. Both you (`/remember`) and the AI (`remember` tool) can add to it.
+
+### Undo System
+
+Every file edit is automatically checkpointed. Use `/undo` to revert the last change. View history with `/history`.
+
+### Token Tracking
+
+The status bar shows current context usage: `📊 45k/200k`. Use `/tokens` for detailed statistics including session totals and tokens saved by summarization.
 
 ### Screen Interaction
 

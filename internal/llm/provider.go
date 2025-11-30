@@ -58,6 +58,7 @@ type ChatRequest struct {
 	Temperature    float64
 	SystemPrompt   string
 	ReasoningLevel ReasoningLevel // Controls thinking depth - default "high" for competition
+	Model          string         // Optional: override the default model (used for summarization)
 }
 
 // ChatResponse represents a response from the LLM.

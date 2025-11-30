@@ -333,34 +333,20 @@ func (m *model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch msg.Type {
 	case tea.KeyCtrlC:
-		// Ctrl+C is commonly used to copy text in terminals - DON'T quit the app!
-		// This prevents teammates from accidentally closing IRONGUARD when they
-		// meant to copy text from the terminal output.
-		if m.agentBusy {
-			m.agent.Cancel()
-			m.messages = append(m.messages, NewSystemMessage("⏹️ AI paused. Use /harden to resume, or /quit to exit."))
-			return m, nil
-		}
-		// If AI is not busy, Ctrl+C does nothing (safe for copy attempts)
-		// Don't even show a message to avoid confusion
+		// Ctrl+C is commonly used to copy text in terminals - let it pass through
+		// Use /stop to cancel AI, /quit to exit
 		return m, nil
 
 	case tea.KeyCtrlQ:
-		// Ctrl+Q is the dedicated quit shortcut
-		m.quitting = true
-		return m, tea.Quit
+		// Ctrl+Q does nothing - use /quit instead
+		return m, nil
 
 	case tea.KeyEsc:
+		// Esc only closes autocomplete dropdown
 		if m.showAutocomplete {
 			m.showAutocomplete = false
 			return m, nil
 		}
-		if m.agentBusy {
-			m.agent.Cancel()
-			m.messages = append(m.messages, NewSystemMessage("⏹️ AI task cancelled."))
-			return m, nil
-		}
-		// Esc doesn't quit - just closes autocomplete or cancels AI
 		return m, nil
 
 	case tea.KeyCtrlL:
@@ -659,17 +645,14 @@ func (m *model) executeAction(action *PendingAction) tea.Cmd {
 				result = fmt.Sprintf("✅ Disconnected MCP server '%s'", action.Args)
 			}
 		case ActionSubAgentLimitChanged:
-			// Send a system message to the AI about the change
+			// Send a system message to the AI about the change (queued, non-interrupting)
 			newMax := action.Args
 			systemMsg := fmt.Sprintf("[SYSTEM] The maximum concurrent subagents limit has been changed to %s. You can now spawn up to %s subagents in parallel.", newMax, newMax)
-			// Queue this as a message to the AI via Chat
-			go func() {
-				ctx := context.Background()
-				m.agent.Chat(ctx, systemMsg)
-			}()
-			result = "" // Don't show tool result, the message will appear in chat
+			// Queue this message - it will be processed after AI finishes current step
+			m.agent.QueueSystemMessage(systemMsg)
+			result = fmt.Sprintf("✅ Subagent limit set to %s (AI will be notified after current step)", newMax)
 		case ActionSettingChanged:
-			// Send a system message to the AI about setting changes
+			// Send a system message to the AI about setting changes (queued, non-interrupting)
 			var systemMsg string
 			switch action.Args {
 			case "confirm":
@@ -683,12 +666,9 @@ func (m *model) executeAction(action *PendingAction) tea.Cmd {
 			default:
 				systemMsg = fmt.Sprintf("[SYSTEM] Setting changed: %s", action.Description)
 			}
-			// Queue this as a message to the AI via Chat
-			go func() {
-				ctx := context.Background()
-				m.agent.Chat(ctx, systemMsg)
-			}()
-			result = "" // Don't show tool result, the message will appear in chat
+			// Queue this message - it will be processed after AI finishes current step
+			m.agent.QueueSystemMessage(systemMsg)
+			result = fmt.Sprintf("✅ Setting changed (AI will be notified after current step)")
 		}
 
 		if err != nil {
@@ -1025,8 +1005,20 @@ func (m model) renderAutocomplete(width int) string {
 }
 
 func (m model) renderStatusBar() string {
-	left := m.styles.KeyHint.Render("Ctrl+Q: Quit | Ctrl+C: Cancel AI | Ctrl+L: Clear | Tab: Autocomplete")
+	left := m.styles.KeyHint.Render("/stop: Stop AI | /quit: Exit | /undo | Tab: Autocomplete")
 
+	// Token usage
+	stats := m.agent.GetTokenStats()
+	tokenInfo := fmt.Sprintf("📊 %dk/%dk", stats.CurrentContext/1000, stats.ContextLimit/1000)
+	if stats.ContextPercentage > 80 {
+		tokenInfo = m.styles.Error.Render(tokenInfo)
+	} else if stats.ContextPercentage > 50 {
+		tokenInfo = m.styles.Warning.Render(tokenInfo)
+	} else {
+		tokenInfo = m.styles.Muted.Render(tokenInfo)
+	}
+
+	// API key status
 	keyStatus := "🔑 "
 	if m.apiKeys[string(m.cfg.Provider)] != "" {
 		keyStatus += m.styles.Success.Render("●")
@@ -1034,7 +1026,14 @@ func (m model) renderStatusBar() string {
 		keyStatus += m.styles.Error.Render("○")
 	}
 
-	right := keyStatus
+	// Undo count
+	undoCount := m.agent.GetCheckpointManager().UndoableCount()
+	undoInfo := ""
+	if undoCount > 0 {
+		undoInfo = m.styles.Muted.Render(fmt.Sprintf(" | ↩️ %d", undoCount))
+	}
+
+	right := tokenInfo + " " + keyStatus + undoInfo
 
 	padding := m.width - lipgloss.Width(left) - lipgloss.Width(right) - 2
 	if padding < 0 {

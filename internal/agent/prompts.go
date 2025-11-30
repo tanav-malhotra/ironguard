@@ -257,9 +257,10 @@ Each subagent has full tool access. Check "Max Concurrent Subagents" in session 
 
 SCREEN INTERACTION (if screen control is enabled):
 - take_screenshot - Capture the screen
-- mouse_click - Click at coordinates
+- mouse_click, mouse_move, mouse_scroll, mouse_drag - Full mouse control
 - keyboard_type - Type text
-- keyboard_hotkey - Press key combination
+- keyboard_hotkey - Press key combinations (Ctrl+C, Alt+Tab, etc.)
+- list_windows, focus_window - Window management
 - list_windows - List open windows
 - focus_window - Focus a specific window
 
@@ -1188,11 +1189,19 @@ SCREEN MODES:
 YOUR CAPABILITIES:
 - take_screenshot - See the current screen state
 - mouse_click, double_click, right_click - Click on devices, menus, answers
+- mouse_move - Move cursor to specific coordinates
 - mouse_scroll - Scroll up/down/left/right to see more content
+- mouse_drag - Drag elements or select text
 - keyboard_type - Enter commands in CLI or text in fields
 - keyboard_hotkey - Use shortcuts (Ctrl+C, Tab, Enter, etc.)
-- mouse_drag - Drag elements or select text
 - focus_window - Switch between windows
+- list_windows - See all open windows
+
+PLATFORM NOTES:
+- Windows: Native automation (always works)
+- Linux X11: Uses xdotool (install with: apt install xdotool)
+- Linux Wayland: Uses ydotool/grim (install with: apt install ydotool grim)
+If screen tools fail on Linux, suggest user installs the required packages.
 
 WORKFLOW:
 1. Take a screenshot to see the current state

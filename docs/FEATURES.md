@@ -34,7 +34,7 @@ A sidebar panel for tasks the AI can't do via terminal:
 - "Open Local Security Policy > Account Policies > Password Policy"
 
 ### 3. Screenshot & Screen Control 📸
-Full desktop interaction capabilities for both Windows and Linux (X11/xdotool):
+Full desktop interaction capabilities for Windows and Linux (X11 and Wayland):
 
 **Observe Mode (default):**
 - `take_screenshot` - Capture the current screen
@@ -47,6 +47,7 @@ Full desktop interaction capabilities for both Windows and Linux (X11/xdotool):
 
 **Control Mode (`/screen control`):**
 - `mouse_click` - Click at coordinates (left/right/middle, single/double)
+- `mouse_move` - Move cursor to specific coordinates
 - `mouse_scroll` - Scroll up/down/left/right to see more content
 - `mouse_drag` - Drag elements or select text
 - `keyboard_type` - Type text
@@ -56,7 +57,25 @@ Full desktop interaction capabilities for both Windows and Linux (X11/xdotool):
 
 **Platform Support:**
 - **Windows**: Native PowerShell/.NET automation
-- **Linux**: xdotool for X11 (requires `xdotool` package)
+- **Linux X11**: xdotool (requires `xdotool` package)
+- **Linux Wayland**: Auto-detects and uses available tools:
+  - `ydotool` - Recommended, most compatible
+  - `dotool` - Alternative option
+  - `wtype` - For keyboard input
+  - `wlrctl` - For wlroots compositors (Sway, etc.)
+  - `grim` - For screenshots
+
+**Wayland Installation (if needed):**
+```bash
+# Ubuntu/Debian
+sudo apt install ydotool grim
+
+# Fedora
+sudo dnf install ydotool grim
+
+# Arch
+sudo pacman -S ydotool grim
+```
 
 **Use cases:**
 - Cisco challenges (Packet Tracer and NetAcad quizzes)

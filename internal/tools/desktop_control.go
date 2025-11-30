@@ -4,12 +4,32 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"runtime"
 	"strconv"
 	"strings"
 	"time"
 )
+
+// isWayland returns true if running under Wayland display server.
+func isWayland() bool {
+	// Check for Wayland-specific environment variables
+	if os.Getenv("WAYLAND_DISPLAY") != "" {
+		return true
+	}
+	// XDG_SESSION_TYPE is set by systemd on modern distros
+	if os.Getenv("XDG_SESSION_TYPE") == "wayland" {
+		return true
+	}
+	return false
+}
+
+// hasCommand checks if a command exists in PATH.
+func hasCommand(name string) bool {
+	_, err := exec.LookPath(name)
+	return err == nil
+}
 
 // RegisterDesktopControlTools adds mouse, keyboard, and screen interaction tools.
 func (r *Registry) RegisterDesktopControlTools() {
@@ -492,24 +512,94 @@ for ($i = 0; $i -lt %d; $i++) {
 }
 
 func mouseClickLinux(ctx context.Context, x, y int, button string, clicks int) (string, error) {
-	buttonNum := "1" // Left
+	// Determine button codes for different tools
+	xdotoolButton := "1" // Left
+	ydotoolButton := "0x110"
+	wlrctlButton := "left"
 	if button == "right" {
-		buttonNum = "3"
+		xdotoolButton = "3"
+		ydotoolButton = "0x111"
+		wlrctlButton = "right"
 	} else if button == "middle" {
-		buttonNum = "2"
+		xdotoolButton = "2"
+		ydotoolButton = "0x112"
+		wlrctlButton = "middle"
 	}
 
-	// Move mouse
+	if isWayland() {
+		// Try ydotool first (most compatible with Wayland)
+		if hasCommand("ydotool") {
+			// ydotool uses absolute coordinates with mousemove
+			cmd := exec.CommandContext(ctx, "ydotool", "mousemove", "--absolute", "-x", strconv.Itoa(x), "-y", strconv.Itoa(y))
+			if err := cmd.Run(); err != nil {
+				return "", fmt.Errorf("ydotool mouse move failed: %w", err)
+			}
+			for i := 0; i < clicks; i++ {
+				cmd = exec.CommandContext(ctx, "ydotool", "click", ydotoolButton)
+				if err := cmd.Run(); err != nil {
+					return "", fmt.Errorf("ydotool click failed: %w", err)
+				}
+				if i < clicks-1 {
+					time.Sleep(100 * time.Millisecond)
+				}
+			}
+			return fmt.Sprintf("Clicked %s button at (%d, %d) x%d (Wayland/ydotool)", button, x, y, clicks), nil
+		}
+
+		// Try wlrctl for wlroots-based compositors (Sway, etc.)
+		if hasCommand("wlrctl") {
+			// wlrctl pointer move requires relative movement, so we need to get current position first
+			// For now, use absolute positioning workaround
+			for i := 0; i < clicks; i++ {
+				cmd := exec.CommandContext(ctx, "wlrctl", "pointer", "click", wlrctlButton)
+				if err := cmd.Run(); err != nil {
+					return "", fmt.Errorf("wlrctl click failed: %w", err)
+				}
+				if i < clicks-1 {
+					time.Sleep(100 * time.Millisecond)
+				}
+			}
+			return fmt.Sprintf("Clicked %s button x%d (Wayland/wlrctl - note: coordinate positioning limited)", button, clicks), nil
+		}
+
+		// Try dotool (another Wayland option)
+		if hasCommand("dotool") {
+			// dotool uses a different syntax
+			cmd := exec.CommandContext(ctx, "sh", "-c", fmt.Sprintf("echo 'mouseto %d %d' | dotool", x, y))
+			if err := cmd.Run(); err != nil {
+				return "", fmt.Errorf("dotool mouse move failed: %w", err)
+			}
+			clickCmd := "click left"
+			if button == "right" {
+				clickCmd = "click right"
+			} else if button == "middle" {
+				clickCmd = "click middle"
+			}
+			for i := 0; i < clicks; i++ {
+				cmd = exec.CommandContext(ctx, "sh", "-c", fmt.Sprintf("echo '%s' | dotool", clickCmd))
+				if err := cmd.Run(); err != nil {
+					return "", fmt.Errorf("dotool click failed: %w", err)
+				}
+				if i < clicks-1 {
+					time.Sleep(100 * time.Millisecond)
+				}
+			}
+			return fmt.Sprintf("Clicked %s button at (%d, %d) x%d (Wayland/dotool)", button, x, y, clicks), nil
+		}
+
+		return "", fmt.Errorf("Wayland detected but no compatible automation tool found. Install one of: ydotool, wlrctl, or dotool")
+	}
+
+	// X11 - use xdotool
 	cmd := exec.CommandContext(ctx, "xdotool", "mousemove", strconv.Itoa(x), strconv.Itoa(y))
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("mouse move failed: %w", err)
+		return "", fmt.Errorf("mouse move failed (X11): %w", err)
 	}
 
-	// Click
 	for i := 0; i < clicks; i++ {
-		cmd = exec.CommandContext(ctx, "xdotool", "click", buttonNum)
+		cmd = exec.CommandContext(ctx, "xdotool", "click", xdotoolButton)
 		if err := cmd.Run(); err != nil {
-			return "", fmt.Errorf("mouse click failed: %w", err)
+			return "", fmt.Errorf("mouse click failed (X11): %w", err)
 		}
 		if i < clicks-1 {
 			time.Sleep(100 * time.Millisecond)
@@ -541,10 +631,24 @@ Add-Type -AssemblyName System.Windows.Forms
 		if err := cmd.Run(); err != nil {
 			return "", fmt.Errorf("mouse move failed: %w", err)
 		}
+	} else if isWayland() {
+		if hasCommand("ydotool") {
+			cmd := exec.CommandContext(ctx, "ydotool", "mousemove", "--absolute", "-x", strconv.Itoa(params.X), "-y", strconv.Itoa(params.Y))
+			if err := cmd.Run(); err != nil {
+				return "", fmt.Errorf("mouse move failed (Wayland/ydotool): %w", err)
+			}
+		} else if hasCommand("dotool") {
+			cmd := exec.CommandContext(ctx, "sh", "-c", fmt.Sprintf("echo 'mouseto %d %d' | dotool", params.X, params.Y))
+			if err := cmd.Run(); err != nil {
+				return "", fmt.Errorf("mouse move failed (Wayland/dotool): %w", err)
+			}
+		} else {
+			return "", fmt.Errorf("Wayland detected but no compatible tool found. Install ydotool or dotool")
+		}
 	} else {
 		cmd := exec.CommandContext(ctx, "xdotool", "mousemove", strconv.Itoa(params.X), strconv.Itoa(params.Y))
 		if err := cmd.Run(); err != nil {
-			return "", fmt.Errorf("mouse move failed: %w", err)
+			return "", fmt.Errorf("mouse move failed (X11): %w", err)
 		}
 	}
 
@@ -612,13 +716,57 @@ for ($i = 1; $i -le $steps; $i++) {
 		if err := cmd.Run(); err != nil {
 			return "", fmt.Errorf("mouse drag failed: %w", err)
 		}
+	} else if isWayland() {
+		// Wayland drag support
+		if hasCommand("ydotool") {
+			// ydotool drag sequence
+			cmd := exec.CommandContext(ctx, "ydotool", "mousemove", "--absolute", "-x", strconv.Itoa(params.StartX), "-y", strconv.Itoa(params.StartY))
+			if err := cmd.Run(); err != nil {
+				return "", fmt.Errorf("mouse drag failed (Wayland/ydotool): %w", err)
+			}
+			time.Sleep(50 * time.Millisecond)
+			
+			buttonCode := "0x110" // left
+			if params.Button == "right" {
+				buttonCode = "0x111"
+			}
+			cmd = exec.CommandContext(ctx, "ydotool", "click", buttonCode+"d") // d for down
+			if err := cmd.Run(); err != nil {
+				return "", fmt.Errorf("mouse drag failed (Wayland/ydotool): %w", err)
+			}
+			time.Sleep(50 * time.Millisecond)
+			
+			cmd = exec.CommandContext(ctx, "ydotool", "mousemove", "--absolute", "-x", strconv.Itoa(params.EndX), "-y", strconv.Itoa(params.EndY))
+			if err := cmd.Run(); err != nil {
+				return "", fmt.Errorf("mouse drag failed (Wayland/ydotool): %w", err)
+			}
+			time.Sleep(50 * time.Millisecond)
+			
+			cmd = exec.CommandContext(ctx, "ydotool", "click", buttonCode+"u") // u for up
+			if err := cmd.Run(); err != nil {
+				return "", fmt.Errorf("mouse drag failed (Wayland/ydotool): %w", err)
+			}
+		} else if hasCommand("dotool") {
+			btnName := "left"
+			if params.Button == "right" {
+				btnName = "right"
+			}
+			script := fmt.Sprintf("echo 'mouseto %d %d\nbuttondown %s\nmouseto %d %d\nbuttonup %s' | dotool",
+				params.StartX, params.StartY, btnName, params.EndX, params.EndY, btnName)
+			cmd := exec.CommandContext(ctx, "sh", "-c", script)
+			if err := cmd.Run(); err != nil {
+				return "", fmt.Errorf("mouse drag failed (Wayland/dotool): %w", err)
+			}
+		} else {
+			return "", fmt.Errorf("Wayland detected but no compatible tool found. Install ydotool or dotool")
+		}
 	} else {
+		// X11 - use xdotool
 		buttonNum := "1"
 		if params.Button == "right" {
 			buttonNum = "3"
 		}
 
-		// Move to start, press, move to end, release
 		cmds := [][]string{
 			{"xdotool", "mousemove", strconv.Itoa(params.StartX), strconv.Itoa(params.StartY)},
 			{"xdotool", "mousedown", buttonNum},
@@ -629,7 +777,7 @@ for ($i = 1; $i -le $steps; $i++) {
 		for _, cmdArgs := range cmds {
 			cmd := exec.CommandContext(ctx, cmdArgs[0], cmdArgs[1:]...)
 			if err := cmd.Run(); err != nil {
-				return "", fmt.Errorf("mouse drag failed: %w", err)
+				return "", fmt.Errorf("mouse drag failed (X11): %w", err)
 			}
 			time.Sleep(50 * time.Millisecond)
 		}
@@ -690,12 +838,51 @@ $flags = [MouseOps]::MOUSEEVENTF_%s
 		if err := cmd.Run(); err != nil {
 			return "", fmt.Errorf("scroll failed: %w", err)
 		}
+	} else if isWayland() {
+		// Wayland scroll support
+		if hasCommand("ydotool") {
+			// ydotool uses wheel command with positive/negative values
+			scrollVal := params.Amount * 15 // scroll units
+			if params.Direction == "down" || params.Direction == "right" {
+				scrollVal = -scrollVal
+			}
+			var cmd *exec.Cmd
+			if params.Direction == "up" || params.Direction == "down" {
+				cmd = exec.CommandContext(ctx, "ydotool", "mousemove", "-w", strconv.Itoa(scrollVal))
+			} else {
+				// Horizontal scroll
+				cmd = exec.CommandContext(ctx, "ydotool", "mousemove", "-h", strconv.Itoa(scrollVal))
+			}
+			if err := cmd.Run(); err != nil {
+				return "", fmt.Errorf("scroll failed (Wayland/ydotool): %w", err)
+			}
+		} else if hasCommand("dotool") {
+			scrollCmd := "scroll "
+			scrollVal := params.Amount
+			switch params.Direction {
+			case "up":
+				scrollCmd += strconv.Itoa(scrollVal)
+			case "down":
+				scrollCmd += strconv.Itoa(-scrollVal)
+			case "left":
+				scrollCmd = "hscroll " + strconv.Itoa(-scrollVal)
+			case "right":
+				scrollCmd = "hscroll " + strconv.Itoa(scrollVal)
+			}
+			cmd := exec.CommandContext(ctx, "sh", "-c", fmt.Sprintf("echo '%s' | dotool", scrollCmd))
+			if err := cmd.Run(); err != nil {
+				return "", fmt.Errorf("scroll failed (Wayland/dotool): %w", err)
+			}
+		} else {
+			return "", fmt.Errorf("Wayland detected but no compatible tool found. Install ydotool or dotool")
+		}
 	} else {
+		// X11 - use xdotool
 		buttonNum := map[string]string{"up": "4", "down": "5", "left": "6", "right": "7"}[params.Direction]
 		for i := 0; i < params.Amount; i++ {
 			cmd := exec.CommandContext(ctx, "xdotool", "click", buttonNum)
 			if err := cmd.Run(); err != nil {
-				return "", fmt.Errorf("scroll failed: %w", err)
+				return "", fmt.Errorf("scroll failed (X11): %w", err)
 			}
 		}
 	}
@@ -743,16 +930,49 @@ Add-Type -AssemblyName System.Windows.Forms
 		if err := cmd.Run(); err != nil {
 			return "", fmt.Errorf("keyboard type failed: %w", err)
 		}
-	} else {
-		args := []string{"type"}
-		if params.DelayMs > 0 {
-			args = append(args, "--delay", strconv.Itoa(params.DelayMs))
+	} else if isWayland() {
+		// Wayland keyboard typing
+		if hasCommand("ydotool") {
+			cmdArgs := []string{"type"}
+			if params.DelayMs > 0 {
+				cmdArgs = append(cmdArgs, "--key-delay", strconv.Itoa(params.DelayMs))
+			}
+			cmdArgs = append(cmdArgs, "--", params.Text)
+			cmd := exec.CommandContext(ctx, "ydotool", cmdArgs...)
+			if err := cmd.Run(); err != nil {
+				return "", fmt.Errorf("keyboard type failed (Wayland/ydotool): %w", err)
+			}
+		} else if hasCommand("dotool") {
+			// dotool uses 'type' command
+			cmd := exec.CommandContext(ctx, "sh", "-c", fmt.Sprintf("echo 'type %s' | dotool", params.Text))
+			if err := cmd.Run(); err != nil {
+				return "", fmt.Errorf("keyboard type failed (Wayland/dotool): %w", err)
+			}
+		} else if hasCommand("wtype") {
+			// wtype is another Wayland typing tool
+			cmdArgs := []string{}
+			if params.DelayMs > 0 {
+				cmdArgs = append(cmdArgs, "-d", strconv.Itoa(params.DelayMs))
+			}
+			cmdArgs = append(cmdArgs, params.Text)
+			cmd := exec.CommandContext(ctx, "wtype", cmdArgs...)
+			if err := cmd.Run(); err != nil {
+				return "", fmt.Errorf("keyboard type failed (Wayland/wtype): %w", err)
+			}
+		} else {
+			return "", fmt.Errorf("Wayland detected but no compatible tool found. Install ydotool, dotool, or wtype")
 		}
-		args = append(args, "--", params.Text)
+	} else {
+		// X11 - use xdotool
+		cmdArgs := []string{"type"}
+		if params.DelayMs > 0 {
+			cmdArgs = append(cmdArgs, "--delay", strconv.Itoa(params.DelayMs))
+		}
+		cmdArgs = append(cmdArgs, "--", params.Text)
 
-		cmd := exec.CommandContext(ctx, "xdotool", args...)
+		cmd := exec.CommandContext(ctx, "xdotool", cmdArgs...)
 		if err := cmd.Run(); err != nil {
-			return "", fmt.Errorf("keyboard type failed: %w", err)
+			return "", fmt.Errorf("keyboard type failed (X11): %w", err)
 		}
 	}
 
@@ -847,11 +1067,8 @@ Add-Type -AssemblyName System.Windows.Forms
 			return "", fmt.Errorf("hotkey failed: %w", err)
 		}
 	} else {
-		// xdotool format
-		parts := strings.Split(keys, "+")
-		var xdotoolKeys []string
-
-		xdotoolMap := map[string]string{
+		// Linux key mapping (shared between X11 and Wayland tools)
+		keyMap := map[string]string{
 			"ctrl":      "ctrl",
 			"control":   "ctrl",
 			"alt":       "alt",
@@ -866,20 +1083,81 @@ Add-Type -AssemblyName System.Windows.Forms
 			"backspace": "BackSpace",
 			"delete":    "Delete",
 			"space":     "space",
+			"up":        "Up",
+			"down":      "Down",
+			"left":      "Left",
+			"right":     "Right",
+			"home":      "Home",
+			"end":       "End",
+			"pageup":    "Page_Up",
+			"pagedown":  "Page_Down",
+			"f1":        "F1",
+			"f2":        "F2",
+			"f3":        "F3",
+			"f4":        "F4",
+			"f5":        "F5",
+			"f6":        "F6",
+			"f7":        "F7",
+			"f8":        "F8",
+			"f9":        "F9",
+			"f10":       "F10",
+			"f11":       "F11",
+			"f12":       "F12",
 		}
 
+		parts := strings.Split(keys, "+")
+		var mappedKeys []string
 		for _, part := range parts {
 			part = strings.TrimSpace(part)
-			if mapped, ok := xdotoolMap[part]; ok {
-				xdotoolKeys = append(xdotoolKeys, mapped)
+			if mapped, ok := keyMap[part]; ok {
+				mappedKeys = append(mappedKeys, mapped)
 			} else {
-				xdotoolKeys = append(xdotoolKeys, part)
+				mappedKeys = append(mappedKeys, part)
 			}
 		}
 
-		cmd := exec.CommandContext(ctx, "xdotool", append([]string{"key"}, strings.Join(xdotoolKeys, "+"))...)
-		if err := cmd.Run(); err != nil {
-			return "", fmt.Errorf("hotkey failed: %w", err)
+		if isWayland() {
+			// Wayland hotkey support
+			if hasCommand("ydotool") {
+				// ydotool key command
+				keyStr := strings.Join(mappedKeys, "+")
+				cmd := exec.CommandContext(ctx, "ydotool", "key", keyStr)
+				if err := cmd.Run(); err != nil {
+					return "", fmt.Errorf("hotkey failed (Wayland/ydotool): %w", err)
+				}
+			} else if hasCommand("dotool") {
+				// dotool key sequence
+				var keySeq string
+				for i, k := range mappedKeys {
+					if i < len(mappedKeys)-1 {
+						keySeq += fmt.Sprintf("keydown %s\n", k)
+					} else {
+						keySeq += fmt.Sprintf("key %s\n", k)
+					}
+				}
+				for i := len(mappedKeys) - 2; i >= 0; i-- {
+					keySeq += fmt.Sprintf("keyup %s\n", mappedKeys[i])
+				}
+				cmd := exec.CommandContext(ctx, "sh", "-c", fmt.Sprintf("echo '%s' | dotool", keySeq))
+				if err := cmd.Run(); err != nil {
+					return "", fmt.Errorf("hotkey failed (Wayland/dotool): %w", err)
+				}
+			} else if hasCommand("wtype") {
+				// wtype for simple key presses
+				cmdArgs := []string{"-M", strings.Join(mappedKeys[:len(mappedKeys)-1], ""), "-k", mappedKeys[len(mappedKeys)-1]}
+				cmd := exec.CommandContext(ctx, "wtype", cmdArgs...)
+				if err := cmd.Run(); err != nil {
+					return "", fmt.Errorf("hotkey failed (Wayland/wtype): %w", err)
+				}
+			} else {
+				return "", fmt.Errorf("Wayland detected but no compatible tool found. Install ydotool, dotool, or wtype")
+			}
+		} else {
+			// X11 - use xdotool
+			cmd := exec.CommandContext(ctx, "xdotool", append([]string{"key"}, strings.Join(mappedKeys, "+"))...)
+			if err := cmd.Run(); err != nil {
+				return "", fmt.Errorf("hotkey failed (X11): %w", err)
+			}
 		}
 	}
 

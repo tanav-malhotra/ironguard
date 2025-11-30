@@ -155,8 +155,48 @@ $bitmap.Dispose()
 }
 
 func takeScreenshotLinux(ctx context.Context, outputPath, region string) error {
-	// Try different screenshot tools in order of preference
-	tools := []struct {
+	// Check if running under Wayland
+	isWayland := os.Getenv("WAYLAND_DISPLAY") != "" || os.Getenv("XDG_SESSION_TYPE") == "wayland"
+
+	if isWayland {
+		// Wayland screenshot tools (in order of preference)
+		waylandTools := []struct {
+			name string
+			args []string
+		}{
+			{"grim", []string{outputPath}},                           // Most common Wayland screenshot tool
+			{"gnome-screenshot", []string{"-f", outputPath}},         // Works on GNOME Wayland
+			{"spectacle", []string{"-b", "-n", "-o", outputPath}},    // KDE
+			{"ksnip", []string{"-m", "fullscreen", "-s", outputPath}}, // Cross-platform
+		}
+
+		if region == "active" {
+			// Active window on Wayland is trickier - some tools support it
+			waylandTools = []struct {
+				name string
+				args []string
+			}{
+				{"gnome-screenshot", []string{"-w", "-f", outputPath}},
+				{"spectacle", []string{"-b", "-a", "-n", "-o", outputPath}},
+				// grim needs slurp for region selection, fallback to full screen
+				{"grim", []string{outputPath}},
+			}
+		}
+
+		for _, tool := range waylandTools {
+			if _, err := exec.LookPath(tool.name); err == nil {
+				cmd := exec.CommandContext(ctx, tool.name, tool.args...)
+				if err := cmd.Run(); err == nil {
+					return nil
+				}
+			}
+		}
+
+		return fmt.Errorf("no Wayland screenshot tool available (tried grim, gnome-screenshot, spectacle, ksnip). Install grim for best results")
+	}
+
+	// X11 screenshot tools
+	x11Tools := []struct {
 		name string
 		args []string
 	}{
@@ -167,7 +207,7 @@ func takeScreenshotLinux(ctx context.Context, outputPath, region string) error {
 	}
 
 	if region == "active" {
-		tools = []struct {
+		x11Tools = []struct {
 			name string
 			args []string
 		}{
@@ -178,7 +218,7 @@ func takeScreenshotLinux(ctx context.Context, outputPath, region string) error {
 		}
 	}
 
-	for _, tool := range tools {
+	for _, tool := range x11Tools {
 		if _, err := exec.LookPath(tool.name); err == nil {
 			cmd := exec.CommandContext(ctx, tool.name, tool.args...)
 			if err := cmd.Run(); err == nil {
@@ -187,7 +227,7 @@ func takeScreenshotLinux(ctx context.Context, outputPath, region string) error {
 		}
 	}
 
-	return fmt.Errorf("no screenshot tool available (tried gnome-screenshot, scrot, import, maim)")
+	return fmt.Errorf("no X11 screenshot tool available (tried gnome-screenshot, scrot, import, maim)")
 }
 
 func toolReadImage(ctx context.Context, args json.RawMessage) (string, error) {

@@ -221,7 +221,7 @@ For Cisco challenges (Packet Tracer and NetAcad quizzes) and GUI-based tasks:
 
 **Capabilities:**
 - **Screenshots**: See the current screen state
-- **Mouse**: Click, double-click, right-click, drag, scroll (up/down/left/right)
+- **Mouse**: Click, double-click, right-click, drag, scroll, move cursor
 - **Keyboard**: Type text, press hotkeys (Ctrl+C, Tab, Enter, etc.)
 - **Window management**: Focus windows, list open windows
 
@@ -229,7 +229,10 @@ For Cisco challenges (Packet Tracer and NetAcad quizzes) and GUI-based tasks:
 - **Observe** (default): AI watches and provides step-by-step guidance
 - **Control**: AI can interact directly with the screen
 
-Works on both Windows (native) and Linux (via xdotool on X11).
+**Platform Support:**
+- **Windows**: Native PowerShell/.NET automation
+- **Linux X11**: xdotool
+- **Linux Wayland**: ydotool, dotool, wtype, grim (auto-detected)
 
 ### Setting Notifications
 

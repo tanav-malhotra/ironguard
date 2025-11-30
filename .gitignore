@@ -1,8 +1,9 @@
-# Binaries
-ironguard
-ironguard.exe
-ironguard-*
-*.exe
+# Binaries (in root directory only)
+/ironguard
+/ironguard.exe
+/ironguard-*
+# Don't ignore all .exe - only in root
+/*.exe
 *.dll
 *.so
 *.dylib

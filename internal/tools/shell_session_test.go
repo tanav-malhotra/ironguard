@@ -10,6 +10,22 @@ import (
 	"time"
 )
 
+// normalizePath resolves symlinks and short paths to get canonical path
+func normalizePath(path string) string {
+	// First clean the path
+	path = filepath.Clean(path)
+	
+	// Try to get the real/canonical path (resolves symlinks and short names on Windows)
+	if abs, err := filepath.Abs(path); err == nil {
+		path = abs
+	}
+	if eval, err := filepath.EvalSymlinks(path); err == nil {
+		path = eval
+	}
+	
+	return path
+}
+
 func TestPersistentShellBasicCommand(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -59,8 +75,9 @@ func TestPersistentShellCdPersists(t *testing.T) {
 	}
 
 	// Verify the shell's cwd was updated
-	expectedPath := filepath.Clean(tmpDir)
-	actualPath := filepath.Clean(shell.GetCwd())
+	// Use normalizePath to handle Windows short paths (8.3) vs long paths
+	expectedPath := normalizePath(tmpDir)
+	actualPath := normalizePath(shell.GetCwd())
 
 	if actualPath != expectedPath {
 		t.Fatalf("shell cwd %q does not match expected %q", actualPath, expectedPath)
@@ -174,8 +191,9 @@ func TestPersistentShellChainedCommands(t *testing.T) {
 	}
 
 	// Verify we're in the subdirectory
-	expectedPath := filepath.Clean(subDir)
-	actualPath := filepath.Clean(shell.GetCwd())
+	// Use normalizePath to handle Windows short paths (8.3) vs long paths
+	expectedPath := normalizePath(subDir)
+	actualPath := normalizePath(shell.GetCwd())
 
 	if actualPath != expectedPath {
 		t.Fatalf("shell cwd %q does not match expected %q", actualPath, expectedPath)

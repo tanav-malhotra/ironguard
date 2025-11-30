@@ -1,4 +1,4 @@
-# IRONGUARD CyberPatriot Master Checklist
+# IronGuard CyberPatriot Master Checklist
 
 > **This checklist is embedded in the AI's system prompt.**
 > The AI will systematically work through each item.

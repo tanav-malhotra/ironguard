@@ -1,4 +1,4 @@
-# IRONGUARD Feature Specification
+# IronGuard Feature Specification
 
 ## Core AI Capabilities
 

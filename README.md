@@ -1,8 +1,8 @@
-# IRONGUARD
+# IronGuard
 
 **Autonomous AI Agent for CyberPatriot Competition**
 
-IRONGUARD is a fully autonomous AI-powered tool designed to secure CyberPatriot competition images. It reads the scenario, answers forensics questions, fixes vulnerabilities, and tracks your score—all without manual intervention. Built by competitors, for competitors.
+IronGuard is a fully autonomous AI-powered tool designed to secure CyberPatriot competition images. It reads the scenario, answers forensics questions, fixes vulnerabilities, and tracks your score—all without manual intervention. Built by competitors, for competitors.
 
 ![Go Version](https://img.shields.io/badge/Go-1.22+-00ADD8?style=flat&logo=go)
 ![License](https://img.shields.io/badge/License-MIT-blue.svg)
@@ -10,9 +10,9 @@ IRONGUARD is a fully autonomous AI-powered tool designed to secure CyberPatriot 
 
 ---
 
-## Why IRONGUARD?
+## Why IronGuard?
 
-CyberPatriot competitions are a race against time. Teams have 4 hours to secure multiple images, answer forensics questions, and maximize their score. IRONGUARD automates the tedious parts so you can focus on learning and strategy.
+CyberPatriot competitions are a race against time. Teams have 4 hours to secure multiple images, answer forensics questions, and maximize their score. IronGuard automates the tedious parts so you can focus on learning and strategy.
 
 **What it does:**
 - Reads the README to understand authorized users, required services, and restrictions
@@ -53,7 +53,7 @@ sudo ./ironguard
 
 ### First Run
 
-1. Start IRONGUARD and set your API key:
+1. Start IronGuard and set your API key:
    ```
    /key sk-your-api-key-here
    ```
@@ -77,7 +77,7 @@ That's it. The AI handles the rest.
 
 ## How It Works
 
-IRONGUARD operates in four phases:
+IronGuard operates in four phases:
 
 | Phase | Time | Activities |
 |-------|------|------------|
@@ -90,7 +90,7 @@ The AI checks the score after every few actions. If the score drops (indicating 
 
 ### Parallel Execution
 
-IRONGUARD can spawn sub-agents to work on multiple tasks simultaneously:
+IronGuard can spawn sub-agents to work on multiple tasks simultaneously:
 
 ```
 Main Agent                    Sub-Agents (parallel)
@@ -120,7 +120,7 @@ Configure the maximum number of concurrent sub-agents with `/subagents <max>` (d
 | `/score` | Check current score |
 | `/status` | Show current configuration |
 | `/help` | List all commands |
-| `/quit` | Exit IRONGUARD |
+| `/quit` | Exit IronGuard |
 
 ### Configuration
 
@@ -176,7 +176,7 @@ Commands maintain state across executions. If you run `cd /etc` followed by `cat
 
 ### Context Management
 
-Long sessions are handled automatically. When the conversation approaches token limits, IRONGUARD summarizes older messages while preserving:
+Long sessions are handled automatically. When the conversation approaches token limits, IronGuard summarizes older messages while preserving:
 - Recent context (last 10 messages)
 - Key actions and findings
 - Current score and progress
@@ -263,12 +263,12 @@ Set your provider with `/provider <name>` and model with `/model <name>`.
 ## Competition Day Checklist
 
 ### Before the Competition
-- [ ] Download IRONGUARD to a USB drive
+- [ ] Download IronGuard to a USB drive
 - [ ] Have your API key written down securely
 - [ ] Test on a practice image
 
 ### On Each Image
-1. Copy IRONGUARD to the Desktop
+1. Copy IronGuard to the Desktop
 2. Run as Administrator (Windows) or with sudo (Linux)
 3. `/key <your-api-key>`
 4. `/harden`
@@ -318,7 +318,7 @@ You can also set keys at runtime with `/key`.
 
 ## MCP Server Integration
 
-IRONGUARD supports the [Model Context Protocol](https://modelcontextprotocol.io/) for extending capabilities:
+IronGuard supports the [Model Context Protocol](https://modelcontextprotocol.io/) for extending capabilities:
 
 ```bash
 /mcp-add filesystem npx -y @modelcontextprotocol/server-filesystem /path

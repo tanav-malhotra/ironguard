@@ -34,6 +34,13 @@ type QueuedMessage struct {
 	Interrupt bool // If true, interrupts current AI task
 }
 
+// AutocompleteItem represents an item in the autocomplete dropdown.
+type AutocompleteItem struct {
+	Text        string // The text to insert (command name or argument)
+	Description string // Description to show
+	IsArg       bool   // True if this is an argument option, false if command
+}
+
 type model struct {
 	cfg config.Config
 
@@ -45,9 +52,11 @@ type model struct {
 	pendingAction *PendingAction
 
 	// Autocomplete state
-	showAutocomplete  bool
-	autocompleteItems []SlashCommand
-	autocompleteIdx   int
+	showAutocomplete    bool
+	autocompleteItems   []AutocompleteItem
+	autocompleteIdx     int
+	autocompleteForArgs bool   // true when showing arg options, false for commands
+	autocompleteCmdName string // command name when showing arg options
 
 	// Confirmation dialog
 	showConfirm    bool
@@ -358,8 +367,15 @@ func (m *model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.showAutocomplete && len(m.autocompleteItems) > 0 {
 			m.autocompleteIdx = (m.autocompleteIdx + 1) % len(m.autocompleteItems)
 			selected := m.autocompleteItems[m.autocompleteIdx]
-			m.input.SetValue("/" + selected.Name + " ")
+			if m.autocompleteForArgs {
+				// Completing an argument
+				m.input.SetValue("/" + m.autocompleteCmdName + " " + selected.Text)
+			} else {
+				// Completing a command name - add space to trigger arg completion
+				m.input.SetValue("/" + selected.Text + " ")
+			}
 			m.input.SetCursor(len(m.input.Value()))
+			m.updateAutocomplete()
 			return m, nil
 		}
 		return m, nil
@@ -371,8 +387,13 @@ func (m *model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.autocompleteIdx = len(m.autocompleteItems) - 1
 			}
 			selected := m.autocompleteItems[m.autocompleteIdx]
-			m.input.SetValue("/" + selected.Name + " ")
+			if m.autocompleteForArgs {
+				m.input.SetValue("/" + m.autocompleteCmdName + " " + selected.Text)
+			} else {
+				m.input.SetValue("/" + selected.Text + " ")
+			}
 			m.input.SetCursor(len(m.input.Value()))
+			m.updateAutocomplete()
 			return m, nil
 		}
 		return m, nil
@@ -408,10 +429,20 @@ func (m *model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 		if m.showAutocomplete && len(m.autocompleteItems) > 0 {
 			selected := m.autocompleteItems[m.autocompleteIdx]
-			m.input.SetValue("/" + selected.Name + " ")
-			m.input.SetCursor(len(m.input.Value()))
-			m.showAutocomplete = false
-			return m, nil
+			if m.autocompleteForArgs {
+				// Complete the argument and close autocomplete
+				m.input.SetValue("/" + m.autocompleteCmdName + " " + selected.Text)
+				m.input.SetCursor(len(m.input.Value()))
+				m.showAutocomplete = false
+				m.autocompleteForArgs = false
+				return m, nil
+			} else {
+				// Complete the command and show arg options
+				m.input.SetValue("/" + selected.Text + " ")
+				m.input.SetCursor(len(m.input.Value()))
+				m.updateAutocomplete()
+				return m, nil
+			}
 		}
 
 		m.input.SetValue("")
@@ -532,17 +563,69 @@ func (m *model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 
 func (m *model) updateAutocomplete() {
 	val := m.input.Value()
-	if strings.HasPrefix(val, "/") && !strings.Contains(val, " ") {
-		prefix := val[1:]
-		m.autocompleteItems = m.cmdRegistry.Find(prefix)
-		m.showAutocomplete = len(m.autocompleteItems) > 0
-		if m.autocompleteIdx >= len(m.autocompleteItems) {
-			m.autocompleteIdx = 0
-		}
-	} else {
+
+	if !strings.HasPrefix(val, "/") {
 		m.showAutocomplete = false
 		m.autocompleteItems = nil
 		m.autocompleteIdx = 0
+		m.autocompleteForArgs = false
+		m.autocompleteCmdName = ""
+		return
+	}
+
+	// Check if we have a space (command is complete, show arg options)
+	if strings.Contains(val, " ") {
+		parts := strings.SplitN(val[1:], " ", 2)
+		cmdName := parts[0]
+		argPrefix := ""
+		if len(parts) > 1 {
+			argPrefix = parts[1]
+		}
+
+		// Get arg options for this command
+		argOptions := m.cmdRegistry.GetArgOptions(cmdName, argPrefix)
+		if len(argOptions) > 0 {
+			m.autocompleteItems = make([]AutocompleteItem, len(argOptions))
+			for i, opt := range argOptions {
+				m.autocompleteItems[i] = AutocompleteItem{
+					Text:        opt,
+					Description: "",
+					IsArg:       true,
+				}
+			}
+			m.showAutocomplete = true
+			m.autocompleteForArgs = true
+			m.autocompleteCmdName = cmdName
+			if m.autocompleteIdx >= len(m.autocompleteItems) {
+				m.autocompleteIdx = 0
+			}
+		} else {
+			m.showAutocomplete = false
+			m.autocompleteItems = nil
+			m.autocompleteForArgs = false
+		}
+	} else {
+		// No space yet, show command options
+		prefix := val[1:]
+		commands := m.cmdRegistry.Find(prefix)
+		m.autocompleteItems = make([]AutocompleteItem, len(commands))
+		for i, cmd := range commands {
+			desc := cmd.Description
+			if cmd.Args != "" {
+				desc = cmd.Args + " - " + desc
+			}
+			m.autocompleteItems[i] = AutocompleteItem{
+				Text:        cmd.Name,
+				Description: desc,
+				IsArg:       false,
+			}
+		}
+		m.showAutocomplete = len(m.autocompleteItems) > 0
+		m.autocompleteForArgs = false
+		m.autocompleteCmdName = ""
+		if m.autocompleteIdx >= len(m.autocompleteItems) {
+			m.autocompleteIdx = 0
+		}
 	}
 }
 
@@ -980,13 +1063,27 @@ func (m model) renderAutocomplete(width int) string {
 		maxShow = len(m.autocompleteItems)
 	}
 
+	// Show header based on what we're completing
+	if m.autocompleteForArgs {
+		lines = append(lines, m.styles.Muted.Render(fmt.Sprintf("  Options for /%s:", m.autocompleteCmdName)))
+	}
+
 	for i := 0; i < maxShow; i++ {
-		cmd := m.autocompleteItems[i]
-		line := "/" + cmd.Name
-		if cmd.Args != "" {
-			line += " " + cmd.Args
+		item := m.autocompleteItems[i]
+		var line string
+		if item.IsArg {
+			// Argument option
+			line = "  " + item.Text
+			if item.Description != "" {
+				line += " - " + item.Description
+			}
+		} else {
+			// Command
+			line = "/" + item.Text
+			if item.Description != "" {
+				line += " - " + item.Description
+			}
 		}
-		line += " - " + cmd.Description
 
 		if i == m.autocompleteIdx {
 			lines = append(lines, m.styles.CommandSelected.Render(line))

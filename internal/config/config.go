@@ -41,10 +41,11 @@ type CompetitionMode string
 const (
 	// CompModeHarden is for CyberPatriot image hardening (Windows/Linux).
 	CompModeHarden CompetitionMode = "harden"
-	// CompModePacketTracer is for Cisco Packet Tracer challenges.
-	CompModePacketTracer CompetitionMode = "packet-tracer"
-	// CompModeNetworkQuiz is for networking quizzes (NetAcad, etc.).
-	CompModeNetworkQuiz CompetitionMode = "network-quiz"
+	// CompModeCisco is for Cisco challenges (Packet Tracer and NetAcad quizzes).
+	CompModeCisco CompetitionMode = "cisco"
+	// Legacy aliases for backward compatibility
+	CompModePacketTracer CompetitionMode = "cisco" // Alias for cisco mode
+	CompModeNetworkQuiz  CompetitionMode = "cisco" // Alias for cisco mode
 )
 
 // OSType represents the detected operating system type.

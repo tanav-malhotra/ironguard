@@ -19,7 +19,8 @@ func syncScreenMode(mode config.ScreenMode) {
 type SlashCommand struct {
 	Name        string
 	Description string
-	Args        string // e.g. "<provider>" or "" if no args
+	Args        string   // e.g. "<provider>" or "" if no args
+	ArgOptions  []string // Autocomplete options for arguments (e.g. ["claude", "openai", "gemini"])
 	Handler     func(m *model, args string) string
 }
 
@@ -46,6 +47,7 @@ func (r *CommandRegistry) registerDefaults() {
 			Name:        "provider",
 			Description: "Switch AI provider",
 			Args:        "<claude|openai|gemini>",
+			ArgOptions:  []string{"claude", "openai", "gemini"},
 			Handler:     cmdProvider,
 		},
 		{
@@ -99,6 +101,8 @@ func (r *CommandRegistry) registerDefaults() {
 		{
 			Name:        "harden",
 			Description: "Start the hardening assistant",
+			Args:        "[windows|windows-server|linux|cisco|auto]",
+			ArgOptions:  []string{"windows", "windows-server", "linux", "cisco", "auto"},
 			Handler:     cmdHarden,
 		},
 		{
@@ -167,6 +171,7 @@ func (r *CommandRegistry) registerDefaults() {
 			Name:        "screen",
 			Description: "Set screen interaction mode",
 			Args:        "<observe|control>",
+			ArgOptions:  []string{"observe", "control"},
 			Handler:     cmdScreenMode,
 		},
 		{
@@ -196,7 +201,8 @@ func (r *CommandRegistry) registerDefaults() {
 		{
 			Name:        "mode",
 			Description: "Set competition mode",
-			Args:        "<harden|packet-tracer|quiz>",
+			Args:        "<harden|cisco>",
+			ArgOptions:  []string{"harden", "cisco"},
 			Handler:     cmdCompMode,
 		},
 		{
@@ -246,12 +252,14 @@ func (r *CommandRegistry) registerDefaults() {
 			Name:        "compact",
 			Description: "Toggle compact mode (brief AI responses)",
 			Args:        "[on|off]",
+			ArgOptions:  []string{"on", "off"},
 			Handler:     cmdCompact,
 		},
 		{
 			Name:        "summarize",
 			Description: "Set summarization mode",
 			Args:        "<smart|fast>",
+			ArgOptions:  []string{"smart", "fast"},
 			Handler:     cmdSummarize,
 		},
 		{
@@ -275,6 +283,7 @@ func (r *CommandRegistry) registerDefaults() {
 			Name:        "remember",
 			Description: "Save something to persistent memory",
 			Args:        "<category> <content>",
+			ArgOptions:  []string{"vulnerability", "config", "command", "finding", "tip", "pattern"},
 			Handler:     cmdRemember,
 		},
 		{
@@ -318,6 +327,24 @@ func (r *CommandRegistry) Get(name string) *SlashCommand {
 		}
 	}
 	return nil
+}
+
+// GetArgOptions returns argument options for a command, filtered by prefix.
+func (r *CommandRegistry) GetArgOptions(cmdName, argPrefix string) []string {
+	cmd := r.Get(cmdName)
+	if cmd == nil || len(cmd.ArgOptions) == 0 {
+		return nil
+	}
+	if argPrefix == "" {
+		return cmd.ArgOptions
+	}
+	var matches []string
+	for _, opt := range cmd.ArgOptions {
+		if len(opt) >= len(argPrefix) && opt[:len(argPrefix)] == argPrefix {
+			matches = append(matches, opt)
+		}
+	}
+	return matches
 }
 
 // Command handlers
@@ -487,7 +514,7 @@ func cmdHarden(m *model, args string) string {
 	}
 
 	// Parse arguments: /harden [mode] [target-score]
-	// Modes: windows, windows-server, linux, packet-tracer, auto
+	// Modes: windows, windows-server, linux, cisco, auto
 	parts := strings.Fields(args)
 	
 	mode := ""
@@ -501,8 +528,8 @@ func cmdHarden(m *model, args string) string {
 			mode = "windows-server"
 		case "linux", "lin", "l":
 			mode = "linux"
-		case "packet-tracer", "pt", "cisco":
-			mode = "packet-tracer"
+		case "cisco", "packet-tracer", "pt", "quiz", "network-quiz":
+			mode = "cisco"
 		case "auto", "detect":
 			mode = "auto"
 		default:
@@ -556,7 +583,7 @@ Choose hardening mode:
   /harden windows        - Windows 10/11 desktop
   /harden windows-server - Windows Server
   /harden linux          - Ubuntu/Debian/Linux Mint
-  /harden packet-tracer  - Cisco Packet Tracer (needs /screen control)
+  /harden cisco          - Cisco challenges (Packet Tracer/NetAcad quizzes)
   /harden auto           - Auto-detect and start (suggested: %s)
 
 Example: /harden %s 100
@@ -579,20 +606,20 @@ Example: /harden %s 100
 		if m.cfg.OSInfo.Type == config.OSTypeUnknown {
 			m.cfg.OSInfo.Type = config.OSTypeUbuntu
 		}
-	case "packet-tracer":
-		m.cfg.CompMode = config.CompModePacketTracer
+	case "cisco":
+		m.cfg.CompMode = config.CompModeCisco
 		if m.cfg.ScreenMode != config.ScreenModeControl {
-			return `⚠️ PACKET TRACER MODE REQUIRES SCREEN CONTROL
+			return `⚠️ CISCO MODE WORKS BEST WITH SCREEN CONTROL
 
-Packet Tracer challenges require the AI to see and interact with the GUI.
-
-Please enable screen control first:
+The AI can observe and guide you, or take control to complete Cisco tasks.
+For full autonomous mode, enable screen control:
   /screen control
 
 Then run:
-  /harden packet-tracer
+  /harden cisco
 
-Note: The AI will need to take screenshots frequently to see the topology.`
+In OBSERVE mode: AI watches your screen and provides step-by-step guidance.
+In CONTROL mode: AI can click, type, scroll, and complete tasks autonomously.`
 		}
 	case "auto":
 		// Use auto-detected OS
@@ -815,25 +842,36 @@ func cmdCompMode(m *model, args string) string {
 	case "harden":
 		m.cfg.CompMode = config.CompModeHarden
 		return "🛡️ Competition mode: HARDENING\nOptimized for CyberPatriot image hardening (Windows/Linux)."
-	case "packet-tracer", "pt":
-		m.cfg.CompMode = config.CompModePacketTracer
-		return "🌐 Competition mode: PACKET TRACER\nAI will help with Cisco Packet Tracer challenges.\nUse /screen control to enable AI screen interaction."
-	case "quiz", "network-quiz":
-		m.cfg.CompMode = config.CompModeNetworkQuiz
-		return "📝 Competition mode: NETWORK QUIZ\nAI will help with networking quizzes.\nUse /screen control to enable AI screen interaction."
+	case "cisco", "packet-tracer", "pt", "quiz", "network-quiz":
+		m.cfg.CompMode = config.CompModeCisco
+		screenInfo := "OBSERVE (AI watches and guides)"
+		if m.cfg.ScreenMode == config.ScreenModeControl {
+			screenInfo = "CONTROL (AI can interact with screen)"
+		}
+		return fmt.Sprintf(`🌐 Competition mode: CISCO
+AI will help with Cisco Packet Tracer and NetAcad quiz challenges.
+
+Screen mode: %s
+
+In this mode, the AI can:
+  • Take screenshots to see the topology/questions
+  • Scroll to view more content
+  • Click, type, and drag (if screen control enabled)
+  • Guide you step-by-step (if observe mode)
+
+Use /screen control to enable full autonomous interaction.`, screenInfo)
 	case "":
 		modes := map[config.CompetitionMode]string{
-			config.CompModeHarden:       "HARDENING",
-			config.CompModePacketTracer: "PACKET TRACER",
-			config.CompModeNetworkQuiz:  "NETWORK QUIZ",
+			config.CompModeHarden: "HARDENING",
+			config.CompModeCisco:  "CISCO",
 		}
 		screenMode := "OBSERVE"
 		if m.cfg.ScreenMode == config.ScreenModeControl {
 			screenMode = "CONTROL"
 		}
-		return fmt.Sprintf("Current competition mode: %s\nScreen mode: %s\nUsage: /mode <harden|packet-tracer|quiz>", modes[m.cfg.CompMode], screenMode)
+		return fmt.Sprintf("Current competition mode: %s\nScreen mode: %s\nUsage: /mode <harden|cisco>", modes[m.cfg.CompMode], screenMode)
 	default:
-		return "Unknown mode. Use: /mode <harden|packet-tracer|quiz>"
+		return "Unknown mode. Use: /mode <harden|cisco>"
 	}
 }
 

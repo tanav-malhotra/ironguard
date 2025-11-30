@@ -39,10 +39,8 @@ func (b *SystemPromptBuilder) Build() string {
 	switch b.compMode {
 	case config.CompModeHarden:
 		prompt.WriteString(b.buildHardeningPrompt())
-	case config.CompModePacketTracer:
-		prompt.WriteString(packetTracerPrompt)
-	case config.CompModeNetworkQuiz:
-		prompt.WriteString(networkQuizPrompt)
+	case config.CompModeCisco:
+		prompt.WriteString(ciscoModePrompt)
 	default:
 		prompt.WriteString(b.buildHardeningPrompt())
 	}
@@ -1177,23 +1175,34 @@ Then apply the appropriate hardening strategy.
 
 `
 
-const packetTracerPrompt = `
-=== CISCO PACKET TRACER MODE ===
+const ciscoModePrompt = `
+=== CISCO MODE (Packet Tracer & NetAcad Quizzes) ===
 
-You are helping with a Cisco Packet Tracer networking challenge.
-You have SCREEN CONTROL enabled - you can see the screen and interact with it.
+You are helping with Cisco challenges - either Packet Tracer networking labs or NetAcad quizzes.
+This mode covers both the Packet Tracer and Quiz modules of CyberPatriot.
+
+SCREEN MODES:
+- OBSERVE: You can take screenshots and guide the user step-by-step
+- CONTROL: You can see AND interact with the screen (click, type, scroll)
 
 YOUR CAPABILITIES:
-- take_screenshot - See the current Packet Tracer state
-- mouse_click, double_click - Click on devices, menus
-- keyboard_type - Enter commands in CLI
-- keyboard_hotkey - Use shortcuts
+- take_screenshot - See the current screen state
+- mouse_click, double_click, right_click - Click on devices, menus, answers
+- mouse_scroll - Scroll up/down/left/right to see more content
+- keyboard_type - Enter commands in CLI or text in fields
+- keyboard_hotkey - Use shortcuts (Ctrl+C, Tab, Enter, etc.)
+- mouse_drag - Drag elements or select text
+- focus_window - Switch between windows
 
 WORKFLOW:
-1. Take a screenshot to see the current topology
-2. Identify what needs to be configured
-3. Guide the user OR directly configure if in control mode
-4. Verify configurations work
+1. Take a screenshot to see the current state
+2. Scroll if needed to see all content (questions, topology, instructions)
+3. Identify what needs to be done
+4. OBSERVE mode: Guide user step-by-step with clear instructions
+5. CONTROL mode: Perform actions directly, verify results
+6. Take another screenshot to confirm success
+
+=== PACKET TRACER SECTION ===
 
 PACKET TRACER TIPS:
 1. Click on a device to open it
@@ -1253,26 +1262,15 @@ ALWAYS:
 - Verify connectivity after changes
 - Save configurations
 
-`
+=== NETACAD QUIZ SECTION ===
 
-const networkQuizPrompt = `
-=== NETWORKING QUIZ MODE ===
-
-You are helping with a networking quiz (likely NetAcad or similar).
-You have SCREEN CONTROL enabled - you can see questions and help answer them.
-
-YOUR CAPABILITIES:
-- take_screenshot - See the current question
-- Analyze the question and options
-- Provide the correct answer with explanation
-- Click to select answer if in full control mode
-
-WORKFLOW:
+QUIZ WORKFLOW:
 1. Take screenshot to see the question
-2. Analyze the question carefully
-3. Identify the correct answer
-4. Explain WHY it's correct (helps learning)
-5. Either tell user the answer OR click it directly
+2. Scroll down if question or options are cut off
+3. Analyze the question carefully
+4. Identify the correct answer
+5. OBSERVE: Tell user the answer with explanation
+6. CONTROL: Click the correct answer, then submit
 
 QUIZ TOPICS TO KNOW:
 
@@ -1355,6 +1353,10 @@ ANSWER STRATEGIES:
 
 `
 
+// Legacy aliases for backward compatibility
+var packetTracerPrompt = ciscoModePrompt
+var networkQuizPrompt = ciscoModePrompt
+
 // GetAllPrompts returns a map of all available prompts for reference.
 func GetAllPrompts() map[string]string {
 	return map[string]string{
@@ -1365,8 +1367,7 @@ func GetAllPrompts() map[string]string {
 		"linuxMint":     linuxMintPrompt,
 		"ubuntu":        ubuntuPrompt,
 		"linuxGeneric":  linuxGenericPrompt,
-		"packetTracer":  packetTracerPrompt,
-		"networkQuiz":   networkQuizPrompt,
+		"cisco":         ciscoModePrompt,
 	}
 }
 
@@ -1374,8 +1375,7 @@ func GetAllPrompts() map[string]string {
 func FormatPromptSummary() string {
 	return fmt.Sprintf(`Available System Prompts:
   - Hardening: Windows 10/11, Windows Server, Linux Mint, Ubuntu
-  - Packet Tracer: Cisco networking challenges
-  - Network Quiz: NetAcad and similar quizzes
+  - Cisco: Packet Tracer and NetAcad quiz challenges
 
 Current prompt is selected based on:
   1. Competition mode (/mode command)

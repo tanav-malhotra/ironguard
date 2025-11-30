@@ -68,7 +68,7 @@ sudo ./ironguard
    /harden windows        # Windows 10/11
    /harden windows-server # Windows Server
    /harden linux          # Ubuntu, Debian, Linux Mint
-   /harden packet-tracer  # Cisco Packet Tracer (requires /screen control)
+   /harden cisco          # Cisco Packet Tracer & NetAcad quizzes
    ```
 
 That's it. The AI handles the rest.
@@ -114,7 +114,7 @@ Configure the maximum number of concurrent sub-agents with `/subagents <max>` (d
 
 | Command | Description |
 |---------|-------------|
-| `/harden [mode]` | Start autonomous hardening (modes: windows, linux, packet-tracer, auto) |
+| `/harden [mode]` | Start autonomous hardening (modes: windows, linux, cisco, auto) |
 | `/stop` | Pause the AI |
 | `/key <api-key>` | Set API key for the current provider |
 | `/score` | Check current score |
@@ -211,14 +211,25 @@ The status bar shows current context usage: `📊 45k/200k`. Use `/tokens` for d
 
 ### Screen Interaction
 
-For Packet Tracer and GUI-based challenges:
+For Cisco challenges (Packet Tracer and NetAcad quizzes) and GUI-based tasks:
 
 ```
+/mode cisco        # Set Cisco mode
 /screen control    # Enable mouse/keyboard control
-/harden packet-tracer
+/harden cisco      # Start autonomous Cisco challenge assistance
 ```
 
-The AI can take screenshots, click on elements, type text, and navigate applications.
+**Capabilities:**
+- **Screenshots**: See the current screen state
+- **Mouse**: Click, double-click, right-click, drag, scroll (up/down/left/right)
+- **Keyboard**: Type text, press hotkeys (Ctrl+C, Tab, Enter, etc.)
+- **Window management**: Focus windows, list open windows
+
+**Modes:**
+- **Observe** (default): AI watches and provides step-by-step guidance
+- **Control**: AI can interact directly with the screen
+
+Works on both Windows (native) and Linux (via xdotool on X11).
 
 ### Setting Notifications
 

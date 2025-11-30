@@ -34,7 +34,7 @@ A sidebar panel for tasks the AI can't do via terminal:
 - "Open Local Security Policy > Account Policies > Password Policy"
 
 ### 3. Screenshot & Screen Control 📸
-Full desktop interaction capabilities:
+Full desktop interaction capabilities for both Windows and Linux (X11/xdotool):
 
 **Observe Mode (default):**
 - `take_screenshot` - Capture the current screen
@@ -42,19 +42,26 @@ Full desktop interaction capabilities:
   - Score reports
   - Error messages
   - GUI settings
-  - Packet Tracer topology
+  - Cisco Packet Tracer topology
+  - NetAcad quiz questions
 
 **Control Mode (`/screen control`):**
-- `mouse_click` - Click at coordinates
+- `mouse_click` - Click at coordinates (left/right/middle, single/double)
+- `mouse_scroll` - Scroll up/down/left/right to see more content
+- `mouse_drag` - Drag elements or select text
 - `keyboard_type` - Type text
 - `keyboard_hotkey` - Press key combinations (Ctrl+C, Alt+Tab, etc.)
 - `list_windows` - List all open windows
 - `focus_window` - Bring a window to foreground
 
+**Platform Support:**
+- **Windows**: Native PowerShell/.NET automation
+- **Linux**: xdotool for X11 (requires `xdotool` package)
+
 **Use cases:**
-- Packet Tracer challenges (full GUI interaction)
-- Network quizzes
+- Cisco challenges (Packet Tracer and NetAcad quizzes)
 - Settings that require GUI
+- Any GUI-based task
 
 ### 4. Sub-Agents (Parallel Execution) 🤖
 The AI can spawn child agents to work in parallel:
@@ -188,7 +195,7 @@ Toggle brief AI responses:
 - `/compact off` - Detailed responses (default)
 - AI is notified via [SYSTEM] message
 
-### 7. Setting Change Notifications 📢
+### 10. Setting Change Notifications 📢
 AI is automatically notified when user changes settings:
 
 - `/confirm` → AI told to wait for approval
@@ -196,6 +203,25 @@ AI is automatically notified when user changes settings:
 - `/screen observe` → AI told mouse/keyboard tools will fail
 - `/screen control` → AI told it has full access
 - `/subagents <n>` → AI told the new limit
+
+### 11. Smart Autocomplete ⌨️
+Intelligent command completion:
+
+- Type `/` to see all available commands
+- Tab/Enter to select a command
+- After selecting a command, see its argument options
+- Example: `/screen` → shows `observe` and `control` options
+- Example: `/provider` → shows `claude`, `openai`, `gemini`
+- Example: `/harden` → shows `windows`, `linux`, `cisco`, `auto`
+
+Works with:
+- `/provider` - AI providers
+- `/screen` - observe/control modes
+- `/mode` - competition modes
+- `/harden` - OS and mode options
+- `/compact` - on/off
+- `/summarize` - smart/fast
+- `/remember` - memory categories
 
 ---
 
@@ -229,7 +255,7 @@ AI is automatically notified when user changes settings:
 ├───────────────────────────────────────────────┴─────────────────────────┤
 │ > Type message... (@file, /command)                        [autopilot]  │
 │                                                                         │
-│ Ctrl+Q: Quit | Ctrl+C: Cancel AI | Ctrl+L: Clear | Tab: Autocomplete   │
+│ /stop: Stop AI | /quit: Exit | Ctrl+L: Clear | Tab: Autocomplete       │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -244,7 +270,7 @@ AI is automatically notified when user changes settings:
 | `/harden windows` | Start hardening for Windows 10/11 |
 | `/harden windows-server` | Start hardening for Windows Server |
 | `/harden linux` | Start hardening for Ubuntu/Debian/Linux |
-| `/harden packet-tracer` | Start Packet Tracer mode (requires `/screen control`) |
+| `/harden cisco` | Start Cisco mode (Packet Tracer & NetAcad quizzes) |
 | `/harden auto` | Auto-detect OS and start immediately |
 | `/auto [target]` | Same as `/harden auto`, optionally set target score |
 | `/stop` | Stop the AI |
@@ -271,7 +297,7 @@ AI is automatically notified when user changes settings:
 | `/confirm` | Enable confirm mode (ask before actions) |
 | `/autopilot` | Enable autopilot mode (default) |
 | `/screen <observe\|control>` | Set screen interaction mode |
-| `/mode <harden\|packet-tracer\|quiz>` | Set competition mode |
+| `/mode <harden\|cisco>` | Set competition mode |
 | `/subagents [max]` | Set max concurrent subagents (1-10, default: 4) |
 | `/compact [on\|off]` | Toggle brief AI responses |
 | `/summarize <smart\|fast>` | Set context summarization mode |
@@ -391,6 +417,10 @@ AI is automatically notified when user changes settings:
 |------|-------------|
 | `take_screenshot` | Capture the screen |
 | `mouse_click` | Click at coordinates (requires control mode) |
+| `mouse_scroll` | Scroll up/down/left/right (requires control mode) |
+| `mouse_drag` | Drag from one point to another (requires control mode) |
+| `double_click` | Double-click at coordinates (requires control mode) |
+| `right_click` | Right-click at coordinates (requires control mode) |
 | `keyboard_type` | Type text (requires control mode) |
 | `keyboard_hotkey` | Press key combination (requires control mode) |
 | `list_windows` | List all open windows |
@@ -493,7 +523,7 @@ The AI maintains:
 - Stops if score drops significantly (penalty detected)
 
 ### Emergency Stop
-- `Ctrl+C` or `/stop` immediately halts AI
+- `/stop` immediately halts AI
 - Current operation is cancelled
 - State is preserved
 - Can resume with another message

@@ -37,6 +37,10 @@ func (c *ClaudeClient) Models() []string {
 	return ModelPresets[ProviderClaude]
 }
 
+func (c *ClaudeClient) HasAPIKey() bool {
+	return c.apiKey != ""
+}
+
 func (c *ClaudeClient) SetAPIKey(key string) {
 	c.apiKey = key
 }

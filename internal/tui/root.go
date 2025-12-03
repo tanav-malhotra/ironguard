@@ -125,30 +125,8 @@ func newModel(cfg config.Config) model {
 	// Create agent
 	ag := agent.New(&cfg)
 
-	welcomeMsg := `═══════════════════════════════════════════════════════════
-              ⚔️  IRONGUARD - COMPETITION MODE  ⚔️
-═══════════════════════════════════════════════════════════
-
-Ready to dominate CyberPatriot. Target: 100/100 in <30 min.
-
-QUICK START:
-  1. Set API key:  /key <your-api-key>
-  2. Start AI:     /harden  (AI does EVERYTHING automatically)
-
-The AI will automatically:
-  • Read the README & forensics questions
-  • Answer forensics, delete bad users, fix vulns
-  • Check score after each action
-  • Keep working until 100/100
-
-CONTROLS:
-  /stop or Ctrl+C  - Pause AI (doesn't quit!)
-  /help            - All commands
-  Ctrl+Q or /quit  - Exit app
-
-Mode: AUTOPILOT | Screen: OBSERVE (AI can't control mouse)
-Model: claude-opus-4-5 (maximum capability)
-═══════════════════════════════════════════════════════════`
+	// Welcome message is set after initialization for API key check
+	welcomeMsg := ""
 
 	// Create MCP manager
 	mcpMgr := mcp.NewManager()
@@ -176,7 +154,74 @@ Model: claude-opus-4-5 (maximum capability)
 }
 
 func (m model) Init() tea.Cmd {
+	// Generate welcome message with banner
+	welcomeMsg := m.generateWelcomeScreen()
+	m.messages = append(m.messages, NewSystemMessage(welcomeMsg))
 	return tea.Batch(textinput.Blink, m.listenToAgent())
+}
+
+// generateWelcomeScreen creates the startup banner and instructions
+func (m model) generateWelcomeScreen() string {
+	// Box width = 75 chars (including borders)
+	// Inner width = 73 chars
+	banner := `
+    ██╗██████╗  ██████╗ ███╗   ██╗ ██████╗ ██╗   ██╗ █████╗ ██████╗ ██████╗ 
+    ██║██╔══██╗██╔═══██╗████╗  ██║██╔════╝ ██║   ██║██╔══██╗██╔══██╗██╔══██╗
+    ██║██████╔╝██║   ██║██╔██╗ ██║██║  ███╗██║   ██║███████║██████╔╝██║  ██║
+    ██║██╔══██╗██║   ██║██║╚██╗██║██║   ██║██║   ██║██╔══██║██╔══██╗██║  ██║
+    ██║██║  ██║╚██████╔╝██║ ╚████║╚██████╔╝╚██████╔╝██║  ██║██║  ██║██████╔╝
+    ╚═╝╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═══╝ ╚═════╝  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝ 
+                  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+                       AUTONOMOUS SECURITY HARDENING SYSTEM
+                  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`
+
+	// Check if API key is configured
+	hasAPIKey := m.agent.HasAPIKey()
+
+	var statusLine string
+	if hasAPIKey {
+		statusLine = `
+ ┌─────────────────────────────────────────────────────────────────────────┐
+ │  [*] SYSTEM ONLINE                                STATUS: OPERATIONAL   │
+ └─────────────────────────────────────────────────────────────────────────┘`
+	} else {
+		statusLine = `
+ ┌─────────────────────────────────────────────────────────────────────────┐
+ │  [ ] AWAITING CONFIGURATION                          STATUS: STANDBY    │
+ └─────────────────────────────────────────────────────────────────────────┘`
+	}
+
+	quickStart := `
+ ╭─────────────────────────────────────────────────────────────────────────╮
+ │                             QUICK START                                 │
+ ├─────────────────────────────────────────────────────────────────────────┤
+ │                                                                         │
+ │   STEP 1   /key <api-key>           Configure AI provider               │
+ │   STEP 2   /harden                  Begin autonomous hardening          │
+ │                                                                         │
+ ╰─────────────────────────────────────────────────────────────────────────╯
+
+ ╭─────────────────────────────────────────────────────────────────────────╮
+ │                             CAPABILITIES                                │
+ ├─────────────────────────────────────────────────────────────────────────┤
+ │                                                                         │
+ │   > Forensics Analysis           Automatically answers all questions    │
+ │   > Vulnerability Remediation    Fixes security misconfigurations       │
+ │   > User Management              Removes unauthorized accounts          │
+ │   > Score Optimization           Iterates until maximum achieved        │
+ │   > Screen Control               GUI automation when enabled            │
+ │                                                                         │
+ ╰─────────────────────────────────────────────────────────────────────────╯
+
+ ╭─────────────────────────────────────────────────────────────────────────╮
+ │  CONTROLS                                                               │
+ ├─────────────────────────────────────────────────────────────────────────┤
+ │  /help              All commands         Tab            Autocomplete    │
+ │  /stop              Halt operation       Enter          Send message    │
+ │  /quit              Exit program         Ctrl+Enter     Interrupt       │
+ ╰─────────────────────────────────────────────────────────────────────────╯`
+
+	return banner + statusLine + quickStart
 }
 
 // listenToAgent creates a command that listens for agent events.
@@ -365,7 +410,7 @@ func (m *model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyTab:
 		if m.showAutocomplete && len(m.autocompleteItems) > 0 {
-			m.autocompleteIdx = (m.autocompleteIdx + 1) % len(m.autocompleteItems)
+			// Select current item first, then move to next for next Tab press
 			selected := m.autocompleteItems[m.autocompleteIdx]
 			if m.autocompleteForArgs {
 				// Completing an argument
@@ -375,6 +420,8 @@ func (m *model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.input.SetValue("/" + selected.Text + " ")
 			}
 			m.input.SetCursor(len(m.input.Value()))
+			// Move to next item for next Tab press
+			m.autocompleteIdx = (m.autocompleteIdx + 1) % len(m.autocompleteItems)
 			m.updateAutocomplete()
 			return m, nil
 		}
@@ -382,6 +429,7 @@ func (m *model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyShiftTab:
 		if m.showAutocomplete && len(m.autocompleteItems) > 0 {
+			// Move back first, then select
 			m.autocompleteIdx--
 			if m.autocompleteIdx < 0 {
 				m.autocompleteIdx = len(m.autocompleteItems) - 1
@@ -404,6 +452,7 @@ func (m *model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.autocompleteIdx < 0 {
 				m.autocompleteIdx = len(m.autocompleteItems) - 1
 			}
+			// Don't update input - just highlight, Enter/Tab will select
 			return m, nil
 		}
 		if m.scrollOffset < len(m.messages)-1 {
@@ -430,14 +479,22 @@ func (m *model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.showAutocomplete && len(m.autocompleteItems) > 0 {
 			selected := m.autocompleteItems[m.autocompleteIdx]
 			if m.autocompleteForArgs {
-				// Complete the argument and close autocomplete
-				m.input.SetValue("/" + m.autocompleteCmdName + " " + selected.Text)
-				m.input.SetCursor(len(m.input.Value()))
+				// Complete the argument and execute the command
+				fullCmd := "/" + m.autocompleteCmdName + " " + selected.Text
+				m.input.SetValue("")
 				m.showAutocomplete = false
 				m.autocompleteForArgs = false
-				return m, nil
+				return m.handleSlashCommand(fullCmd)
 			} else {
-				// Complete the command and show arg options
+				// Check if command has required arguments
+				cmd := m.cmdRegistry.Get(selected.Text)
+				if cmd != nil && cmd.Args == "" {
+					// No arguments required - execute immediately
+					m.input.SetValue("")
+					m.showAutocomplete = false
+					return m.handleSlashCommand("/" + selected.Text)
+				}
+				// Has arguments - complete and show arg options
 				m.input.SetValue("/" + selected.Text + " ")
 				m.input.SetCursor(len(m.input.Value()))
 				m.updateAutocomplete()
@@ -508,14 +565,14 @@ func (m *model) startChat(message string) tea.Cmd {
 	return func() tea.Msg {
 		// Expand @ mentions in the message
 		expandedMessage, mentions := ExpandMentionsInMessage(message)
-		
+
 		// Log mentions for user visibility
 		for _, mention := range mentions {
 			if mention.Type == MentionFile && mention.Content != "" {
 				// File was loaded successfully - the content is in expandedMessage
 			}
 		}
-		
+
 		go m.agent.Chat(context.Background(), expandedMessage)
 		return nil
 	}
@@ -772,7 +829,7 @@ func (m *model) executeAction(action *PendingAction) tea.Cmd {
 
 func (m model) View() string {
 	if !m.ready {
-		return "Loading ironguard TUI…"
+		return "Loading IronGuard..."
 	}
 
 	chatWidth := m.width - m.sidebarWidth - 3
@@ -780,8 +837,15 @@ func (m model) View() string {
 
 	sidebar := m.renderSidebar()
 	chat := m.renderChat(chatWidth, chatHeight)
-	inputArea := m.renderInput(chatWidth)
+	inputArea := m.renderInputOnly(chatWidth) // Just the input box
 	statusBar := m.renderStatusBar()
+
+	// If autocomplete is showing, overlay it on the chat
+	if m.showAutocomplete && len(m.autocompleteItems) > 0 {
+		autocomplete := m.renderAutocomplete(chatWidth)
+		// Replace bottom lines of chat with autocomplete overlay
+		chat = m.overlayAutocomplete(chat, autocomplete, chatWidth, chatHeight)
+	}
 
 	mainContent := lipgloss.JoinVertical(lipgloss.Left, chat, inputArea)
 	content := lipgloss.JoinHorizontal(lipgloss.Top, mainContent, sidebar)
@@ -791,107 +855,158 @@ func (m model) View() string {
 
 func (m model) renderSidebar() string {
 	var sb strings.Builder
+	lineWidth := m.sidebarWidth - 6
 
-	title := m.styles.Title.Render("⚔ IRONGUARD")
-	sb.WriteString(title + "\n\n")
+	// Header with title
+	sb.WriteString(m.styles.Title.Render("◈ IRONGUARD") + "\n")
+	sb.WriteString(m.styles.Muted.Render(strings.Repeat("─", lineWidth)) + "\n\n")
 
 	// Score display (prominent)
-	sb.WriteString(m.styles.Label.Render("📊 SCORE") + "\n")
+	sb.WriteString(m.styles.Label.Render("SCORE") + "\n")
 	if m.currentScore > 0 {
-		scoreStr := fmt.Sprintf("  %d/100", m.currentScore)
+		scoreBar := m.renderScoreBar(m.currentScore, lineWidth)
+		sb.WriteString(scoreBar + "\n")
+		scoreStr := fmt.Sprintf("%d/100", m.currentScore)
 		if m.scoreDelta > 0 {
-			scoreStr += m.styles.Success.Render(fmt.Sprintf(" (+%d)", m.scoreDelta))
+			scoreStr += m.styles.Success.Render(fmt.Sprintf(" +%d", m.scoreDelta))
 		} else if m.scoreDelta < 0 {
-			scoreStr += m.styles.Error.Render(fmt.Sprintf(" (%d)", m.scoreDelta))
+			scoreStr += m.styles.Error.Render(fmt.Sprintf(" %d", m.scoreDelta))
 		}
-		sb.WriteString(m.styles.Value.Render(scoreStr) + "\n\n")
+		sb.WriteString(m.styles.Value.Render("  "+scoreStr) + "\n\n")
 	} else {
-		sb.WriteString(m.styles.Muted.Render("  Not checked") + "\n\n")
+		sb.WriteString(m.styles.Muted.Render("  ── awaiting ──") + "\n\n")
 	}
 
-	// Status
-	sb.WriteString(m.styles.Label.Render("Status") + "\n")
-	if m.agentBusy {
-		sb.WriteString(m.styles.Warning.Render("  ● Working") + "\n")
+	// Status - check API key first
+	sb.WriteString(m.styles.Label.Render("STATUS") + "\n")
+	if !m.agent.HasAPIKey() {
+		sb.WriteString(m.styles.Error.Render("  ◌ NO API KEY") + "\n")
+		sb.WriteString(m.styles.Muted.Render("    /key <key>") + "\n")
+	} else if m.agentBusy {
+		sb.WriteString(m.styles.Warning.Render("  ◉ PROCESSING") + "\n")
 		if m.agentStatus != "" {
 			status := m.agentStatus
-			if len(status) > 24 {
-				status = status[:21] + "..."
+			if len(status) > lineWidth-4 {
+				status = status[:lineWidth-7] + "..."
 			}
 			sb.WriteString(m.styles.Muted.Render("  "+status) + "\n")
 		}
 	} else {
-		sb.WriteString(m.styles.Success.Render("  ● Ready") + "\n")
+		sb.WriteString(m.styles.Success.Render("  ● READY") + "\n")
 	}
 	sb.WriteString("\n")
 
-	// Mode badge
-	var modeBadge string
-	if m.cfg.Mode == config.ModeConfirm {
-		modeBadge = m.styles.BadgeConfirm.Render("CONFIRM")
-	} else {
-		modeBadge = m.styles.BadgeAutopilot.Render("AUTO")
-	}
-	sb.WriteString(m.styles.Muted.Render(string(m.cfg.Provider)) + " " + modeBadge + "\n\n")
+	// Mode and Provider info
+	sb.WriteString(m.styles.Label.Render("CONFIG") + "\n")
+	providerStr := strings.ToUpper(string(m.cfg.Provider))
+	sb.WriteString(m.styles.Muted.Render("  Provider: ") + m.styles.Value.Render(providerStr) + "\n")
 
-	// Separator
-	sb.WriteString(m.styles.Muted.Render(strings.Repeat("─", m.sidebarWidth-4)) + "\n\n")
+	var modeStr string
+	if m.cfg.Mode == config.ModeConfirm {
+		modeStr = m.styles.Success.Render("CONFIRM")
+	} else {
+		modeStr = m.styles.Warning.Render("AUTO")
+	}
+	sb.WriteString(m.styles.Muted.Render("  Mode:     ") + modeStr + "\n")
+
+	var screenStr string
+	if m.cfg.ScreenMode == config.ScreenModeControl {
+		screenStr = m.styles.Warning.Render("CONTROL")
+	} else {
+		screenStr = m.styles.Muted.Render("OBSERVE")
+	}
+	sb.WriteString(m.styles.Muted.Render("  Screen:   ") + screenStr + "\n\n")
+
+	sb.WriteString(m.styles.Muted.Render(strings.Repeat("─", lineWidth)) + "\n\n")
 
 	// Subagents section (if any are active)
 	subAgents := m.agent.GetSubAgents()
 	if len(subAgents) > 0 {
-		sb.WriteString(m.styles.Label.Render("🤖 SUBAGENTS") + "\n")
+		sb.WriteString(m.styles.Label.Render("SUBAGENTS") + "\n")
 		runningCount := 0
 		for _, sa := range subAgents {
 			if sa.Status == "running" {
 				runningCount++
-				sb.WriteString(m.styles.SubAgentRunning.Render(fmt.Sprintf("  ⏳ %s", sa.ID)) + "\n")
+				sb.WriteString(m.styles.SubAgentRunning.Render(fmt.Sprintf("  ◉ %s", sa.ID)) + "\n")
 				if sa.CurrentStep != "" {
 					step := sa.CurrentStep
-					if len(step) > 20 {
-						step = step[:17] + "..."
+					if len(step) > lineWidth-6 {
+						step = step[:lineWidth-9] + "..."
 					}
-					sb.WriteString(m.styles.Muted.Render(fmt.Sprintf("     %s", step)) + "\n")
+					sb.WriteString(m.styles.Muted.Render("    "+step) + "\n")
 				}
 			}
 		}
 		completedCount := len(subAgents) - runningCount
 		if completedCount > 0 {
-			sb.WriteString(m.styles.SubAgentDone.Render(fmt.Sprintf("  ✅ %d done", completedCount)) + "\n")
+			sb.WriteString(m.styles.SubAgentDone.Render(fmt.Sprintf("  ✓ %d completed", completedCount)) + "\n")
 		}
 		sb.WriteString("\n")
 	}
 
 	// Manual tasks section
-	sb.WriteString(m.styles.Label.Render("📋 MANUAL TASKS") + "\n")
 	total, pending, _ := m.manualTasks.Count()
-	if total == 0 {
-		sb.WriteString(m.styles.Muted.Render("  No tasks") + "\n")
-	} else {
-		sb.WriteString(m.styles.Muted.Render(fmt.Sprintf("  %d pending", pending)) + "\n\n")
-		sb.WriteString(m.manualTasks.FormatForSidebar(m.sidebarWidth - 4))
+	if total > 0 {
+		sb.WriteString(m.styles.Label.Render("MANUAL TASKS") + "\n")
+		sb.WriteString(m.styles.Muted.Render(fmt.Sprintf("  %d pending", pending)) + "\n")
+		sb.WriteString(m.manualTasks.FormatForSidebar(lineWidth))
+		sb.WriteString("\n")
 	}
 
 	// MCP servers section (if any connected)
 	if m.mcpManager != nil {
 		servers := m.mcpManager.ListServers()
 		if len(servers) > 0 {
-			sb.WriteString("\n" + m.styles.Label.Render("🔌 MCP SERVERS") + "\n")
+			sb.WriteString(m.styles.Label.Render("MCP SERVERS") + "\n")
 			for _, s := range servers {
 				sb.WriteString(m.styles.Muted.Render(fmt.Sprintf("  • %s", s)) + "\n")
 			}
+			sb.WriteString("\n")
 		}
 	}
 
 	// Queue indicator
 	if len(m.messageQueue) > 0 {
-		sb.WriteString("\n" + m.styles.Warning.Render(fmt.Sprintf("⏳ %d queued", len(m.messageQueue))) + "\n")
+		sb.WriteString(m.styles.Warning.Render(fmt.Sprintf("◉ %d QUEUED", len(m.messageQueue))) + "\n")
+	}
+
+	// Pad to fill height to prevent glitching
+	content := sb.String()
+	contentLines := strings.Count(content, "\n")
+	targetHeight := m.height - 4
+	for i := contentLines; i < targetHeight; i++ {
+		content += "\n"
 	}
 
 	return m.styles.Sidebar.
 		Width(m.sidebarWidth).
 		Height(m.height - 2).
-		Render(sb.String())
+		Render(content)
+}
+
+// renderScoreBar creates a visual progress bar for the score
+func (m model) renderScoreBar(score, width int) string {
+	barWidth := width - 4
+	if barWidth < 10 {
+		barWidth = 10
+	}
+	filled := (score * barWidth) / 100
+	empty := barWidth - filled
+
+	bar := "  "
+	for i := 0; i < filled; i++ {
+		bar += "█"
+	}
+	for i := 0; i < empty; i++ {
+		bar += "░"
+	}
+
+	if score >= 90 {
+		return m.styles.Success.Render(bar)
+	} else if score >= 70 {
+		return m.styles.Warning.Render(bar)
+	}
+	return m.styles.Error.Render(bar)
 }
 
 func (m model) renderChat(width, height int) string {
@@ -936,7 +1051,7 @@ func (m model) formatMessage(msg Message, width int) string {
 
 	case RoleAI:
 		var sb strings.Builder
-		
+
 		// Show thinking/reasoning if present (Claude Code style)
 		if msg.Thinking != "" {
 			thinkingLines := strings.Split(msg.Thinking, "\n")
@@ -946,7 +1061,7 @@ func (m model) formatMessage(msg Message, width int) string {
 			} else {
 				thinkingPreview = msg.Thinking
 			}
-			
+
 			if msg.ThinkingVisible {
 				// Expanded view
 				sb.WriteString(m.styles.ThinkingBox.Render("💭 THINKING (click to collapse):\n" + msg.Thinking))
@@ -956,7 +1071,7 @@ func (m model) formatMessage(msg Message, width int) string {
 			}
 			sb.WriteString("\n")
 		}
-		
+
 		prefix := m.styles.AIMessage.Bold(true).Render("AI: ")
 		content := msg.Content
 		if msg.IsStreaming {
@@ -970,7 +1085,7 @@ func (m model) formatMessage(msg Message, width int) string {
 
 	case RoleTool:
 		var sb strings.Builder
-		
+
 		// Tool header with collapse indicator
 		if msg.Collapsed {
 			sb.WriteString(m.styles.ToolCall.Render("⚡ " + msg.ToolName + " [+]"))
@@ -1008,7 +1123,38 @@ func (m model) formatMessage(msg Message, width int) string {
 	}
 }
 
-func (m model) renderInput(width int) string {
+// overlayAutocomplete places the autocomplete popup over the bottom of the chat area
+func (m model) overlayAutocomplete(chat, autocomplete string, width, height int) string {
+	chatLines := strings.Split(chat, "\n")
+	autocompleteLines := strings.Split(autocomplete, "\n")
+
+	// Pad autocomplete lines to full width to ensure clean overlay
+	for i, line := range autocompleteLines {
+		lineWidth := lipgloss.Width(line)
+		if lineWidth < width {
+			autocompleteLines[i] = line + strings.Repeat(" ", width-lineWidth)
+		}
+	}
+
+	// Calculate how many chat lines to keep
+	acHeight := len(autocompleteLines)
+	keepLines := len(chatLines) - acHeight
+	if keepLines < 0 {
+		keepLines = 0
+	}
+
+	// Build result: keep top of chat, replace bottom with autocomplete
+	var result []string
+	if keepLines > 0 {
+		result = append(result, chatLines[:keepLines]...)
+	}
+	result = append(result, autocompleteLines...)
+
+	return strings.Join(result, "\n")
+}
+
+// renderInputOnly renders just the input box without autocomplete (which is now overlaid)
+func (m model) renderInputOnly(width int) string {
 	var sb strings.Builder
 
 	// Show queued messages above input (Claude Code style)
@@ -1030,10 +1176,6 @@ func (m model) renderInput(width int) string {
 		sb.WriteString(m.styles.BorderedBox.Width(width).Render(queueBox) + "\n")
 	}
 
-	if m.showAutocomplete && len(m.autocompleteItems) > 0 {
-		sb.WriteString(m.renderAutocomplete(width) + "\n")
-	}
-
 	if m.showConfirm {
 		confirmBox := m.styles.BorderedBox.
 			BorderForeground(m.theme.Warning).
@@ -1043,15 +1185,9 @@ func (m model) renderInput(width int) string {
 		sb.WriteString(confirmBox + "\n")
 	}
 
-	// Input hint
-	hint := "Enter: queue message | Ctrl+Enter: interrupt & send | /: commands"
-	if !m.agentBusy {
-		hint = "Enter: send message | /: commands"
-	}
-
+	// Input box with styled prompt
 	inputStyle := m.styles.InputPane.Width(width)
 	sb.WriteString(inputStyle.Render(m.input.View()))
-	sb.WriteString("\n" + m.styles.Muted.Render(hint))
 
 	return sb.String()
 }
@@ -1059,8 +1195,28 @@ func (m model) renderInput(width int) string {
 func (m model) renderAutocomplete(width int) string {
 	var lines []string
 	maxShow := 8
-	if len(m.autocompleteItems) < maxShow {
-		maxShow = len(m.autocompleteItems)
+	totalItems := len(m.autocompleteItems)
+
+	if totalItems == 0 {
+		return ""
+	}
+
+	// Calculate scroll window to keep selected item visible
+	startIdx := 0
+	if totalItems > maxShow {
+		// Keep selected item in the middle of the visible window when possible
+		startIdx = m.autocompleteIdx - maxShow/2
+		if startIdx < 0 {
+			startIdx = 0
+		}
+		if startIdx > totalItems-maxShow {
+			startIdx = totalItems - maxShow
+		}
+	}
+
+	endIdx := startIdx + maxShow
+	if endIdx > totalItems {
+		endIdx = totalItems
 	}
 
 	// Show header based on what we're completing
@@ -1068,7 +1224,12 @@ func (m model) renderAutocomplete(width int) string {
 		lines = append(lines, m.styles.Muted.Render(fmt.Sprintf("  Options for /%s:", m.autocompleteCmdName)))
 	}
 
-	for i := 0; i < maxShow; i++ {
+	// Show scroll indicator at top if not at beginning
+	if startIdx > 0 {
+		lines = append(lines, m.styles.Muted.Render(fmt.Sprintf("  ↑ %d more above", startIdx)))
+	}
+
+	for i := startIdx; i < endIdx; i++ {
 		item := m.autocompleteItems[i]
 		var line string
 		if item.IsArg {
@@ -1086,14 +1247,15 @@ func (m model) renderAutocomplete(width int) string {
 		}
 
 		if i == m.autocompleteIdx {
-			lines = append(lines, m.styles.CommandSelected.Render(line))
+			lines = append(lines, m.styles.CommandSelected.Render("▶ "+line))
 		} else {
-			lines = append(lines, m.styles.Command.Render(line))
+			lines = append(lines, m.styles.Command.Render("  "+line))
 		}
 	}
 
-	if len(m.autocompleteItems) > maxShow {
-		lines = append(lines, m.styles.Muted.Render(fmt.Sprintf("  ... and %d more", len(m.autocompleteItems)-maxShow)))
+	// Show scroll indicator at bottom if more items below
+	if endIdx < totalItems {
+		lines = append(lines, m.styles.Muted.Render(fmt.Sprintf("  ↓ %d more below", totalItems-endIdx)))
 	}
 
 	return m.styles.BorderedBox.
@@ -1102,39 +1264,54 @@ func (m model) renderAutocomplete(width int) string {
 }
 
 func (m model) renderStatusBar() string {
-	left := m.styles.KeyHint.Render("/stop: Stop AI | /quit: Exit | /undo | Tab: Autocomplete")
-
-	// Token usage
-	stats := m.agent.GetTokenStats()
-	tokenInfo := fmt.Sprintf("📊 %dk/%dk", stats.CurrentContext/1000, stats.ContextLimit/1000)
-	if stats.ContextPercentage > 80 {
-		tokenInfo = m.styles.Error.Render(tokenInfo)
-	} else if stats.ContextPercentage > 50 {
-		tokenInfo = m.styles.Warning.Render(tokenInfo)
-	} else {
-		tokenInfo = m.styles.Muted.Render(tokenInfo)
+	// Left side: key hints
+	var hints []string
+	if m.agentBusy {
+		hints = append(hints, "/stop")
 	}
+	hints = append(hints, "/help", "Tab", "Enter")
+	left := m.styles.Muted.Render(strings.Join(hints, " │ "))
 
-	// API key status
-	keyStatus := "🔑 "
-	if m.apiKeys[string(m.cfg.Provider)] != "" {
-		keyStatus += m.styles.Success.Render("●")
+	// Right side: status indicators
+	var rightParts []string
+
+	// Token usage with visual indicator
+	stats := m.agent.GetTokenStats()
+	contextPct := int(stats.ContextPercentage)
+	var contextIndicator string
+	if contextPct > 80 {
+		contextIndicator = m.styles.Error.Render(fmt.Sprintf("CTX %d%%", contextPct))
+	} else if contextPct > 50 {
+		contextIndicator = m.styles.Warning.Render(fmt.Sprintf("CTX %d%%", contextPct))
 	} else {
-		keyStatus += m.styles.Error.Render("○")
+		contextIndicator = m.styles.Muted.Render(fmt.Sprintf("CTX %d%%", contextPct))
+	}
+	rightParts = append(rightParts, contextIndicator)
+
+	// Session tokens
+	if stats.TotalTokens > 0 {
+		sessionStr := fmt.Sprintf("%dk tok", stats.TotalTokens/1000)
+		rightParts = append(rightParts, m.styles.Muted.Render(sessionStr))
 	}
 
 	// Undo count
 	undoCount := m.agent.GetCheckpointManager().UndoableCount()
-	undoInfo := ""
 	if undoCount > 0 {
-		undoInfo = m.styles.Muted.Render(fmt.Sprintf(" | ↩️ %d", undoCount))
+		rightParts = append(rightParts, m.styles.Muted.Render(fmt.Sprintf("↩ %d", undoCount)))
 	}
 
-	right := tokenInfo + " " + keyStatus + undoInfo
+	// API key indicator
+	if m.agent.HasAPIKey() {
+		rightParts = append(rightParts, m.styles.Success.Render("●"))
+	} else {
+		rightParts = append(rightParts, m.styles.Error.Render("○"))
+	}
 
-	padding := m.width - lipgloss.Width(left) - lipgloss.Width(right) - 2
+	right := strings.Join(rightParts, " │ ")
+
+	padding := m.width - lipgloss.Width(left) - lipgloss.Width(right) - 4
 	if padding < 0 {
-		padding = 0
+		padding = 1
 	}
 
 	return m.styles.StatusBar.Render(left + strings.Repeat(" ", padding) + right)

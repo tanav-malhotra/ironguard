@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"runtime"
 
 	"github.com/tanav-malhotra/ironguard/internal/config"
 	"github.com/tanav-malhotra/ironguard/internal/tui"
@@ -14,6 +15,7 @@ var version = "dev"
 
 func main() {
 	showVersion := flag.Bool("version", false, "print ironguard version and exit")
+	noAdmin := flag.Bool("no-admin", false, "skip admin/root privilege check (not recommended)")
 	flag.Usage = func() {
 		fmt.Fprintf(flag.CommandLine.Output(), "ironguard – CyberPatriot AI helper\n\n")
 		fmt.Fprintf(flag.CommandLine.Output(), "Usage:\n  ironguard [flags]\n\nFlags:\n")
@@ -26,12 +28,49 @@ func main() {
 		return
 	}
 
+	// Check for admin/root privileges
+	if !*noAdmin && !isAdmin() {
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "╔════════════════════════════════════════════════════════════════╗")
+		fmt.Fprintln(os.Stderr, "║  ADMINISTRATOR PRIVILEGES REQUIRED                             ║")
+		fmt.Fprintln(os.Stderr, "╠════════════════════════════════════════════════════════════════╣")
+		fmt.Fprintln(os.Stderr, "║                                                                ║")
+		fmt.Fprintln(os.Stderr, "║  IronGuard needs elevated privileges to:                       ║")
+		fmt.Fprintln(os.Stderr, "║    • Modify system security settings                           ║")
+		fmt.Fprintln(os.Stderr, "║    • Edit protected configuration files                        ║")
+		fmt.Fprintln(os.Stderr, "║    • Manage user accounts and permissions                      ║")
+		fmt.Fprintln(os.Stderr, "║                                                                ║")
+		if runtime.GOOS == "windows" {
+			fmt.Fprintln(os.Stderr, "║  Run as Administrator:                                         ║")
+			fmt.Fprintln(os.Stderr, "║    Right-click → Run as administrator                          ║")
+		} else {
+			fmt.Fprintln(os.Stderr, "║  Run with sudo:                                                ║")
+			fmt.Fprintln(os.Stderr, "║    sudo ironguard                                              ║")
+		}
+		fmt.Fprintln(os.Stderr, "║                                                                ║")
+		fmt.Fprintln(os.Stderr, "║  To skip this check (not recommended):                         ║")
+		fmt.Fprintln(os.Stderr, "║    ironguard --no-admin                                        ║")
+		fmt.Fprintln(os.Stderr, "║                                                                ║")
+		fmt.Fprintln(os.Stderr, "╚════════════════════════════════════════════════════════════════╝")
+		fmt.Fprintln(os.Stderr, "")
+		os.Exit(1)
+	}
+
 	// Default: start the TUI.
 	cfg := config.DefaultConfig()
 	if err := tui.Run(cfg); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// isAdmin checks if the current process has administrator/root privileges.
+func isAdmin() bool {
+	if runtime.GOOS == "windows" {
+		return isAdminWindows()
+	}
+	// Unix: check if running as root (uid 0)
+	return os.Geteuid() == 0
 }
 
 

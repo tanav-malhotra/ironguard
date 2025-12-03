@@ -316,6 +316,11 @@ func (a *Agent) SetAPIKey(provider string, key string) error {
 	return a.llmRegistry.SetAPIKey(llm.Provider(provider), key)
 }
 
+// HasAPIKey returns true if the current provider has an API key configured.
+func (a *Agent) HasAPIKey() bool {
+	return a.llmRegistry.HasAPIKey()
+}
+
 // SetProvider sets the current provider.
 func (a *Agent) SetProvider(provider string) error {
 	return a.llmRegistry.SetCurrent(llm.Provider(provider))

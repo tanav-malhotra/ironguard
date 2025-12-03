@@ -101,6 +101,9 @@ type Client interface {
 
 	// SetAPIKey sets the API key for this client.
 	SetAPIKey(key string)
+
+	// HasAPIKey returns true if an API key is configured.
+	HasAPIKey() bool
 }
 
 // ModelPresets contains recommended models per provider.

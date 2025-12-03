@@ -44,6 +44,10 @@ func (c *GeminiClient) SetAPIKey(key string) {
 	c.apiKey = key
 }
 
+func (c *GeminiClient) HasAPIKey() bool {
+	return c.apiKey != ""
+}
+
 // Gemini API types
 type geminiRequest struct {
 	Contents         []geminiContent       `json:"contents"`

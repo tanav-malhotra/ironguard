@@ -72,7 +72,7 @@ func (r *Registry) RegisterHardenTools() {
 			}
 			result := h.DisableUser(ctx, params.Username)
 			if !result.Success {
-				return "", fmt.Errorf(result.Error)
+				return "", fmt.Errorf("%s", result.Error)
 			}
 			return result.Output, nil
 		},
@@ -102,7 +102,7 @@ func (r *Registry) RegisterHardenTools() {
 			}
 			result := h.DeleteUser(ctx, params.Username)
 			if !result.Success {
-				return "", fmt.Errorf(result.Error)
+				return "", fmt.Errorf("%s", result.Error)
 			}
 			return result.Output, nil
 		},
@@ -137,7 +137,7 @@ func (r *Registry) RegisterHardenTools() {
 			}
 			result := h.SetPassword(ctx, params.Username, params.Password)
 			if !result.Success {
-				return "", fmt.Errorf(result.Error)
+				return "", fmt.Errorf("%s", result.Error)
 			}
 			return result.Output, nil
 		},
@@ -167,7 +167,7 @@ func (r *Registry) RegisterHardenTools() {
 			}
 			result := h.RemoveFromAdmins(ctx, params.Username)
 			if !result.Success {
-				return "", fmt.Errorf(result.Error)
+				return "", fmt.Errorf("%s", result.Error)
 			}
 			return result.Output, nil
 		},
@@ -233,7 +233,7 @@ func (r *Registry) RegisterHardenTools() {
 			}
 			result := h.StopService(ctx, params.Service)
 			if !result.Success {
-				return "", fmt.Errorf(result.Error)
+				return "", fmt.Errorf("%s", result.Error)
 			}
 			return result.Output, nil
 		},
@@ -263,7 +263,7 @@ func (r *Registry) RegisterHardenTools() {
 			}
 			result := h.DisableService(ctx, params.Service)
 			if !result.Success {
-				return "", fmt.Errorf(result.Error)
+				return "", fmt.Errorf("%s", result.Error)
 			}
 			return result.Output, nil
 		},
@@ -281,7 +281,7 @@ func (r *Registry) RegisterHardenTools() {
 		Handler: func(ctx context.Context, args json.RawMessage) (string, error) {
 			result := h.EnableFirewall(ctx)
 			if !result.Success {
-				return "", fmt.Errorf(result.Error)
+				return "", fmt.Errorf("%s", result.Error)
 			}
 			return result.Output, nil
 		},
@@ -313,7 +313,7 @@ func (r *Registry) RegisterHardenTools() {
 		Handler: func(ctx context.Context, args json.RawMessage) (string, error) {
 			result := h.InstallUpdates(ctx)
 			if !result.Success {
-				return "", fmt.Errorf(result.Error)
+				return "", fmt.Errorf("%s", result.Error)
 			}
 			return result.Output, nil
 		},
@@ -331,7 +331,7 @@ func (r *Registry) RegisterHardenTools() {
 		Handler: func(ctx context.Context, args json.RawMessage) (string, error) {
 			result := h.SetPasswordPolicy(ctx)
 			if !result.Success {
-				return "", fmt.Errorf(result.Error)
+				return "", fmt.Errorf("%s", result.Error)
 			}
 			return result.Output, nil
 		},
@@ -349,7 +349,7 @@ func (r *Registry) RegisterHardenTools() {
 		Handler: func(ctx context.Context, args json.RawMessage) (string, error) {
 			result := h.DisableGuestAccount(ctx)
 			if !result.Success {
-				return "", fmt.Errorf(result.Error)
+				return "", fmt.Errorf("%s", result.Error)
 			}
 			return result.Output, nil
 		},
@@ -393,7 +393,7 @@ func (r *Registry) RegisterHardenTools() {
 			}
 			result := h.DeleteFile(ctx, params.Path)
 			if !result.Success {
-				return "", fmt.Errorf(result.Error)
+				return "", fmt.Errorf("%s", result.Error)
 			}
 			return result.Output, nil
 		},

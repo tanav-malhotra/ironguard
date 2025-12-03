@@ -47,6 +47,10 @@ func (c *OpenAIClient) SetAPIKey(key string) {
 	c.apiKey = key
 }
 
+func (c *OpenAIClient) HasAPIKey() bool {
+	return c.apiKey != ""
+}
+
 // OpenAI API types
 type openaiRequest struct {
 	Model       string        `json:"model"`

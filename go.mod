@@ -1,6 +1,6 @@
 module github.com/tanav-malhotra/ironguard
 
-go 1.22
+go 1.24.0
 
 require (
 	github.com/charmbracelet/bubbles v0.18.0
@@ -22,7 +22,7 @@ require (
 	github.com/muesli/termenv v0.15.2 // indirect
 	github.com/rivo/uniseg v0.4.6 // indirect
 	golang.org/x/sync v0.1.0 // indirect
-	golang.org/x/sys v0.12.0 // indirect
+	golang.org/x/sys v0.38.0 // indirect
 	golang.org/x/term v0.6.0 // indirect
 	golang.org/x/text v0.3.8 // indirect
 )

@@ -3,7 +3,7 @@ package tui
 import "github.com/charmbracelet/lipgloss"
 
 // Theme defines the color palette and styling for the TUI.
-// Inspired by Claude Code's dark, clean aesthetic.
+// IronGuard: High-tech security operations aesthetic
 type Theme struct {
 	// Primary colors
 	Primary    lipgloss.Color
@@ -26,28 +26,41 @@ type Theme struct {
 	// Border colors
 	Border      lipgloss.Color
 	BorderFocus lipgloss.Color
+
+	// Special accent colors
+	Cyan    lipgloss.Color
+	Magenta lipgloss.Color
 }
 
-// DefaultTheme returns a Claude Code–inspired dark theme.
+// DefaultTheme returns the IronGuard high-tech dark theme.
+// Inspired by cybersecurity operations centers and tactical interfaces.
 func DefaultTheme() Theme {
 	return Theme{
-		Primary:    lipgloss.Color("#E8DCFF"), // Soft lavender
-		Secondary:  lipgloss.Color("#B8A4D9"), // Muted purple
-		Accent:     lipgloss.Color("#FF9F43"), // Warm orange accent
-		Background: lipgloss.Color("#0D1117"), // Deep dark
-		Surface:    lipgloss.Color("#161B22"), // Slightly lighter surface
+		// Core palette: Deep space black with electric cyan accents
+		Primary:    lipgloss.Color("#00D4FF"), // Electric cyan - primary brand
+		Secondary:  lipgloss.Color("#7B68EE"), // Medium slate blue
+		Accent:     lipgloss.Color("#FF6B35"), // Tactical orange for alerts
+		Background: lipgloss.Color("#0A0E14"), // Near-black with blue tint
+		Surface:    lipgloss.Color("#0D1219"), // Slightly elevated surface
 
-		TextPrimary:   lipgloss.Color("#E6EDF3"),
-		TextSecondary: lipgloss.Color("#8B949E"),
-		TextMuted:     lipgloss.Color("#484F58"),
+		// Text hierarchy
+		TextPrimary:   lipgloss.Color("#E4E8F0"), // Crisp white-blue
+		TextSecondary: lipgloss.Color("#8892A2"), // Soft gray-blue
+		TextMuted:     lipgloss.Color("#4A5568"), // Dim gray
 
-		Success: lipgloss.Color("#3FB950"),
-		Warning: lipgloss.Color("#D29922"),
-		Error:   lipgloss.Color("#F85149"),
-		Info:    lipgloss.Color("#58A6FF"),
+		// Semantic - security-focused
+		Success: lipgloss.Color("#00E676"), // Bright green - secure
+		Warning: lipgloss.Color("#FFAB00"), // Amber - caution
+		Error:   lipgloss.Color("#FF5252"), // Red - threat/error
+		Info:    lipgloss.Color("#40C4FF"), // Light cyan - info
 
-		Border:      lipgloss.Color("#30363D"),
-		BorderFocus: lipgloss.Color("#58A6FF"),
+		// Borders
+		Border:      lipgloss.Color("#1E2A3A"), // Subtle blue-gray
+		BorderFocus: lipgloss.Color("#00D4FF"), // Electric cyan on focus
+
+		// Special accents
+		Cyan:    lipgloss.Color("#00D4FF"),
+		Magenta: lipgloss.Color("#E040FB"),
 	}
 }
 
@@ -112,22 +125,27 @@ func NewStyles(t Theme) Styles {
 			Background(t.Background),
 
 		Sidebar: lipgloss.NewStyle().
-			BorderStyle(lipgloss.RoundedBorder()).
+			BorderStyle(lipgloss.ThickBorder()).
 			BorderForeground(t.Border).
+			BorderLeft(true).
+			BorderRight(false).
+			BorderTop(false).
+			BorderBottom(false).
 			Padding(1, 2).
-			Background(t.Surface),
+			MarginLeft(1),
 
 		ChatPane: lipgloss.NewStyle().
 			Padding(0, 1),
 
 		InputPane: lipgloss.NewStyle().
 			BorderStyle(lipgloss.RoundedBorder()).
-			BorderForeground(t.BorderFocus).
+			BorderForeground(t.Primary).
 			Padding(0, 1),
 
 		StatusBar: lipgloss.NewStyle().
 			Foreground(t.TextMuted).
-			Padding(0, 1),
+			Padding(0, 1).
+			MarginTop(0),
 
 		Title: lipgloss.NewStyle().
 			Foreground(t.Primary).
@@ -137,7 +155,8 @@ func NewStyles(t Theme) Styles {
 			Foreground(t.Secondary),
 
 		Label: lipgloss.NewStyle().
-			Foreground(t.TextSecondary),
+			Foreground(t.Primary).
+			Bold(true),
 
 		Value: lipgloss.NewStyle().
 			Foreground(t.TextPrimary),
@@ -146,7 +165,7 @@ func NewStyles(t Theme) Styles {
 			Foreground(t.TextMuted),
 
 		UserMessage: lipgloss.NewStyle().
-			Foreground(t.Info).
+			Foreground(t.Cyan).
 			Bold(true),
 
 		AIMessage: lipgloss.NewStyle().
@@ -161,22 +180,26 @@ func NewStyles(t Theme) Styles {
 			Bold(true),
 
 		Error: lipgloss.NewStyle().
-			Foreground(t.Error),
+			Foreground(t.Error).
+			Bold(true),
 
 		Success: lipgloss.NewStyle().
-			Foreground(t.Success),
+			Foreground(t.Success).
+			Bold(true),
 
 		Warning: lipgloss.NewStyle().
-			Foreground(t.Warning),
+			Foreground(t.Warning).
+			Bold(true),
 
 		Command: lipgloss.NewStyle().
 			Foreground(t.TextSecondary).
 			Padding(0, 1),
 
 		CommandSelected: lipgloss.NewStyle().
-			Foreground(t.TextPrimary).
-			Background(t.Surface).
-			Padding(0, 1),
+			Foreground(t.Background).
+			Background(t.Primary).
+			Padding(0, 1).
+			Bold(true),
 
 		KeyHint: lipgloss.NewStyle().
 			Foreground(t.TextMuted),
@@ -184,7 +207,8 @@ func NewStyles(t Theme) Styles {
 		Badge: lipgloss.NewStyle().
 			Foreground(t.Background).
 			Background(t.Secondary).
-			Padding(0, 1),
+			Padding(0, 1).
+			Bold(true),
 
 		BadgeConfirm: lipgloss.NewStyle().
 			Foreground(t.Background).
@@ -194,25 +218,25 @@ func NewStyles(t Theme) Styles {
 
 		BadgeAutopilot: lipgloss.NewStyle().
 			Foreground(t.Background).
-			Background(t.Warning).
+			Background(t.Primary).
 			Padding(0, 1).
 			Bold(true),
 
 		BorderedBox: lipgloss.NewStyle().
 			BorderStyle(lipgloss.RoundedBorder()).
-			BorderForeground(t.Border).
-			Padding(1, 2),
+			BorderForeground(t.Primary).
+			Padding(0, 1),
 
-		// Thinking/Reasoning (Claude Code style - subtle, collapsible)
+		// Thinking/Reasoning - subtle glow effect
 		ThinkingBox: lipgloss.NewStyle().
 			Foreground(t.TextMuted).
 			BorderStyle(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("#3D4450")).
+			BorderForeground(t.Secondary).
 			Padding(0, 1).
 			MarginBottom(1),
 
 		ThinkingCollapsed: lipgloss.NewStyle().
-			Foreground(t.TextMuted).
+			Foreground(t.Secondary).
 			Italic(true),
 
 		// Progress indicators
@@ -220,10 +244,11 @@ func NewStyles(t Theme) Styles {
 			Foreground(t.TextMuted),
 
 		ProgressFilled: lipgloss.NewStyle().
-			Foreground(t.Success),
+			Foreground(t.Primary).
+			Background(t.Primary),
 
 		ProgressEmpty: lipgloss.NewStyle().
-			Foreground(t.TextMuted),
+			Foreground(t.Border),
 
 		// Subagent display
 		SubAgentBox: lipgloss.NewStyle().
@@ -232,7 +257,8 @@ func NewStyles(t Theme) Styles {
 			Padding(0, 1),
 
 		SubAgentRunning: lipgloss.NewStyle().
-			Foreground(t.Warning),
+			Foreground(t.Warning).
+			Bold(true),
 
 		SubAgentDone: lipgloss.NewStyle().
 			Foreground(t.Success),
@@ -240,14 +266,14 @@ func NewStyles(t Theme) Styles {
 		// Diff view
 		DiffAdd: lipgloss.NewStyle().
 			Foreground(t.Success).
-			Background(lipgloss.Color("#1a3d1a")),
+			Background(lipgloss.Color("#0D2818")),
 
 		DiffRemove: lipgloss.NewStyle().
 			Foreground(t.Error).
-			Background(lipgloss.Color("#3d1a1a")),
+			Background(lipgloss.Color("#2D0F0F")),
 
 		DiffHeader: lipgloss.NewStyle().
-			Foreground(t.Info).
+			Foreground(t.Primary).
 			Bold(true),
 	}
 }

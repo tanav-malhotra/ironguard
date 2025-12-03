@@ -424,7 +424,7 @@ func (r *Registry) RegisterDesktopControlTools() {
 // checkScreenControl returns an error if screen control is not enabled.
 func checkScreenControl() error {
 	if !IsScreenControlEnabled() {
-		return fmt.Errorf(ScreenModeError())
+		return fmt.Errorf("%s", ScreenModeError())
 	}
 	return nil
 }

@@ -66,3 +66,8 @@ func (r *Registry) Providers() []Provider {
 	return []Provider{ProviderClaude, ProviderOpenAI, ProviderGemini}
 }
 
+// HasAPIKey returns true if the current provider has an API key configured.
+func (r *Registry) HasAPIKey() bool {
+	return r.clients[r.current].HasAPIKey()
+}
+

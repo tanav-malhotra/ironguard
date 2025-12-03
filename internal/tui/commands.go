@@ -360,12 +360,11 @@ func cmdHelp(m *model, _ string) string {
 		help += line
 	}
 	help += "\nKeybindings:\n"
-	help += "  Ctrl+C       - Cancel/Quit\n"
+	help += "  Enter        - Send message (queues if AI busy)\n"
+	help += "  Ctrl+Enter   - Interrupt AI & send immediately\n"
+	help += "  Tab          - Select autocomplete item\n"
+	help += "  ↑/↓          - Navigate autocomplete\n"
 	help += "  Ctrl+L       - Clear screen\n"
-	help += "  Tab          - Cycle autocomplete\n"
-	help += "  Enter        - Send message or run command\n"
-	help += "  Up/Down      - Scroll history\n"
-	help += "  Esc          - Cancel/Close\n"
 	return help
 }
 

@@ -108,6 +108,10 @@ type Config struct {
 	// Context management
 	SummarizeMode SummarizeMode
 
+	// Sound settings
+	NoSound       bool // Disable all sound effects
+	NoRepeatSound bool // Play single ding instead of multiple for points gained
+
 	// Environment detection (basic)
 	OS           string
 	Architecture string

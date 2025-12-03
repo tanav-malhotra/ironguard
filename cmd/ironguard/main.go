@@ -16,6 +16,8 @@ var version = "dev"
 func main() {
 	showVersion := flag.Bool("version", false, "print ironguard version and exit")
 	noAdmin := flag.Bool("no-admin", false, "skip admin/root privilege check (not recommended)")
+	noSound := flag.Bool("no-sound", false, "disable all sound effects")
+	noRepeatSound := flag.Bool("no-repeat-sound", false, "play single ding instead of multiple for points gained")
 	flag.Usage = func() {
 		fmt.Fprintf(flag.CommandLine.Output(), "ironguard – CyberPatriot AI helper\n\n")
 		fmt.Fprintf(flag.CommandLine.Output(), "Usage:\n  ironguard [flags]\n\nFlags:\n")
@@ -58,6 +60,8 @@ func main() {
 
 	// Default: start the TUI.
 	cfg := config.DefaultConfig()
+	cfg.NoSound = *noSound
+	cfg.NoRepeatSound = *noRepeatSound
 	if err := tui.Run(cfg); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)

@@ -266,12 +266,17 @@ Satisfying audio feedback for scoring:
   - Sounds are spaced 100ms apart for a satisfying cascade
 - **Perfect score**: Victory sound plays when achieving 100/100
 
+**Command-line flags:**
+- `--no-sound` — Disable all sound effects completely
+- `--no-repeat-sound` — Play single ding instead of multiple (less noisy)
+
 **Technical details:**
 - MP3 files are embedded in the binary using Go's `//go:embed`
 - No external files needed—single executable
 - Uses `github.com/gopxl/beep` for cross-platform audio
 - Gracefully handles missing audio devices (silent operation)
 - Sound playback is non-blocking (doesn't interrupt AI work)
+- Volume boosted 2.5x for audibility
 
 ---
 

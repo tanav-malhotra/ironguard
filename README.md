@@ -233,6 +233,10 @@ IronGuard plays satisfying audio feedback when you score points:
 
 Sound files are embedded in the binary—no external files needed. If audio initialization fails (e.g., no audio device), IronGuard continues silently.
 
+**Command-line flags:**
+- `--no-sound` — Disable all sound effects
+- `--no-repeat-sound` — Play a single ding instead of multiple (e.g., 7 vulns = 1 ding instead of 7)
+
 ### Screen Interaction
 
 For Cisco challenges (Packet Tracer and NetAcad quizzes) and GUI-based tasks:

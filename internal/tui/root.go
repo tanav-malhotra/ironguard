@@ -18,7 +18,8 @@ import (
 
 // Run starts the top-level TUI program.
 func Run(cfg config.Config) error {
-	// Initialize audio system (non-fatal if it fails)
+	// Configure and initialize audio system (non-fatal if it fails)
+	audio.SetOptions(cfg.NoSound, cfg.NoRepeatSound)
 	if err := audio.Init(); err != nil {
 		// Audio init failed - continue without sound
 		// This is fine, sound is optional

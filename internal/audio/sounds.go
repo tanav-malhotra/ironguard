@@ -30,7 +30,19 @@ var (
 	
 	// Volume multiplier (2.0 = 2x louder, 3.0 = 3x louder)
 	volumeGain = 2.5
+	
+	// Sound settings (set via SetOptions before Init)
+	soundDisabled    bool
+	noRepeatSound    bool
 )
+
+// SetOptions configures audio settings. Call before Init().
+func SetOptions(noSound, noRepeat bool) {
+	initMu.Lock()
+	defer initMu.Unlock()
+	soundDisabled = noSound
+	noRepeatSound = noRepeat
+}
 
 // Init initializes the audio system. Call this once at startup.
 func Init() error {
@@ -38,6 +50,12 @@ func Init() error {
 	defer initMu.Unlock()
 	
 	if initialized {
+		return nil
+	}
+	
+	// If sounds are disabled, mark as initialized but don't load anything
+	if soundDisabled {
+		initialized = true
 		return nil
 	}
 	
@@ -86,7 +104,7 @@ func amplify(s beep.Streamer) beep.Streamer {
 
 // PlayPointsGained plays the points gained sound once.
 func PlayPointsGained() {
-	if !initialized || pointsGainedBuffer == nil {
+	if !initialized || soundDisabled || pointsGainedBuffer == nil {
 		return
 	}
 	
@@ -96,8 +114,15 @@ func PlayPointsGained() {
 
 // PlayPointsGainedMultiple plays the points gained sound N times with a short delay.
 // This creates the satisfying "ding ding ding" effect for multiple vulns found.
+// If noRepeatSound is set, plays only once regardless of count.
 func PlayPointsGainedMultiple(count int) {
-	if !initialized || pointsGainedBuffer == nil || count <= 0 {
+	if !initialized || soundDisabled || pointsGainedBuffer == nil || count <= 0 {
+		return
+	}
+	
+	// If no-repeat mode, just play once
+	if noRepeatSound {
+		PlayPointsGained()
 		return
 	}
 	
@@ -125,7 +150,7 @@ func PlayPointsGainedMultiple(count int) {
 
 // PlayMaxPointsAchieved plays the victory sound for 100/100.
 func PlayMaxPointsAchieved() {
-	if !initialized || maxPointsBuffer == nil {
+	if !initialized || soundDisabled || maxPointsBuffer == nil {
 		return
 	}
 	

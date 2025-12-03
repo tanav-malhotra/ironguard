@@ -184,6 +184,9 @@ SYSTEM HARDENING:
 
 FILE OPERATIONS:
 - read_file - Read contents of any file
+  * Large files (>50KB) are automatically condensed to show structure only
+  * Use start_line/end_line parameters to read specific sections of large files
+  * Example: read_file(path="/etc/passwd", start_line=1, end_line=50)
 - write_file - Write to a file
 - list_dir - List directory contents
 - search_files - Search for files by pattern
@@ -283,6 +286,13 @@ SYSTEM MESSAGES:
 - When you see a subagent completion notification, check its results and clean it up to free the slot
 - When user uses /undo, you'll be told what was reverted - adjust your plan accordingly
 - When user enables /compact, give BRIEF responses - no lengthy explanations
+
+CONTEXT MANAGEMENT (automatic):
+- When conversation gets long, oldest 60% of messages are summarized automatically
+- You'll receive a [SYSTEM] notification when this happens
+- The most recent 40% of messages remain intact for natural conversation flow
+- Your progress, key findings, and actions are preserved in the summary
+- Continue working normally after summarization - nothing is lost, just compressed
 
 `
 

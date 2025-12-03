@@ -155,16 +155,19 @@ Automatic handling of long conversations:
 
 - Monitors token usage during sessions
 - Triggers summarization at 90% of provider's context limit
+- **Only summarizes oldest 60%** of messages, keeping **40% recent** intact
+- This preserves conversation flow and relevance
 - Provider-specific limits:
   - Gemini: 1M tokens (gemini-3-pro)
   - Claude: 200K tokens (opus-4-5 main model)
   - OpenAI: 272K tokens (gpt-5.1)
 - Preserves:
-  - Recent messages (last 10)
+  - Recent messages (40% of conversation, minimum 10)
   - Key actions completed
   - Important findings
   - Current score and target
   - Subagent status
+- **Notifications**: Both user and AI are notified when summarization occurs
 - AI continues seamlessly without losing track
 
 **Summarization Modes:**
@@ -180,6 +183,19 @@ Toggle with `/summarize smart` or `/summarize fast`.
 - Status bar shows: `📊 45k/200k` (current/limit)
 - `/tokens` command shows detailed statistics
 - Tracks tokens saved by summarization
+
+### 6.1. File Condensation 📄
+Automatic handling of large files (>50KB):
+
+- Large files are automatically condensed to show structure only
+- Shows key elements based on file type:
+  - **Go**: package, imports, type definitions, function signatures
+  - **Python**: imports, class definitions, function definitions
+  - **JavaScript/TypeScript**: imports, exports, classes, functions
+  - **Shell scripts**: shebang, function definitions, section comments
+  - **Other**: First 20 lines + last 10 lines
+- Use `read_file` with `start_line`/`end_line` to read specific sections
+- Helps AI understand large files without consuming entire context
 
 ### 7. Persistent Memory 🧠
 Remember information across sessions:
@@ -241,6 +257,21 @@ Works with:
 - `/compact` - on/off
 - `/summarize` - smart/fast
 - `/remember` - memory categories
+
+### 12. Sound Effects 🔊
+Satisfying audio feedback for scoring:
+
+- **Points gained**: Plays a "ding" sound for each vulnerability found/fixed
+  - If you go from 5 vulns to 12 vulns, plays 7 dings
+  - Sounds are spaced 100ms apart for a satisfying cascade
+- **Perfect score**: Victory sound plays when achieving 100/100
+
+**Technical details:**
+- MP3 files are embedded in the binary using Go's `//go:embed`
+- No external files needed—single executable
+- Uses `github.com/gopxl/beep` for cross-platform audio
+- Gracefully handles missing audio devices (silent operation)
+- Sound playback is non-blocking (doesn't interrupt AI work)
 
 ---
 

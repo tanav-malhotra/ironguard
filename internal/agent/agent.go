@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -34,13 +36,15 @@ const (
 
 // Event is sent from the agent to the TUI.
 type Event struct {
-	Type     EventType
-	Content  string
-	Tool     *ToolCallInfo
-	Error    error
-	Thinking string       // For EventThinking
-	SubAgent *SubAgentInfo // For EventSubAgentSpawned/Update
-	Score    int          // For EventScoreUpdate
+	Type       EventType
+	Content    string
+	Tool       *ToolCallInfo
+	Error      error
+	Thinking   string       // For EventThinking
+	SubAgent   *SubAgentInfo // For EventSubAgentSpawned/Update
+	Score      int          // For EventScoreUpdate
+	VulnsFound int          // Vulnerabilities found (for sound effects)
+	VulnsTotal int          // Total vulnerabilities
 }
 
 // SubAgentInfo contains information about a subagent for events.
@@ -538,6 +542,11 @@ func (a *Agent) Chat(ctx context.Context, userMessage string) {
 			toolInfo.Output = output
 
 			a.events <- Event{Type: EventToolResult, Tool: toolInfo}
+			
+			// Check if this was a scoring tool and send score update
+			if tc.Name == "read_score_report" || tc.Name == "get_current_score" || tc.Name == "check_score_improved" {
+				a.parseAndSendScoreUpdate(output)
+			}
 
 			// Add tool result to messages
 			a.mu.Lock()
@@ -558,8 +567,10 @@ func (a *Agent) Chat(ctx context.Context, userMessage string) {
 const (
 	// Chars per token estimate (conservative)
 	charsPerToken = 3
-	// Number of recent messages to always keep
-	recentMessagesToKeep = 10
+	// Minimum number of recent messages to always keep (fallback)
+	minRecentMessagesToKeep = 10
+	// Percentage of messages to keep (40% = summarize oldest 60%)
+	recentMessagesPercentage = 0.40
 	// Percentage of context limit at which to trigger summarization (90%)
 	summarizationThreshold = 0.90
 )
@@ -654,8 +665,14 @@ func (a *Agent) summarizeContextIfNeeded(ctx context.Context) error {
 	a.mu.Lock()
 	messageCount := len(a.messages)
 
-	// Keep recent messages
-	keepFrom := messageCount - recentMessagesToKeep
+	// Keep the most recent 40% of messages (summarize oldest 60%)
+	// This keeps the conversation relevant and natural
+	keepCount := int(float64(messageCount) * recentMessagesPercentage)
+	if keepCount < minRecentMessagesToKeep {
+		keepCount = minRecentMessagesToKeep
+	}
+	
+	keepFrom := messageCount - keepCount
 	if keepFrom < 0 {
 		keepFrom = 0
 	}
@@ -671,6 +688,9 @@ func (a *Agent) summarizeContextIfNeeded(ctx context.Context) error {
 	if len(oldMessages) == 0 {
 		return nil // Nothing to summarize
 	}
+	
+	oldMsgCount := len(oldMessages)
+	recentMsgCount := len(recentMessages)
 
 	// Create summary based on mode
 	var summary string
@@ -718,10 +738,26 @@ func (a *Agent) summarizeContextIfNeeded(ctx context.Context) error {
 	a.messages = append([]llm.Message{summaryMessage}, recentMessages...)
 	a.mu.Unlock()
 
+	// Notify user that summarization happened
+	summaryNotification := fmt.Sprintf("📝 Context summarized: %d old messages → summary (kept %d recent). Saved ~%d tokens.", 
+		oldMsgCount, recentMsgCount, tokensSaved)
+	
 	a.events <- Event{
 		Type:    EventStatusUpdate,
-		Content: fmt.Sprintf("✅ Context summarized: %d messages → %d messages (saved ~%d tokens)", messageCount, len(a.messages), tokensSaved),
+		Content: summaryNotification,
 	}
+	
+	// Also add a system message so the AI knows summarization happened
+	a.mu.Lock()
+	systemNotice := llm.Message{
+		Role:    "user",
+		Content: fmt.Sprintf("[SYSTEM] Context was automatically summarized. The %d oldest messages were compressed into a summary above. The %d most recent messages remain intact. Continue working normally.", oldMsgCount, recentMsgCount),
+	}
+	// Insert after the summary message
+	if len(a.messages) > 1 {
+		a.messages = append([]llm.Message{a.messages[0], systemNotice}, a.messages[1:]...)
+	}
+	a.mu.Unlock()
 
 	return nil
 }
@@ -1242,5 +1278,63 @@ func (a *Agent) ExecuteTool(ctx context.Context, name string, args map[string]in
 		return "", err
 	}
 	return a.toolRegistry.Execute(ctx, name, argsJSON)
+}
+
+// parseAndSendScoreUpdate parses scoring tool output and sends score update events.
+func (a *Agent) parseAndSendScoreUpdate(output string) {
+	// Parse score from output (e.g., "Current Score: 45 / 100" or "Score: 45/100")
+	scoreRegex := regexp.MustCompile(`(?i)(?:current\s+)?score[:\s]+(\d+)\s*/\s*(\d+)`)
+	matches := scoreRegex.FindStringSubmatch(output)
+	if len(matches) < 3 {
+		return
+	}
+	
+	score, _ := strconv.Atoi(matches[1])
+	maxScore, _ := strconv.Atoi(matches[2])
+	
+	// Parse vulnerabilities found from output
+	// Look for patterns like "12 vulnerabilities found" or "Found: 12/24"
+	var vulnsFound, vulnsTotal int
+	
+	// Pattern 1: "X vulnerabilities found" or "found X vulnerabilities"
+	vulnFoundRegex := regexp.MustCompile(`(?i)(\d+)\s+vulnerabilit(?:y|ies)\s+(?:found|fixed)`)
+	if m := vulnFoundRegex.FindStringSubmatch(output); len(m) >= 2 {
+		vulnsFound, _ = strconv.Atoi(m[1])
+	}
+	
+	// Pattern 2: "REMAINING: X vulnerabilities"
+	vulnRemainingRegex := regexp.MustCompile(`(?i)remaining[:\s]+(\d+)\s+vulnerabilit`)
+	if m := vulnRemainingRegex.FindStringSubmatch(output); len(m) >= 2 {
+		remaining, _ := strconv.Atoi(m[1])
+		// If we have remaining, we can estimate total
+		if vulnsFound > 0 {
+			vulnsTotal = vulnsFound + remaining
+		}
+	}
+	
+	// Pattern 3: Count ✓ lines for found vulns
+	foundLines := strings.Count(output, "✓")
+	if foundLines > vulnsFound {
+		vulnsFound = foundLines
+	}
+	
+	// Estimate total from max score if not found (usually 1 vuln = ~4 points)
+	if vulnsTotal == 0 && maxScore > 0 {
+		vulnsTotal = maxScore / 4 // Rough estimate
+		if vulnsTotal < vulnsFound {
+			vulnsTotal = vulnsFound
+		}
+	}
+	
+	// Update internal state
+	a.currentScore = score
+	
+	// Send event with score and vulnerability info
+	a.events <- Event{
+		Type:       EventScoreUpdate,
+		Score:      score,
+		VulnsFound: vulnsFound,
+		VulnsTotal: vulnsTotal,
+	}
 }
 

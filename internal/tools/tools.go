@@ -169,13 +169,21 @@ func (r *Registry) registerDefaults() {
 	// Read file tool
 	r.Register(&Tool{
 		Name:        "read_file",
-		Description: "Read the contents of a file at the specified path",
+		Description: "Read the contents of a file. Large files (>50KB) are automatically condensed to show structure only. Use start_line/end_line to read specific sections.",
 		Parameters: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
 				"path": map[string]interface{}{
 					"type":        "string",
 					"description": "The file path to read",
+				},
+				"start_line": map[string]interface{}{
+					"type":        "integer",
+					"description": "Start reading from this line number (1-indexed). Use for reading specific sections of large files.",
+				},
+				"end_line": map[string]interface{}{
+					"type":        "integer",
+					"description": "Stop reading at this line number (1-indexed, inclusive). Use for reading specific sections of large files.",
 				},
 			},
 			"required": []string{"path"},
@@ -354,9 +362,14 @@ func (r *Registry) registerDefaults() {
 
 // Tool implementations
 
+// Maximum file size before condensation (in bytes) - ~50KB
+const maxFileSize = 50 * 1024
+
 func toolReadFile(ctx context.Context, args json.RawMessage) (string, error) {
 	var params struct {
-		Path string `json:"path"`
+		Path      string `json:"path"`
+		StartLine int    `json:"start_line,omitempty"` // 1-indexed, for reading specific sections
+		EndLine   int    `json:"end_line,omitempty"`   // 1-indexed, inclusive
 	}
 	if err := json.Unmarshal(args, &params); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
@@ -366,8 +379,194 @@ func toolReadFile(ctx context.Context, args json.RawMessage) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to read file: %w", err)
 	}
+	
+	// If specific line range requested, return just that section
+	if params.StartLine > 0 || params.EndLine > 0 {
+		lines := strings.Split(string(content), "\n")
+		start := params.StartLine - 1 // Convert to 0-indexed
+		end := params.EndLine
+		
+		if start < 0 {
+			start = 0
+		}
+		if end <= 0 || end > len(lines) {
+			end = len(lines)
+		}
+		if start >= len(lines) {
+			return "", fmt.Errorf("start_line %d exceeds file length (%d lines)", params.StartLine, len(lines))
+		}
+		
+		selectedLines := lines[start:end]
+		var result strings.Builder
+		result.WriteString(fmt.Sprintf("[Lines %d-%d of %d]\n", start+1, end, len(lines)))
+		for i, line := range selectedLines {
+			result.WriteString(fmt.Sprintf("%4d | %s\n", start+i+1, line))
+		}
+		return result.String(), nil
+	}
+	
+	// If file is too large, show condensed view
+	if len(content) > maxFileSize {
+		return condenseFile(params.Path, string(content)), nil
+	}
 
 	return string(content), nil
+}
+
+// condenseFile creates a condensed view of a large file showing structure.
+func condenseFile(path string, content string) string {
+	lines := strings.Split(content, "\n")
+	totalLines := len(lines)
+	
+	var result strings.Builder
+	result.WriteString(fmt.Sprintf("⚠️ FILE TOO LARGE (%d lines, %d bytes) - Showing condensed view\n", totalLines, len(content)))
+	result.WriteString(fmt.Sprintf("📁 %s\n", path))
+	result.WriteString(strings.Repeat("─", 60) + "\n\n")
+	
+	ext := strings.ToLower(filepath.Ext(path))
+	
+	switch ext {
+	case ".go":
+		result.WriteString(condenseGoFile(lines))
+	case ".py":
+		result.WriteString(condensePythonFile(lines))
+	case ".js", ".ts", ".jsx", ".tsx":
+		result.WriteString(condenseJSFile(lines))
+	case ".sh", ".bash", ".ps1":
+		result.WriteString(condenseShellFile(lines))
+	default:
+		// Generic condensation - show first 20 and last 10 lines
+		result.WriteString("[First 20 lines]\n")
+		for i := 0; i < 20 && i < len(lines); i++ {
+			result.WriteString(fmt.Sprintf("%4d | %s\n", i+1, lines[i]))
+		}
+		if len(lines) > 30 {
+			result.WriteString(fmt.Sprintf("\n... [%d lines omitted] ...\n\n", len(lines)-30))
+			result.WriteString("[Last 10 lines]\n")
+			for i := len(lines) - 10; i < len(lines); i++ {
+				result.WriteString(fmt.Sprintf("%4d | %s\n", i+1, lines[i]))
+			}
+		}
+	}
+	
+	result.WriteString("\n" + strings.Repeat("─", 60) + "\n")
+	result.WriteString("💡 Use read_file with start_line/end_line to read specific sections\n")
+	
+	return result.String()
+}
+
+// condenseGoFile extracts Go function/type signatures.
+func condenseGoFile(lines []string) string {
+	var result strings.Builder
+	result.WriteString("[Go File Structure]\n\n")
+	
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		// Package declaration
+		if strings.HasPrefix(trimmed, "package ") {
+			result.WriteString(fmt.Sprintf("%4d | %s\n", i+1, line))
+		}
+		// Import block
+		if strings.HasPrefix(trimmed, "import ") || trimmed == "import (" {
+			result.WriteString(fmt.Sprintf("%4d | %s\n", i+1, line))
+		}
+		// Type declarations
+		if strings.HasPrefix(trimmed, "type ") {
+			result.WriteString(fmt.Sprintf("%4d | %s\n", i+1, line))
+		}
+		// Function declarations
+		if strings.HasPrefix(trimmed, "func ") {
+			result.WriteString(fmt.Sprintf("%4d | %s\n", i+1, line))
+		}
+		// Const/var blocks
+		if strings.HasPrefix(trimmed, "const ") || strings.HasPrefix(trimmed, "var ") {
+			result.WriteString(fmt.Sprintf("%4d | %s\n", i+1, line))
+		}
+	}
+	
+	return result.String()
+}
+
+// condensePythonFile extracts Python class/function definitions.
+func condensePythonFile(lines []string) string {
+	var result strings.Builder
+	result.WriteString("[Python File Structure]\n\n")
+	
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		// Import statements
+		if strings.HasPrefix(trimmed, "import ") || strings.HasPrefix(trimmed, "from ") {
+			result.WriteString(fmt.Sprintf("%4d | %s\n", i+1, line))
+		}
+		// Class definitions
+		if strings.HasPrefix(trimmed, "class ") {
+			result.WriteString(fmt.Sprintf("%4d | %s\n", i+1, line))
+		}
+		// Function definitions
+		if strings.HasPrefix(trimmed, "def ") {
+			result.WriteString(fmt.Sprintf("%4d | %s\n", i+1, line))
+		}
+	}
+	
+	return result.String()
+}
+
+// condenseJSFile extracts JS/TS function/class definitions.
+func condenseJSFile(lines []string) string {
+	var result strings.Builder
+	result.WriteString("[JavaScript/TypeScript File Structure]\n\n")
+	
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		// Import statements
+		if strings.HasPrefix(trimmed, "import ") {
+			result.WriteString(fmt.Sprintf("%4d | %s\n", i+1, line))
+		}
+		// Export statements
+		if strings.HasPrefix(trimmed, "export ") {
+			result.WriteString(fmt.Sprintf("%4d | %s\n", i+1, line))
+		}
+		// Class definitions
+		if strings.HasPrefix(trimmed, "class ") {
+			result.WriteString(fmt.Sprintf("%4d | %s\n", i+1, line))
+		}
+		// Function definitions
+		if strings.HasPrefix(trimmed, "function ") || strings.HasPrefix(trimmed, "async function ") {
+			result.WriteString(fmt.Sprintf("%4d | %s\n", i+1, line))
+		}
+		// Arrow functions assigned to const/let
+		if (strings.HasPrefix(trimmed, "const ") || strings.HasPrefix(trimmed, "let ")) && strings.Contains(line, "=>") {
+			result.WriteString(fmt.Sprintf("%4d | %s\n", i+1, line))
+		}
+	}
+	
+	return result.String()
+}
+
+// condenseShellFile extracts shell function definitions.
+func condenseShellFile(lines []string) string {
+	var result strings.Builder
+	result.WriteString("[Shell Script Structure]\n\n")
+	
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		// Shebang
+		if strings.HasPrefix(trimmed, "#!") {
+			result.WriteString(fmt.Sprintf("%4d | %s\n", i+1, line))
+		}
+		// Function definitions
+		if strings.Contains(trimmed, "()") && (strings.HasPrefix(trimmed, "function ") || !strings.HasPrefix(trimmed, "#")) {
+			if strings.HasSuffix(trimmed, "{") || strings.HasSuffix(trimmed, "()") {
+				result.WriteString(fmt.Sprintf("%4d | %s\n", i+1, line))
+			}
+		}
+		// Major comments (sections)
+		if strings.HasPrefix(trimmed, "# ===") || strings.HasPrefix(trimmed, "# ---") {
+			result.WriteString(fmt.Sprintf("%4d | %s\n", i+1, line))
+		}
+	}
+	
+	return result.String()
 }
 
 func toolWriteFile(ctx context.Context, args json.RawMessage) (string, error) {

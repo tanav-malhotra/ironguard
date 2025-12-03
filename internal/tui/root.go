@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/tanav-malhotra/ironguard/internal/agent"
+	"github.com/tanav-malhotra/ironguard/internal/audio"
 	"github.com/tanav-malhotra/ironguard/internal/config"
 	"github.com/tanav-malhotra/ironguard/internal/mcp"
 	"github.com/tanav-malhotra/ironguard/internal/tools"
@@ -17,6 +18,12 @@ import (
 
 // Run starts the top-level TUI program.
 func Run(cfg config.Config) error {
+	// Initialize audio system (non-fatal if it fails)
+	if err := audio.Init(); err != nil {
+		// Audio init failed - continue without sound
+		// This is fine, sound is optional
+	}
+	
 	m := newModel(cfg)
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	_, err := p.Run()
@@ -96,6 +103,11 @@ type model struct {
 	currentScore  int
 	previousScore int
 	scoreDelta    int
+	
+	// Vulnerability tracking
+	vulnsFound int
+	vulnsTotal int
+	prevVulnsFound int // For calculating dings
 
 	// MCP server manager
 	mcpManager *mcp.Manager
@@ -360,6 +372,24 @@ func (m *model) handleAgentEvent(event agent.Event) (tea.Model, tea.Cmd) {
 		m.previousScore = m.currentScore
 		m.currentScore = event.Score
 		m.scoreDelta = m.currentScore - m.previousScore
+		
+		// Update vulnerability tracking if provided
+		if event.VulnsFound > 0 || event.VulnsTotal > 0 {
+			m.prevVulnsFound = m.vulnsFound
+			m.vulnsFound = event.VulnsFound
+			m.vulnsTotal = event.VulnsTotal
+			
+			// Play ding sounds for each new vuln found
+			newVulns := m.vulnsFound - m.prevVulnsFound
+			if newVulns > 0 {
+				audio.PlayPointsGainedMultiple(newVulns)
+			}
+		}
+		
+		// Play victory sound at 100/100
+		if m.currentScore == 100 && m.previousScore < 100 {
+			audio.PlayMaxPointsAchieved()
+		}
 	}
 
 	// Continue listening for events
@@ -872,7 +902,18 @@ func (m model) renderSidebar() string {
 		} else if m.scoreDelta < 0 {
 			scoreStr += m.styles.Error.Render(fmt.Sprintf(" %d", m.scoreDelta))
 		}
-		sb.WriteString(m.styles.Value.Render("  "+scoreStr) + "\n\n")
+		sb.WriteString(m.styles.Value.Render("  "+scoreStr) + "\n")
+		
+		// Vulnerabilities found/total
+		if m.vulnsTotal > 0 {
+			vulnStr := fmt.Sprintf("  %d/%d vulns", m.vulnsFound, m.vulnsTotal)
+			if m.vulnsFound == m.vulnsTotal {
+				sb.WriteString(m.styles.Success.Render(vulnStr) + "\n")
+			} else {
+				sb.WriteString(m.styles.Muted.Render(vulnStr) + "\n")
+			}
+		}
+		sb.WriteString("\n")
 	} else {
 		sb.WriteString(m.styles.Muted.Render("  ── awaiting ──") + "\n\n")
 	}

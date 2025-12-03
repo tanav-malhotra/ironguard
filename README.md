@@ -176,11 +176,17 @@ Commands maintain state across executions. If you run `cd /etc` followed by `cat
 
 ### Context Management
 
-Long sessions are handled automatically. When the conversation approaches token limits, IronGuard summarizes older messages while preserving:
-- Recent context (last 10 messages)
-- Key actions and findings
+Long sessions are handled automatically. When the conversation approaches 90% of the token limit, IronGuard summarizes the **oldest 60%** of messages while keeping the **most recent 40%** intact. This preserves conversation relevance and natural flow.
+
+**What's preserved:**
+- Recent messages (40% of conversation, minimum 10 messages)
+- Key actions and findings in summary
 - Current score and progress
 - Sub-agent status
+
+**Notifications:**
+- Both user and AI are notified when summarization occurs
+- The AI receives a system message so it knows context was compressed
 
 **Summarization Modes:**
 - **Smart** (default): Uses the provider's largest-context model for intelligent summarization
@@ -190,6 +196,16 @@ Long sessions are handled automatically. When the conversation approaches token 
 - **Fast**: Programmatic extraction (saves tokens, slightly less intelligent)
 
 Change with `/summarize smart` or `/summarize fast`.
+
+### File Condensation
+
+Large files (>50KB) are automatically condensed to show only structural elements:
+- **Go**: Package, imports, type definitions, function signatures
+- **Python**: Imports, class definitions, function definitions
+- **JavaScript/TypeScript**: Imports, exports, classes, functions
+- **Shell scripts**: Shebang, function definitions, section comments
+
+Use `read_file` with `start_line`/`end_line` parameters to read specific sections of condensed files.
 
 ### Persistent Memory
 
@@ -208,6 +224,14 @@ Every file edit is automatically checkpointed. Use `/undo` to revert the last ch
 ### Token Tracking
 
 The status bar shows current context usage: `📊 45k/200k`. Use `/tokens` for detailed statistics including session totals and tokens saved by summarization.
+
+### Sound Effects
+
+IronGuard plays satisfying audio feedback when you score points:
+- **Ding!** — Plays once for each vulnerability found/fixed
+- **Victory sound** — Plays when you achieve 100/100 (perfect score)
+
+Sound files are embedded in the binary—no external files needed. If audio initialization fails (e.g., no audio device), IronGuard continues silently.
 
 ### Screen Interaction
 

@@ -1086,35 +1086,56 @@ func (m model) formatMessage(msg Message, width int) string {
 	case RoleTool:
 		var sb strings.Builder
 
-		// Tool header with collapse indicator
+		// Tool calls displayed as actions/thoughts, not messages
+		// Collapsed view: compact single line
 		if msg.Collapsed {
-			sb.WriteString(m.styles.ToolCall.Render("⚡ " + msg.ToolName + " [+]"))
-			if msg.ToolOutput != "" {
-				sb.WriteString(m.styles.Muted.Render(" → " + truncate(msg.ToolOutput, 30)))
+			// Show as a subtle action indicator
+			actionIcon := "├─"
+			if msg.ToolError != "" {
+				actionIcon = "├✗"
+				sb.WriteString(m.styles.Muted.Render(actionIcon + " "))
+				sb.WriteString(m.styles.Error.Render(msg.ToolName))
+			} else {
+				sb.WriteString(m.styles.Muted.Render(actionIcon + " "))
+				sb.WriteString(m.styles.ToolCall.Render(msg.ToolName))
 			}
+			if msg.ToolOutput != "" {
+				sb.WriteString(m.styles.Muted.Render(" → " + truncate(msg.ToolOutput, 40)))
+			}
+			sb.WriteString(m.styles.Muted.Render(" [+]"))
 		} else {
-			sb.WriteString(m.styles.ToolCall.Render("⚡ " + msg.ToolName + " [-]"))
+			// Expanded view: show as thought/action block
+			sb.WriteString(m.styles.Muted.Render("┌─ "))
+			sb.WriteString(m.styles.ToolCall.Render(msg.ToolName))
+			sb.WriteString(m.styles.Muted.Render(" ─────────────────────────"))
+			
 			if msg.ToolInput != "" {
 				inputLines := strings.Split(msg.ToolInput, "\n")
 				if len(inputLines) > 3 {
-					sb.WriteString("\n" + m.styles.Muted.Render("  Input: "+truncate(inputLines[0], 50)+" ("+fmt.Sprintf("%d", len(inputLines))+" lines)"))
+					sb.WriteString("\n" + m.styles.Muted.Render("│ ") + m.styles.Muted.Render(truncate(inputLines[0], 55)+" (+"+fmt.Sprintf("%d", len(inputLines)-1)+" lines)"))
 				} else {
-					sb.WriteString("\n" + m.styles.Muted.Render("  Input: "+truncate(msg.ToolInput, 60)))
+					sb.WriteString("\n" + m.styles.Muted.Render("│ ") + m.styles.Muted.Render(truncate(msg.ToolInput, 60)))
 				}
 			}
 			if msg.ToolOutput != "" {
 				outputLines := strings.Split(msg.ToolOutput, "\n")
-				if len(outputLines) > 5 {
-					// Show first 3 lines with line count
-					preview := strings.Join(outputLines[:3], "\n  ")
-					sb.WriteString("\n" + m.styles.Value.Render("  Output:\n  "+preview+"\n  ... ("+fmt.Sprintf("%d", len(outputLines))+" total lines)"))
+				if len(outputLines) > 4 {
+					// Show first 2 lines with line count
+					sb.WriteString("\n" + m.styles.Muted.Render("│ ") + m.styles.Value.Render(truncate(outputLines[0], 55)))
+					sb.WriteString("\n" + m.styles.Muted.Render("│ ") + m.styles.Value.Render(truncate(outputLines[1], 55)))
+					sb.WriteString("\n" + m.styles.Muted.Render("│ ... "+fmt.Sprintf("%d", len(outputLines)-2)+" more lines"))
 				} else {
-					sb.WriteString("\n" + m.styles.Value.Render("  Output: "+truncate(msg.ToolOutput, 100)))
+					for _, line := range outputLines {
+						if line != "" {
+							sb.WriteString("\n" + m.styles.Muted.Render("│ ") + m.styles.Value.Render(truncate(line, 60)))
+						}
+					}
 				}
 			}
 			if msg.ToolError != "" {
-				sb.WriteString("\n" + m.styles.Error.Render("  Error: "+msg.ToolError))
+				sb.WriteString("\n" + m.styles.Muted.Render("│ ") + m.styles.Error.Render("Error: "+msg.ToolError))
 			}
+			sb.WriteString("\n" + m.styles.Muted.Render("└────────────────────────────────────────"))
 		}
 		return sb.String()
 

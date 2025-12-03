@@ -331,6 +331,24 @@ MCP tools appear automatically alongside built-in tools.
 
 ---
 
+## Disclaimer
+
+**USE AT YOUR OWN RISK.** This software is provided "as is" without warranty of any kind. The authors and contributors:
+
+- **Are not responsible** for any loss of points, penalties, or disqualifications during CyberPatriot or any other competition
+- **Are not liable** for any damage to systems, data loss, or unintended consequences from using this tool
+- **Make no guarantees** about the accuracy, reliability, or effectiveness of the AI's actions
+- **Do not warrant** that the software will meet your requirements or operate error-free
+
+By using IronGuard, you accept full responsibility for:
+- Verifying all changes made by the AI
+- Understanding competition rules and ensuring compliance
+- Any consequences resulting from the use of this software
+
+**This tool is meant to assist and educate, not replace human judgment.** Always review what the AI does and be prepared to intervene.
+
+---
+
 ## License
 
 MIT License. See [LICENSE](LICENSE) for details.

@@ -555,6 +555,103 @@ ALWAYS:
 ✓ Create missing users if README requires them
 ✓ Add users to groups if README requires it
 
+═══════════════════════════════════════════════════════════════════════════════
+                         SYSTEM UPDATES STRATEGY
+═══════════════════════════════════════════════════════════════════════════════
+
+CRITICAL: Updates can take 10-30 minutes and may require RESTART!
+
+WINDOWS UPDATE STRATEGY:
+- Do updates LAST, ONLY if time permits
+- START preparing at 45 MINUTES LEFT if other tasks remain
+- INITIATE updates at 30 MINUTES LEFT (gives time for restart)
+- If README doesn't prohibit updates, they're worth 3-5 points each
+- Before updating, add_manual_task("IMPORTANT: When update completes, suspend VM or restart IronGuard")
+- If we're at 95+ points with 1-2 items left, updates may be the easiest remaining points
+
+LINUX UPDATE STRATEGY:
+1. CHECK REPOSITORIES FIRST (common issue!):
+   - For apt (Debian/Ubuntu/Mint):
+     * cat /etc/apt/sources.list - Check if lines are commented out (#)
+     * ls /etc/apt/sources.list.d/ - Check for additional repo files
+     * Ensure security repos present (e.g., *-security for Ubuntu)
+     * Common fix: Uncomment lines, add universe/multiverse if needed
+   - For dnf/yum (Fedora/RHEL/CentOS):
+     * ls /etc/yum.repos.d/ - Check repo files
+     * dnf repolist - List enabled repos
+
+2. UPDATE PACKAGE LISTS:
+   - apt update (Debian/Ubuntu/Mint)
+   - dnf check-update (Fedora) or yum check-update (older RHEL/CentOS)
+   - If errors, fix repo issues first
+
+3. INSTALL SECURITY UPDATES:
+   - apt upgrade -y (Debian/Ubuntu/Mint)
+   - dnf upgrade -y (Fedora) or yum upgrade -y (RHEL/CentOS)
+   - For Ubuntu: apt install unattended-upgrades, enable automatic security updates
+
+Linux updates are usually faster and don't require restart.
+Can be done earlier in the process after initial quick wins.
+
+═══════════════════════════════════════════════════════════════════════════════
+                         PROGRESS TRACKING & RESTART RECOVERY
+═══════════════════════════════════════════════════════════════════════════════
+
+USE PERSISTENT MEMORY TO TRACK PROGRESS!
+
+At the START of hardening, save your plan:
+  remember(category="progress", content="Starting hardening. Plan: 1) Forensics 2) Users 3) Firewall 4) Services 5) Updates", os="current")
+
+After completing each major phase, update progress:
+  remember(category="progress", content="COMPLETED: Forensics (5/5), Users (cleaned). NEXT: Services", os="current")
+  remember(category="progress", content="COMPLETED: Services disabled. Score: 72/100. REMAINING: Updates, prohibited files", os="current")
+
+BEFORE RESTART (Windows updates):
+  remember(category="progress", content="RESTART PENDING. Score: 85/100. TODO after restart: Check updates applied, find last 15 pts", os="windows")
+
+If IronGuard restarts, check memory with recall(category="progress") to see where you left off!
+
+This allows seamless recovery if:
+- Windows restarts for updates
+- User accidentally closes IronGuard
+- System crashes
+- User needs to restart for any reason
+
+═══════════════════════════════════════════════════════════════════════════════
+                         TASK TRACKING (USE THIS!)
+═══════════════════════════════════════════════════════════════════════════════
+
+Track your work with todos! Helps stay organized after context summarization.
+
+AT START - Use plan_tasks to create your plan:
+  plan_tasks(tasks=[
+    {"description": "Read README and forensics", "priority": "high"},
+    {"description": "Answer forensics questions", "priority": "high"},
+    {"description": "Audit and clean users", "priority": "high"},
+    {"description": "Enable firewall", "priority": "medium"},
+    {"description": "Disable unnecessary services", "priority": "medium"},
+    {"description": "Find prohibited files", "priority": "medium"},
+    {"description": "Check for updates", "priority": "low"}
+  ])
+
+AS YOU WORK:
+  update_todo(id=1, status="in_progress")  // Starting a task
+  update_todo(id=1, status="completed")    // Finished a task
+  list_todos                               // Check what's left
+
+This prevents forgetting tasks after summarization!
+
+═══════════════════════════════════════════════════════════════════════════════
+                         COMPLETION
+═══════════════════════════════════════════════════════════════════════════════
+
+When score reaches 100/100:
+1. Announce: "SCORE: 100/100 - IMAGE COMPLETE!"
+2. add_manual_task("100/100! SUSPEND the VM to lock in your score.")
+
+If updates require restart:
+  add_manual_task("Updates installing. Restart IronGuard when complete to continue.")
+
 `
 
 const windows10_11Prompt = `

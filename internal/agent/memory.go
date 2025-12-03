@@ -218,7 +218,26 @@ func (m *Memory) GetSummary() string {
 	}
 	
 	summary := "=== REMEMBERED FROM PREVIOUS SESSIONS ===\n\n"
+	
+	// Show progress first (most important for restart recovery)
+	if progress, ok := categories["progress"]; ok && len(progress) > 0 {
+		summary += "[PROGRESS - RESTART RECOVERY]\n"
+		// Show most recent progress entries (last 3)
+		start := 0
+		if len(progress) > 3 {
+			start = len(progress) - 3
+		}
+		for i := start; i < len(progress); i++ {
+			summary += fmt.Sprintf("  → %s\n", truncateString(progress[i].Content, 150))
+		}
+		summary += "\n"
+	}
+	
+	// Show other categories
 	for cat, entries := range categories {
+		if cat == "progress" {
+			continue // Already shown
+		}
 		summary += fmt.Sprintf("[%s] (%d entries)\n", cat, len(entries))
 		// Show up to 3 most used entries per category
 		shown := 0
@@ -232,6 +251,40 @@ func (m *Memory) GetSummary() string {
 	}
 	
 	return summary
+}
+
+// GetProgress returns the most recent progress entry for restart recovery.
+func (m *Memory) GetProgress() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	
+	var latest *MemoryEntry
+	for i := range m.Entries {
+		if m.Entries[i].Category == "progress" {
+			if latest == nil || m.Entries[i].CreatedAt.After(latest.CreatedAt) {
+				latest = &m.Entries[i]
+			}
+		}
+	}
+	
+	if latest != nil {
+		return latest.Content
+	}
+	return ""
+}
+
+// ClearProgress removes all progress entries (call when starting fresh).
+func (m *Memory) ClearProgress() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	
+	filtered := make([]MemoryEntry, 0)
+	for _, e := range m.Entries {
+		if e.Category != "progress" {
+			filtered = append(filtered, e)
+		}
+	}
+	m.Entries = filtered
 }
 
 // containsIgnoreCase checks if s contains substr (case insensitive).

@@ -225,7 +225,7 @@ SYSTEM HARDENING:
 - find_prohibited_files - Search for media files (mp3, mp4, etc.)
 
 FILE OPERATIONS:
-- read_file - Read contents of any file
+- read_file - Read contents of any text file
   * Large files (>50KB) are automatically condensed to show structure only
   * Use start_line/end_line parameters to read specific sections of large files
   * Example: read_file(path="/etc/passwd", start_line=1, end_line=50)
@@ -233,6 +233,21 @@ FILE OPERATIONS:
 - list_dir - List directory contents
 - search_files - Search for files by pattern
 - delete_file - Delete a file
+
+DOCUMENT & BINARY FILE TOOLS (no external dependencies!):
+- analyze_pcap - Parse PCAP/PCAPNG files for network forensics
+  * Extracts protocols, IPs, ports, connections
+  * Finds FTP credentials, HTTP passwords, sensitive data
+  * Example: analyze_pcap(path="/home/user/Desktop/ftp_capture.pcap")
+- read_pdf - Extract text from PDF files
+  * Works on uncompressed PDFs
+  * Example: read_pdf(path="/home/user/Desktop/document.pdf")
+- read_docx - Extract text from Microsoft Word files
+  * Pure Go implementation, no MS Office needed
+  * Example: read_docx(path="/home/user/Desktop/readme.docx")
+- read_image - Read image files for vision analysis
+  * Supports PNG, JPG, GIF, WebP, BMP
+  * Returns base64 for vision-capable models
 
 SHELL SESSION (persistent across commands!):
 - run_command - Run a command in the persistent shell session
@@ -574,21 +589,27 @@ FORENSICS QUESTION TYPES YOU'LL SEE:
 2. "Find the hidden user" - Check: /etc/passwd for UID 0 or UID < 1000
 3. "Decode this message" - Common: base64, steghide, MD5 hashes
 4. "Find the prohibited files" - Use: locate '*.mp3', find / -name "*.mp3"
-5. "Analyze network capture" - Use: tshark, wireshark, tcpdump
-6. "Find the password in file" - Check: pcap files, config files, logs
+5. "Analyze network capture" - Use: analyze_pcap tool (built-in!) or tshark
+6. "Find the password in file" - Use: analyze_pcap for .pcap, read_file for text
 7. "Identify the vulnerability" - Check: CVE databases, version numbers
 8. "Find unauthorized users" - Cross-reference README with user list
+9. "Read a PDF/DOCX document" - Use: read_pdf or read_docx tools (built-in!)
 
-FORENSICS TOOLS TO KNOW:
+FORENSICS TOOLS (BUILT INTO IRONGUARD):
+- analyze_pcap - Parse pcap files, find credentials, protocols
+- read_pdf - Extract text from PDF files
+- read_docx - Extract text from Word documents
+- read_image - Read images for vision analysis
+
+SYSTEM FORENSICS COMMANDS:
 - ss -tlnp (listening ports)
 - ps -ef | grep [process] (running processes)
 - netstat -tulpn (network connections)
 - locate [filename] (find files)
 - find / -name "pattern" (search files)
-- tshark -r file.pcap (analyze captures)
 - base64 -d (decode base64)
 - md5sum [file] (calculate hash)
-- steghide extract -sf [image] (extract hidden data)
+- steghide extract -sf [image] (extract hidden data from images)
 
 ═══════════════════════════════════════════════════════════════════════════════
                          CRITICAL WARNINGS

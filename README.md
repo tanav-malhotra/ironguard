@@ -209,6 +209,19 @@ Large files (>50KB) are automatically condensed to show only structural elements
 
 Use `read_file` with `start_line`/`end_line` parameters to read specific sections of condensed files.
 
+### Document & Binary File Support
+
+IronGuard includes native parsers for common forensics file formats—no external dependencies needed:
+
+| Format | Tool | Description |
+|--------|------|-------------|
+| **PCAP/PCAPNG** | `analyze_pcap` | Parse network captures, extract credentials, protocols, connections |
+| **PDF** | `read_pdf` | Extract text from PDF documents |
+| **DOCX** | `read_docx` | Extract text from Microsoft Word files |
+| **Images** | `read_image` | Read images for vision model analysis |
+
+These tools are compiled into the binary—they work even if Wireshark, pdftotext, or Microsoft Office aren't installed.
+
 ### Persistent Memory
 
 The AI can remember information across sessions:

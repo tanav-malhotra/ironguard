@@ -197,6 +197,33 @@ Automatic handling of large files (>50KB):
 - Use `read_file` with `start_line`/`end_line` to read specific sections
 - Helps AI understand large files without consuming entire context
 
+### 6.2. Document & Binary File Parsing 📄
+Native support for common forensics file formats (no external dependencies!):
+
+**PCAP/PCAPNG Analysis:**
+- `analyze_pcap` - Pure Go packet capture parser
+- Extracts protocols, IP addresses, ports, connections
+- Automatically finds FTP credentials, HTTP passwords
+- Detects sensitive data in plaintext traffic
+- Works without Wireshark or tshark installed
+
+**PDF Text Extraction:**
+- `read_pdf` - Pure Go PDF parser
+- Extracts text content from PDF documents
+- Handles common PDF encodings
+- No pdftotext or external tools needed
+
+**DOCX Text Extraction:**
+- `read_docx` - Pure Go Word document parser
+- DOCX files are ZIP archives with XML inside
+- Extracts all text content, headers, footers
+- No Microsoft Office needed
+
+**Image Reading:**
+- `read_image` - Returns base64 for vision models
+- Supports PNG, JPG, GIF, WebP, BMP
+- Works with vision-capable AI models
+
 ### 7. Persistent Memory 🧠
 Remember information across sessions:
 
@@ -481,6 +508,14 @@ API Key:  ✅ Valid
 | `list_dir` | List directory contents |
 | `search_files` | Search for files by pattern |
 | `delete_file` | Delete a file |
+
+### Document & Binary Files
+| Tool | Description |
+|------|-------------|
+| `analyze_pcap` | Parse PCAP/PCAPNG files, extract protocols, credentials |
+| `read_pdf` | Extract text from PDF files |
+| `read_docx` | Extract text from Microsoft Word (.docx) files |
+| `read_image` | Read image file as base64 for vision analysis |
 
 ### Shell Session
 | Tool | Description |

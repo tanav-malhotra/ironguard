@@ -77,6 +77,7 @@ func NewRegistry() *Registry {
 	r.RegisterDesktopControlTools() // Add mouse/keyboard control for full desktop interaction
 	r.RegisterAITodoTools()         // Add AI todo list management
 	r.RegisterSubAgentTools()       // Add subagent spawning and management
+	r.RegisterDocumentTools()       // Add PCAP, PDF, DOCX parsing tools
 	registerMemoryTools(r)          // Add persistent memory tools
 	return r
 }

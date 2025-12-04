@@ -313,7 +313,7 @@ Set your provider with `/provider <name>` and model with `/model <name>`.
 | AI stuck | `/stop` then `/harden` to restart |
 | Score dropped | AI should auto-undo; verify manually if needed |
 | Not responding | Check `/status` for API key and connection |
-| Need to exit | `Ctrl+Q` or `/quit` |
+| Need to exit | `/quit` |
 
 ---
 

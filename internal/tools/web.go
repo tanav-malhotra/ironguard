@@ -5,12 +5,112 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
 	"time"
 )
+
+// isPrivateIP checks if an IP address is in a private/internal range.
+// This prevents SSRF attacks by blocking requests to internal networks.
+func isPrivateIP(ip net.IP) bool {
+	if ip == nil {
+		return false
+	}
+
+	// Check for loopback (127.0.0.0/8, ::1)
+	if ip.IsLoopback() {
+		return true
+	}
+
+	// Check for private networks
+	if ip.IsPrivate() {
+		return true
+	}
+
+	// Check for link-local addresses (169.254.0.0/16, fe80::/10)
+	if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+		return true
+	}
+
+	// Check for unspecified/any address (0.0.0.0, ::)
+	if ip.IsUnspecified() {
+		return true
+	}
+
+	// Additional check for IPv4 mapped IPv6 addresses
+	if ip4 := ip.To4(); ip4 != nil {
+		// 0.0.0.0/8 - "This" network
+		if ip4[0] == 0 {
+			return true
+		}
+		// 100.64.0.0/10 - Carrier-grade NAT
+		if ip4[0] == 100 && ip4[1] >= 64 && ip4[1] <= 127 {
+			return true
+		}
+		// 192.0.0.0/24 - IETF Protocol Assignments
+		if ip4[0] == 192 && ip4[1] == 0 && ip4[2] == 0 {
+			return true
+		}
+		// 192.0.2.0/24 - TEST-NET-1
+		if ip4[0] == 192 && ip4[1] == 0 && ip4[2] == 2 {
+			return true
+		}
+		// 198.51.100.0/24 - TEST-NET-2
+		if ip4[0] == 198 && ip4[1] == 51 && ip4[2] == 100 {
+			return true
+		}
+		// 203.0.113.0/24 - TEST-NET-3
+		if ip4[0] == 203 && ip4[1] == 0 && ip4[2] == 113 {
+			return true
+		}
+		// 224.0.0.0/4 - Multicast
+		if ip4[0] >= 224 && ip4[0] <= 239 {
+			return true
+		}
+		// 240.0.0.0/4 - Reserved for future use
+		if ip4[0] >= 240 {
+			return true
+		}
+	}
+
+	return false
+}
+
+// validateURLNotInternal checks that a URL does not point to internal/private resources.
+func validateURLNotInternal(urlStr string) error {
+	parsedURL, err := url.Parse(urlStr)
+	if err != nil {
+		return fmt.Errorf("invalid URL: %w", err)
+	}
+
+	host := parsedURL.Hostname()
+
+	// Block localhost variations
+	lowerHost := strings.ToLower(host)
+	if lowerHost == "localhost" || strings.HasSuffix(lowerHost, ".localhost") {
+		return fmt.Errorf("requests to localhost are not allowed")
+	}
+
+	// Resolve the hostname to IP addresses
+	ips, err := net.LookupIP(host)
+	if err != nil {
+		// If we can't resolve, allow it (might be external DNS)
+		// The HTTP client will fail anyway if it can't connect
+		return nil
+	}
+
+	// Check all resolved IPs
+	for _, ip := range ips {
+		if isPrivateIP(ip) {
+			return fmt.Errorf("requests to private/internal IP addresses are not allowed (resolved to %s)", ip.String())
+		}
+	}
+
+	return nil
+}
 
 // RegisterWebTools adds web search and URL fetching tools.
 func (r *Registry) RegisterWebTools() {
@@ -175,6 +275,11 @@ func toolFetchURL(ctx context.Context, args json.RawMessage) (string, error) {
 
 	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
 		return "", fmt.Errorf("only http and https URLs are supported")
+	}
+
+	// SSRF protection: block requests to internal/private IP ranges
+	if err := validateURLNotInternal(params.URL); err != nil {
+		return "", err
 	}
 
 	client := &http.Client{

@@ -165,6 +165,12 @@ func (a *Agent) Confirm(resp ConfirmResponse) {
 	select {
 	case a.confirms <- resp:
 	default:
+		// This should rarely happen as confirms are processed one at a time
+		// Log a warning event so the user is aware
+		select {
+		case a.events <- Event{Type: EventStatusUpdate, Content: "⚠️ Confirmation dropped (channel full)"}:
+		default:
+		}
 	}
 }
 
@@ -1240,6 +1246,10 @@ REMEMBER:
 - NEVER STOP until target is reached
 - Use web_search if you're unsure how to fix something
 - Add manual tasks to sidebar for GUI-only items
+
+⚠️ CRITICAL: You MUST call tools in EVERY response to keep working!
+If you respond with only text and no tool calls, execution STOPS.
+Always chain your next action: finish one task → immediately call tool for next task.
 
 START NOW. Read the README first.`, targetScore, targetScore, targetScore)
 

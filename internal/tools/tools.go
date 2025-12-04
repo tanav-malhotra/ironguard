@@ -365,6 +365,45 @@ func (r *Registry) registerDefaults() {
 // Maximum file size before condensation (in bytes) - ~50KB
 const maxFileSize = 50 * 1024
 
+// isBinaryContent checks if content appears to be binary (not text).
+// Returns true if the content contains null bytes or has a high ratio of non-printable characters.
+func isBinaryContent(content []byte) bool {
+	if len(content) == 0 {
+		return false
+	}
+
+	// Check first 8KB for binary indicators
+	checkSize := len(content)
+	if checkSize > 8192 {
+		checkSize = 8192
+	}
+
+	nullCount := 0
+	nonPrintable := 0
+
+	for i := 0; i < checkSize; i++ {
+		b := content[i]
+		// Null bytes are a strong indicator of binary
+		if b == 0 {
+			nullCount++
+			if nullCount > 1 {
+				return true
+			}
+		}
+		// Count non-printable, non-whitespace characters
+		if b < 32 && b != '\n' && b != '\r' && b != '\t' {
+			nonPrintable++
+		}
+	}
+
+	// If more than 10% non-printable, likely binary
+	if float64(nonPrintable)/float64(checkSize) > 0.1 {
+		return true
+	}
+
+	return false
+}
+
 func toolReadFile(ctx context.Context, args json.RawMessage) (string, error) {
 	var params struct {
 		Path      string `json:"path"`
@@ -378,6 +417,12 @@ func toolReadFile(ctx context.Context, args json.RawMessage) (string, error) {
 	content, err := os.ReadFile(params.Path)
 	if err != nil {
 		return "", fmt.Errorf("failed to read file: %w", err)
+	}
+
+	// Check if file is binary
+	if isBinaryContent(content) {
+		ext := strings.ToLower(filepath.Ext(params.Path))
+		return fmt.Sprintf("⚠️ BINARY FILE DETECTED\n📁 %s\nSize: %d bytes\nExtension: %s\n\nThis appears to be a binary file and cannot be displayed as text.\nUse appropriate tools to inspect binary files.", params.Path, len(content), ext), nil
 	}
 	
 	// If specific line range requested, return just that section

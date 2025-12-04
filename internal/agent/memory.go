@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -83,7 +84,7 @@ func (m *Memory) Save() error {
 		return fmt.Errorf("failed to marshal memory: %w", err)
 	}
 	
-	return os.WriteFile(m.path, data, 0644)
+	return os.WriteFile(m.path, data, 0600)
 }
 
 // Add adds a new memory entry.
@@ -289,37 +290,6 @@ func (m *Memory) ClearProgress() {
 
 // containsIgnoreCase checks if s contains substr (case insensitive).
 func containsIgnoreCase(s, substr string) bool {
-	sLower := make([]byte, len(s))
-	substrLower := make([]byte, len(substr))
-	
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if c >= 'A' && c <= 'Z' {
-			sLower[i] = c + 32
-		} else {
-			sLower[i] = c
-		}
-	}
-	
-	for i := 0; i < len(substr); i++ {
-		c := substr[i]
-		if c >= 'A' && c <= 'Z' {
-			substrLower[i] = c + 32
-		} else {
-			substrLower[i] = c
-		}
-	}
-	
-	return contains(string(sLower), string(substrLower))
-}
-
-// contains checks if s contains substr.
-func contains(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
+	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
 }
 

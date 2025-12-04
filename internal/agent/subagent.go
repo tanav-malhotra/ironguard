@@ -413,7 +413,9 @@ func (m *SubAgentManager) emitEvent(event SubAgentEvent) {
 	select {
 	case m.events <- event:
 	default:
-		// Channel full, drop event
+		// Channel full - this can happen during high activity.
+		// Events are non-critical UI updates, so dropping is acceptable
+		// but we should be aware of it during debugging.
 	}
 }
 

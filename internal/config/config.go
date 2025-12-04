@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -219,23 +220,22 @@ func detectWindows(info OSInfo) OSInfo {
 
 // detectLinux detects Linux distribution and version.
 func detectLinux(info OSInfo) OSInfo {
-	// Try /etc/os-release first (most modern distros)
-	out, err := exec.Command("cat", "/etc/os-release").Output()
-	if err == nil {
-		return parseOSRelease(string(out), info)
+	// Try /etc/os-release first (most modern distros) - use os.ReadFile instead of exec
+	if content, err := os.ReadFile("/etc/os-release"); err == nil {
+		return parseOSRelease(string(content), info)
 	}
 
 	// Fallback to lsb_release
-	out, err = exec.Command("lsb_release", "-a").Output()
+	out, err := exec.Command("lsb_release", "-a").Output()
 	if err == nil {
 		return parseLSBRelease(string(out), info)
 	}
 
-	// Last resort: check for specific files
-	if _, err := exec.Command("test", "-f", "/etc/debian_version").Output(); err == nil {
+	// Last resort: check for specific files using os.Stat instead of exec
+	if _, err := os.Stat("/etc/debian_version"); err == nil {
 		info.Type = OSTypeDebian
 		info.Name = "Debian"
-	} else if _, err := exec.Command("test", "-f", "/etc/redhat-release").Output(); err == nil {
+	} else if _, err := os.Stat("/etc/redhat-release"); err == nil {
 		info.Type = OSTypeCentOS
 		info.Name = "CentOS/RHEL"
 	} else {

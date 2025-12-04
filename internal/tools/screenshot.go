@@ -9,8 +9,31 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 )
+
+// escapePowerShellString escapes a string for safe use in PowerShell scripts.
+// This prevents command injection by escaping special characters.
+func escapePowerShellString(s string) string {
+	// Replace backticks (PowerShell escape char) first
+	s = strings.ReplaceAll(s, "`", "``")
+	// Replace dollar signs (variable expansion)
+	s = strings.ReplaceAll(s, "$", "`$")
+	// Replace double quotes
+	s = strings.ReplaceAll(s, `"`, "`\"")
+	// Replace single quotes (for single-quoted strings)
+	s = strings.ReplaceAll(s, "'", "''")
+	return s
+}
+
+// escapeShellArg escapes a string for safe use in shell arguments.
+// This prevents command injection in bash/sh scripts.
+func escapeShellArg(s string) string {
+	// Use single quotes and escape any single quotes in the string
+	// 'arg' -> replace ' with '\''
+	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
+}
 
 // RegisterScreenshotTools adds screenshot and image tools to the registry.
 func (r *Registry) RegisterScreenshotTools() {
@@ -110,6 +133,10 @@ func toolTakeScreenshot(ctx context.Context, args json.RawMessage) (string, erro
 }
 
 func takeScreenshotWindows(ctx context.Context, outputPath, region string) error {
+	// Escape inputs to prevent command injection
+	safeRegion := escapePowerShellString(region)
+	safeOutputPath := escapePowerShellString(outputPath)
+
 	// Use PowerShell to take screenshot
 	script := fmt.Sprintf(`
 Add-Type -AssemblyName System.Windows.Forms
@@ -124,7 +151,7 @@ if ("%s" -eq "active") {
     Add-Type @"
     using System;
     using System.Runtime.InteropServices;
-    public class Win32 {
+    public class Win32Screenshot {
         [DllImport("user32.dll")]
         public static extern IntPtr GetForegroundWindow();
         [DllImport("user32.dll")]
@@ -135,9 +162,9 @@ if ("%s" -eq "active") {
         }
     }
 "@
-    $hwnd = [Win32]::GetForegroundWindow()
-    $rect = New-Object Win32+RECT
-    [Win32]::GetWindowRect($hwnd, [ref]$rect)
+    $hwnd = [Win32Screenshot]::GetForegroundWindow()
+    $rect = New-Object Win32Screenshot+RECT
+    [Win32Screenshot]::GetWindowRect($hwnd, [ref]$rect)
     $bitmap = New-Object System.Drawing.Bitmap(($rect.Right - $rect.Left), ($rect.Bottom - $rect.Top))
     $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
     $graphics.CopyFromScreen($rect.Left, $rect.Top, 0, 0, $bitmap.Size)
@@ -148,7 +175,7 @@ if ("%s" -eq "active") {
 $bitmap.Save('%s', [System.Drawing.Imaging.ImageFormat]::Png)
 $graphics.Dispose()
 $bitmap.Dispose()
-`, region, outputPath)
+`, safeRegion, safeOutputPath)
 
 	cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", script)
 	return cmd.Run()
@@ -207,15 +234,53 @@ func takeScreenshotLinux(ctx context.Context, outputPath, region string) error {
 	}
 
 	if region == "active" {
-		x11Tools = []struct {
+		// For active window capture, some tools need shell expansion for xdotool
+		// Try gnome-screenshot and scrot first as they have native active window support
+		simpleTools := []struct {
 			name string
 			args []string
 		}{
 			{"gnome-screenshot", []string{"-w", "-f", outputPath}},
 			{"scrot", []string{"-u", outputPath}},
-			{"import", []string{"-window", "$(xdotool getactivewindow)", outputPath}},
-			{"maim", []string{"-i", "$(xdotool getactivewindow)", outputPath}},
 		}
+
+		for _, tool := range simpleTools {
+			if _, err := exec.LookPath(tool.name); err == nil {
+				cmd := exec.CommandContext(ctx, tool.name, tool.args...)
+				if err := cmd.Run(); err == nil {
+					return nil
+				}
+			}
+		}
+
+		// For import and maim, we need to get the active window ID via xdotool
+		// and pass it as an argument (not via shell expansion)
+		if _, err := exec.LookPath("xdotool"); err == nil {
+			// Get active window ID
+			windowIDCmd := exec.CommandContext(ctx, "xdotool", "getactivewindow")
+			windowIDBytes, err := windowIDCmd.Output()
+			if err == nil {
+				windowID := strings.TrimSpace(string(windowIDBytes))
+
+				// Try import (ImageMagick)
+				if _, err := exec.LookPath("import"); err == nil {
+					cmd := exec.CommandContext(ctx, "import", "-window", windowID, outputPath)
+					if err := cmd.Run(); err == nil {
+						return nil
+					}
+				}
+
+				// Try maim
+				if _, err := exec.LookPath("maim"); err == nil {
+					cmd := exec.CommandContext(ctx, "maim", "-i", windowID, outputPath)
+					if err := cmd.Run(); err == nil {
+						return nil
+					}
+				}
+			}
+		}
+
+		return fmt.Errorf("no X11 screenshot tool available for active window capture")
 	}
 
 	for _, tool := range x11Tools {
@@ -296,6 +361,10 @@ func toolCaptureWindow(ctx context.Context, args json.RawMessage) (string, error
 }
 
 func captureWindowWindows(ctx context.Context, outputPath, title string) error {
+	// Escape inputs to prevent command injection
+	safeTitle := escapePowerShellString(title)
+	safeOutputPath := escapePowerShellString(outputPath)
+
 	script := fmt.Sprintf(`
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -303,7 +372,7 @@ Add-Type @"
 using System;
 using System.Runtime.InteropServices;
 using System.Text;
-public class Win32 {
+public class Win32CaptureWindow {
     [DllImport("user32.dll")]
     public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
     [DllImport("user32.dll")]
@@ -325,11 +394,11 @@ $foundHwnd = [IntPtr]::Zero
 
 $callback = {
     param([IntPtr]$hwnd, [IntPtr]$lParam)
-    if ([Win32]::IsWindowVisible($hwnd)) {
+    if ([Win32CaptureWindow]::IsWindowVisible($hwnd)) {
         $sb = New-Object System.Text.StringBuilder 256
-        [Win32]::GetWindowText($hwnd, $sb, 256) | Out-Null
-        $title = $sb.ToString()
-        if ($title -like "*$targetTitle*") {
+        [Win32CaptureWindow]::GetWindowText($hwnd, $sb, 256) | Out-Null
+        $windowTitle = $sb.ToString()
+        if ($windowTitle -like "*$targetTitle*") {
             $script:foundHwnd = $hwnd
             return $false
         }
@@ -337,14 +406,14 @@ $callback = {
     return $true
 }
 
-[Win32]::EnumWindows($callback, [IntPtr]::Zero)
+[Win32CaptureWindow]::EnumWindows($callback, [IntPtr]::Zero)
 
 if ($foundHwnd -eq [IntPtr]::Zero) {
     throw "Window not found: $targetTitle"
 }
 
-$rect = New-Object Win32+RECT
-[Win32]::GetWindowRect($foundHwnd, [ref]$rect)
+$rect = New-Object Win32CaptureWindow+RECT
+[Win32CaptureWindow]::GetWindowRect($foundHwnd, [ref]$rect)
 
 $width = $rect.Right - $rect.Left
 $height = $rect.Bottom - $rect.Top
@@ -355,16 +424,20 @@ $graphics.CopyFromScreen($rect.Left, $rect.Top, 0, 0, $bitmap.Size)
 $bitmap.Save('%s', [System.Drawing.Imaging.ImageFormat]::Png)
 $graphics.Dispose()
 $bitmap.Dispose()
-`, title, outputPath)
+`, safeTitle, safeOutputPath)
 
 	cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", script)
 	return cmd.Run()
 }
 
 func captureWindowLinux(ctx context.Context, outputPath, title string) error {
+	// Escape inputs to prevent command injection
+	safeTitle := escapeShellArg(title)
+	safeOutputPath := escapeShellArg(outputPath)
+
 	// Try to find window by title and capture it
 	script := fmt.Sprintf(`
-WINDOW_ID=$(xdotool search --name "%s" | head -1)
+WINDOW_ID=$(xdotool search --name %s | head -1)
 if [ -z "$WINDOW_ID" ]; then
     echo "Window not found: %s"
     exit 1
@@ -372,19 +445,19 @@ fi
 
 # Try different screenshot tools
 if command -v import &> /dev/null; then
-    import -window "$WINDOW_ID" "%s"
+    import -window "$WINDOW_ID" %s
 elif command -v maim &> /dev/null; then
-    maim -i "$WINDOW_ID" "%s"
+    maim -i "$WINDOW_ID" %s
 elif command -v gnome-screenshot &> /dev/null; then
     # Activate window first, then capture
     xdotool windowactivate "$WINDOW_ID"
     sleep 0.5
-    gnome-screenshot -w -f "%s"
+    gnome-screenshot -w -f %s
 else
     echo "No screenshot tool available"
     exit 1
 fi
-`, title, title, outputPath, outputPath, outputPath)
+`, safeTitle, safeTitle, safeOutputPath, safeOutputPath, safeOutputPath)
 
 	cmd := exec.CommandContext(ctx, "bash", "-c", script)
 	return cmd.Run()

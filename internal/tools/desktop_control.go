@@ -31,6 +31,20 @@ func hasCommand(name string) bool {
 	return err == nil
 }
 
+// escapePowerShellStringDesktop escapes a string for safe use in PowerShell scripts.
+// This prevents command injection by escaping special characters.
+func escapePowerShellStringDesktop(s string) string {
+	// Replace backticks (PowerShell escape char) first
+	s = strings.ReplaceAll(s, "`", "``")
+	// Replace dollar signs (variable expansion)
+	s = strings.ReplaceAll(s, "$", "`$")
+	// Replace double quotes
+	s = strings.ReplaceAll(s, `"`, "`\"")
+	// Replace single quotes (for single-quoted strings)
+	s = strings.ReplaceAll(s, "'", "''")
+	return s
+}
+
 // RegisterDesktopControlTools adds mouse, keyboard, and screen interaction tools.
 func (r *Registry) RegisterDesktopControlTools() {
 	// Mouse click - supports left, right, middle buttons with single/double click
@@ -1298,12 +1312,15 @@ func toolFocusWindow(ctx context.Context, args json.RawMessage) (string, error) 
 	}
 
 	if runtime.GOOS == "windows" {
+		// Escape title to prevent command injection
+		safeTitle := escapePowerShellStringDesktop(params.Title)
+
 		script := fmt.Sprintf(`
 Add-Type @"
 using System;
 using System.Runtime.InteropServices;
 using System.Text;
-public class Win32 {
+public class Win32FocusWindow {
     [DllImport("user32.dll")]
     public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
     [DllImport("user32.dll")]
@@ -1321,12 +1338,12 @@ $found = $false
 
 $callback = {
     param([IntPtr]$hwnd, [IntPtr]$lParam)
-    if ([Win32]::IsWindowVisible($hwnd)) {
+    if ([Win32FocusWindow]::IsWindowVisible($hwnd)) {
         $sb = New-Object System.Text.StringBuilder 256
-        [Win32]::GetWindowText($hwnd, $sb, 256) | Out-Null
-        $title = $sb.ToString()
-        if ($title -like "*$targetTitle*") {
-            [Win32]::SetForegroundWindow($hwnd)
+        [Win32FocusWindow]::GetWindowText($hwnd, $sb, 256) | Out-Null
+        $windowTitle = $sb.ToString()
+        if ($windowTitle -like "*$targetTitle*") {
+            [Win32FocusWindow]::SetForegroundWindow($hwnd)
             $script:found = $true
             return $false
         }
@@ -1334,18 +1351,19 @@ $callback = {
     return $true
 }
 
-[Win32]::EnumWindows($callback, [IntPtr]::Zero)
+[Win32FocusWindow]::EnumWindows($callback, [IntPtr]::Zero)
 
 if (-not $found) {
     throw "Window not found: $targetTitle"
 }
-`, params.Title)
+`, safeTitle)
 
 		cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", script)
 		if err := cmd.Run(); err != nil {
 			return "", fmt.Errorf("focus window failed: %w", err)
 		}
 	} else {
+		// For Linux, xdotool handles arguments safely when passed directly
 		cmd := exec.CommandContext(ctx, "xdotool", "search", "--name", params.Title, "windowactivate")
 		if err := cmd.Run(); err != nil {
 			return "", fmt.Errorf("focus window failed: %w", err)

@@ -57,6 +57,7 @@ sudo ./ironguard
    ```
    /key sk-your-api-key-here
    ```
+   The sidebar will show `READY` once internet and API key are validated (automatic check at startup).
 
 2. Begin autonomous hardening:
    ```
@@ -117,6 +118,7 @@ Configure the maximum number of concurrent sub-agents with `/subagents <max>` (d
 | `/harden [mode]` | Start autonomous hardening (modes: windows, linux, cisco, auto) |
 | `/stop` | Pause the AI |
 | `/key <api-key>` | Set API key for the current provider |
+| `/check` | Check internet connectivity and validate API key |
 | `/score` | Check current score |
 | `/status` | Show current configuration |
 | `/help` | List all commands |
@@ -236,6 +238,7 @@ Sound files are embedded in the binary—no external files needed. If audio init
 **Command-line flags:**
 - `--no-sound` — Disable all sound effects
 - `--no-repeat-sound` — Play a single ding instead of multiple (e.g., 7 vulns = 1 ding instead of 7)
+- `--official-sound` — Use official CyberPatriot sound instead of custom mp3
 
 ### Screen Interaction
 

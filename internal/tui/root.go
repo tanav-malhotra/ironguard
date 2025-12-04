@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -12,6 +13,7 @@ import (
 	"github.com/tanav-malhotra/ironguard/internal/agent"
 	"github.com/tanav-malhotra/ironguard/internal/audio"
 	"github.com/tanav-malhotra/ironguard/internal/config"
+	"github.com/tanav-malhotra/ironguard/internal/llm"
 	"github.com/tanav-malhotra/ironguard/internal/mcp"
 	"github.com/tanav-malhotra/ironguard/internal/tools"
 )
@@ -19,7 +21,7 @@ import (
 // Run starts the top-level TUI program.
 func Run(cfg config.Config) error {
 	// Configure and initialize audio system (non-fatal if it fails)
-	audio.SetOptions(cfg.NoSound, cfg.NoRepeatSound)
+	audio.SetOptions(cfg.NoSound, cfg.NoRepeatSound, cfg.OfficialSound)
 	if err := audio.Init(); err != nil {
 		// Audio init failed - continue without sound
 		// This is fine, sound is optional
@@ -40,6 +42,14 @@ type AgentEventMsg struct {
 type QueuedMessage struct {
 	Content   string
 	Interrupt bool // If true, interrupts current AI task
+}
+
+// ConnectivityCheckMsg is sent when connectivity check completes.
+type ConnectivityCheckMsg struct {
+	InternetOK  bool
+	InternetErr error
+	APIKeyOK    bool
+	APIKeyErr   error
 }
 
 // AutocompleteItem represents an item in the autocomplete dropdown.
@@ -81,6 +91,13 @@ type model struct {
 	width        int
 	height       int
 	sidebarWidth int
+
+	// Connectivity status (checked at startup)
+	internetOK     bool
+	internetErr    error
+	apiKeyValidated bool
+	apiKeyErr      error
+	checkingConn   bool  // true while connectivity check is in progress
 
 	// Styling
 	theme  Theme
@@ -163,6 +180,7 @@ func newModel(cfg config.Config) model {
 		agent:        ag,
 		manualTasks:  NewManualTaskManager(),
 		mcpManager:   mcpMgr,
+		checkingConn: true, // Will be set to false when connectivity check completes
 	}
 }
 
@@ -170,7 +188,35 @@ func (m model) Init() tea.Cmd {
 	// Generate welcome message with banner
 	welcomeMsg := m.generateWelcomeScreen()
 	m.messages = append(m.messages, NewSystemMessage(welcomeMsg))
-	return tea.Batch(textinput.Blink, m.listenToAgent())
+	return tea.Batch(textinput.Blink, m.listenToAgent(), m.checkConnectivity())
+}
+
+// checkConnectivity performs internet and API key validation in the background.
+func (m model) checkConnectivity() tea.Cmd {
+	return func() tea.Msg {
+		result := ConnectivityCheckMsg{}
+		
+		// Check internet first
+		if err := llm.CheckInternet(); err != nil {
+			result.InternetErr = err
+			return result
+		}
+		result.InternetOK = true
+		
+		// Check API key if we have one
+		if m.agent.HasAPIKey() {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			
+			if err := m.agent.ValidateAPIKey(ctx); err != nil {
+				result.APIKeyErr = err
+			} else {
+				result.APIKeyOK = true
+			}
+		}
+		
+		return result
+	}
 }
 
 // generateWelcomeScreen creates the startup banner and instructions
@@ -257,6 +303,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case AgentEventMsg:
 		return m.handleAgentEvent(msg.Event)
+	case ConnectivityCheckMsg:
+		m.checkingConn = false
+		m.internetOK = msg.InternetOK
+		m.internetErr = msg.InternetErr
+		m.apiKeyValidated = msg.APIKeyOK
+		m.apiKeyErr = msg.APIKeyErr
+		return m, nil
 	}
 
 	var cmd tea.Cmd
@@ -919,11 +972,23 @@ func (m model) renderSidebar() string {
 		sb.WriteString(m.styles.Muted.Render("  ── awaiting ──") + "\n\n")
 	}
 
-	// Status - check API key first
+	// Status - check connectivity, API key, and agent state
 	sb.WriteString(m.styles.Label.Render("STATUS") + "\n")
-	if !m.agent.HasAPIKey() {
+	if m.checkingConn {
+		sb.WriteString(m.styles.Warning.Render("  ◌ CHECKING...") + "\n")
+	} else if m.internetErr != nil {
+		sb.WriteString(m.styles.Error.Render("  ✗ NO INTERNET") + "\n")
+		sb.WriteString(m.styles.Muted.Render("    Check connection") + "\n")
+	} else if !m.agent.HasAPIKey() {
 		sb.WriteString(m.styles.Error.Render("  ◌ NO API KEY") + "\n")
 		sb.WriteString(m.styles.Muted.Render("    /key <key>") + "\n")
+	} else if m.apiKeyErr != nil {
+		sb.WriteString(m.styles.Error.Render("  ✗ INVALID KEY") + "\n")
+		errMsg := m.apiKeyErr.Error()
+		if len(errMsg) > lineWidth-4 {
+			errMsg = errMsg[:lineWidth-7] + "..."
+		}
+		sb.WriteString(m.styles.Muted.Render("    "+errMsg) + "\n")
 	} else if m.agentBusy {
 		sb.WriteString(m.styles.Warning.Render("  ◉ PROCESSING") + "\n")
 		if m.agentStatus != "" {
@@ -933,8 +998,14 @@ func (m model) renderSidebar() string {
 			}
 			sb.WriteString(m.styles.Muted.Render("  "+status) + "\n")
 		}
-	} else {
+	} else if m.internetOK && m.apiKeyValidated {
 		sb.WriteString(m.styles.Success.Render("  ● READY") + "\n")
+	} else if m.internetOK && m.agent.HasAPIKey() && !m.apiKeyValidated {
+		// Has API key but hasn't been validated yet (still checking or check not started)
+		sb.WriteString(m.styles.Warning.Render("  ◌ VALIDATING...") + "\n")
+	} else {
+		// Fallback - has API key, internet not checked yet
+		sb.WriteString(m.styles.Warning.Render("  ◌ INITIALIZING") + "\n")
 	}
 	sb.WriteString("\n")
 

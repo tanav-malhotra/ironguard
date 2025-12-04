@@ -18,6 +18,7 @@ func main() {
 	noAdmin := flag.Bool("no-admin", false, "skip admin/root privilege check (not recommended)")
 	noSound := flag.Bool("no-sound", false, "disable all sound effects")
 	noRepeatSound := flag.Bool("no-repeat-sound", false, "play single ding instead of multiple for points gained")
+	officialSound := flag.Bool("official-sound", false, "use official CyberPatriot sound instead of custom mp3")
 	flag.Usage = func() {
 		fmt.Fprintf(flag.CommandLine.Output(), "ironguard – CyberPatriot AI helper\n\n")
 		fmt.Fprintf(flag.CommandLine.Output(), "Usage:\n  ironguard [flags]\n\nFlags:\n")
@@ -62,6 +63,7 @@ func main() {
 	cfg := config.DefaultConfig()
 	cfg.NoSound = *noSound
 	cfg.NoRepeatSound = *noRepeatSound
+	cfg.OfficialSound = *officialSound
 	if err := tui.Run(cfg); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)

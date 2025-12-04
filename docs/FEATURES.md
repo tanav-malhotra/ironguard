@@ -269,6 +269,7 @@ Satisfying audio feedback for scoring:
 **Command-line flags:**
 - `--no-sound` — Disable all sound effects completely
 - `--no-repeat-sound` — Play single ding instead of multiple (less noisy)
+- `--official-sound` — Use official CyberPatriot gain.wav instead of custom mp3
 
 **Technical details:**
 - MP3 files are embedded in the binary using Go's `//go:embed`
@@ -277,6 +278,40 @@ Satisfying audio feedback for scoring:
 - Gracefully handles missing audio devices (silent operation)
 - Sound playback is non-blocking (doesn't interrupt AI work)
 - Volume boosted 2.5x for audibility
+
+### 13. Connectivity Check 🌐
+Verify internet and API key before starting:
+
+**Automatic Check at Startup:**
+The sidebar STATUS reflects real connectivity:
+- `CHECKING...` - Connectivity check in progress
+- `NO INTERNET` - Cannot reach internet
+- `NO API KEY` - No API key configured
+- `INVALID KEY` - API key validation failed
+- `PROCESSING` - AI is working
+- `READY` - Internet connected AND API key validated ✅
+
+**Manual Check with `/check`:**
+```
+🔍 Connectivity Check
+─────────────────────
+
+Internet: ✅ Connected
+Provider: claude
+API Key:  ✅ Valid
+
+🚀 Ready to go!
+```
+
+**What's checked:**
+1. **Internet connectivity** - Pings Google, Anthropic, and OpenAI endpoints
+2. **API key validity** - Makes a minimal API call to verify the key works
+
+**Error handling:**
+- No internet: Shows error and skips API check
+- No API key: Prompts to use `/key <api-key>`
+- Invalid API key: Shows specific error (invalid, rate-limited, permission denied)
+- 10-second timeout for validation calls
 
 ---
 
@@ -330,6 +365,7 @@ Satisfying audio feedback for scoring:
 | `/auto [target]` | Same as `/harden auto`, optionally set target score |
 | `/stop` | Stop the AI |
 | `/key <api-key>` | Set API key for current provider |
+| `/check` | Check internet connectivity and validate API key |
 | `/score` | Check current score |
 | `/help` | Show all commands |
 | `/quit` | Exit ironguard |

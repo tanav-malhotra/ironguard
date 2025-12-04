@@ -109,8 +109,9 @@ type Config struct {
 	SummarizeMode SummarizeMode
 
 	// Sound settings
-	NoSound       bool // Disable all sound effects
-	NoRepeatSound bool // Play single ding instead of multiple for points gained
+	NoSound         bool // Disable all sound effects
+	NoRepeatSound   bool // Play single ding instead of multiple for points gained
+	OfficialSound   bool // Use official CyberPatriot gain.wav instead of custom mp3
 
 	// Environment detection (basic)
 	OS           string

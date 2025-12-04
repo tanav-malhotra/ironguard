@@ -104,6 +104,10 @@ type Client interface {
 
 	// HasAPIKey returns true if an API key is configured.
 	HasAPIKey() bool
+
+	// ValidateAPIKey tests if the API key is valid by making a minimal API call.
+	// Returns nil if valid, error with details if invalid.
+	ValidateAPIKey(ctx context.Context) error
 }
 
 // ModelPresets contains recommended models per provider.

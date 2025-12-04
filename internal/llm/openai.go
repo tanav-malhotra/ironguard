@@ -371,3 +371,34 @@ func (c *OpenAIClient) parseResponse(resp *openaiResponse) *ChatResponse {
 	return chatResp
 }
 
+// ValidateAPIKey tests if the API key is valid by making a minimal API call.
+func (c *OpenAIClient) ValidateAPIKey(ctx context.Context) error {
+	if c.apiKey == "" {
+		return fmt.Errorf("no API key configured")
+	}
+
+	// Make a minimal request with max_tokens=1 to validate the key
+	req := ChatRequest{
+		Messages:  []Message{{Role: "user", Content: "Hi"}},
+		MaxTokens: 1,
+	}
+
+	_, err := c.Chat(ctx, req)
+	if err != nil {
+		// Parse error to give better feedback
+		errStr := err.Error()
+		if strings.Contains(errStr, "401") || strings.Contains(errStr, "invalid") || strings.Contains(errStr, "Incorrect API key") {
+			return fmt.Errorf("invalid API key")
+		}
+		if strings.Contains(errStr, "403") || strings.Contains(errStr, "permission") {
+			return fmt.Errorf("API key lacks required permissions")
+		}
+		if strings.Contains(errStr, "429") || strings.Contains(errStr, "rate") {
+			return fmt.Errorf("rate limited - but API key is valid")
+		}
+		return fmt.Errorf("API error: %v", err)
+	}
+
+	return nil
+}
+

@@ -11,6 +11,7 @@ import (
 	"github.com/gopxl/beep/v2/effects"
 	"github.com/gopxl/beep/v2/mp3"
 	"github.com/gopxl/beep/v2/speaker"
+	"github.com/gopxl/beep/v2/wav"
 )
 
 //go:embed assets/max_points_achieved.mp3
@@ -18,6 +19,9 @@ var maxPointsAchievedMP3 []byte
 
 //go:embed assets/points_gained.mp3
 var pointsGainedMP3 []byte
+
+//go:embed assets/gain.wav
+var officialGainWAV []byte
 
 var (
 	initialized   bool
@@ -32,16 +36,18 @@ var (
 	volumeGain = 2.5
 	
 	// Sound settings (set via SetOptions before Init)
-	soundDisabled    bool
-	noRepeatSound    bool
+	soundDisabled      bool
+	noRepeatSound      bool
+	useOfficialSound   bool // Use official CyberPatriot gain.wav instead of custom mp3
 )
 
 // SetOptions configures audio settings. Call before Init().
-func SetOptions(noSound, noRepeat bool) {
+func SetOptions(noSound, noRepeat, official bool) {
 	initMu.Lock()
 	defer initMu.Unlock()
 	soundDisabled = noSound
 	noRepeatSound = noRepeat
+	useOfficialSound = official
 }
 
 // Init initializes the audio system. Call this once at startup.
@@ -59,9 +65,18 @@ func Init() error {
 		return nil
 	}
 	
-	// Decode points_gained sound to get sample rate
-	reader := io.NopCloser(bytes.NewReader(pointsGainedMP3))
-	streamer, format, err := mp3.Decode(reader)
+	// Decode points_gained sound - use official WAV or custom MP3
+	var streamer beep.StreamSeekCloser
+	var format beep.Format
+	var err error
+	
+	if useOfficialSound {
+		reader := io.NopCloser(bytes.NewReader(officialGainWAV))
+		streamer, format, err = wav.Decode(reader)
+	} else {
+		reader := io.NopCloser(bytes.NewReader(pointsGainedMP3))
+		streamer, format, err = mp3.Decode(reader)
+	}
 	if err != nil {
 		return err
 	}

@@ -1,12 +1,14 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/tanav-malhotra/ironguard/internal/agent"
 	"github.com/tanav-malhotra/ironguard/internal/config"
+	"github.com/tanav-malhotra/ironguard/internal/llm"
 	"github.com/tanav-malhotra/ironguard/internal/tools"
 )
 
@@ -296,6 +298,12 @@ func (r *CommandRegistry) registerDefaults() {
 			Name:        "forget",
 			Description: "Clear persistent memory",
 			Handler:     cmdForget,
+		},
+		// Connectivity check
+		{
+			Name:        "check",
+			Description: "Check internet and API key connectivity",
+			Handler:     cmdCheck,
 		},
 	}
 }
@@ -663,7 +671,12 @@ func cmdKey(m *model, args string) string {
 	}
 	m.apiKeys[string(m.cfg.Provider)] = args
 	m.agent.SetAPIKey(string(m.cfg.Provider), args)
-	return "API key set for " + string(m.cfg.Provider)
+	
+	// Reset validation state so user can use /check to validate the new key
+	m.apiKeyValidated = false
+	m.apiKeyErr = nil
+	
+	return "API key set for " + string(m.cfg.Provider) + "\nUse /check to validate connectivity."
 }
 
 func cmdQuit(m *model, _ string) string {
@@ -1364,6 +1377,60 @@ func cmdForget(m *model, args string) string {
 	}
 	
 	return fmt.Sprintf("🧹 Cleared %d memories from persistent storage.", count)
+}
+
+// Check command - check connectivity and API key
+func cmdCheck(m *model, _ string) string {
+	var result strings.Builder
+	result.WriteString("🔍 Connectivity Check\n")
+	result.WriteString("─────────────────────\n\n")
+	
+	// Check internet
+	result.WriteString("Internet: ")
+	if err := llm.CheckInternet(); err != nil {
+		m.internetOK = false
+		m.internetErr = err
+		result.WriteString("❌ " + err.Error() + "\n")
+		result.WriteString("\n⚠️ Cannot check API key without internet connection.")
+		return result.String()
+	}
+	m.internetOK = true
+	m.internetErr = nil
+	result.WriteString("✅ Connected\n")
+	
+	// Check API key
+	result.WriteString(fmt.Sprintf("Provider: %s\n", m.cfg.Provider))
+	result.WriteString("API Key:  ")
+	
+	if !m.agent.HasAPIKey() {
+		result.WriteString("❌ Not configured\n")
+		result.WriteString("\n💡 Set your API key with: /key <your-api-key>")
+		return result.String()
+	}
+	
+	// Validate API key with a test call
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	
+	result.WriteString("🔄 Validating...")
+	
+	if err := m.agent.ValidateAPIKey(ctx); err != nil {
+		m.apiKeyValidated = false
+		m.apiKeyErr = err
+		result.WriteString("\r") // Clear the "Validating..." line
+		result.WriteString("API Key:  ❌ " + err.Error() + "\n")
+		return result.String()
+	}
+	
+	// Update model state - API key validated successfully
+	m.apiKeyValidated = true
+	m.apiKeyErr = nil
+	
+	result.WriteString("\r") // Clear the "Validating..." line  
+	result.WriteString("API Key:  ✅ Valid\n")
+	result.WriteString("\n🚀 Ready to go!")
+	
+	return result.String()
 }
 
 // Helper for time formatting

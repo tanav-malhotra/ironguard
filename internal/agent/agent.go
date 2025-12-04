@@ -325,6 +325,11 @@ func (a *Agent) HasAPIKey() bool {
 	return a.llmRegistry.HasAPIKey()
 }
 
+// ValidateAPIKey tests if the API key is valid by making a minimal API call.
+func (a *Agent) ValidateAPIKey(ctx context.Context) error {
+	return a.llmRegistry.ValidateAPIKey(ctx)
+}
+
 // SetProvider sets the current provider.
 func (a *Agent) SetProvider(provider string) error {
 	return a.llmRegistry.SetCurrent(llm.Provider(provider))

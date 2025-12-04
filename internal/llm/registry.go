@@ -1,6 +1,11 @@
 package llm
 
-import "fmt"
+import (
+	"context"
+	"fmt"
+	"net/http"
+	"time"
+)
 
 // Registry manages LLM client instances.
 type Registry struct {
@@ -69,5 +74,73 @@ func (r *Registry) Providers() []Provider {
 // HasAPIKey returns true if the current provider has an API key configured.
 func (r *Registry) HasAPIKey() bool {
 	return r.clients[r.current].HasAPIKey()
+}
+
+// ValidateAPIKey validates the API key for the current provider.
+func (r *Registry) ValidateAPIKey(ctx context.Context) error {
+	return r.clients[r.current].ValidateAPIKey(ctx)
+}
+
+// CheckInternet tests basic internet connectivity.
+// Returns nil if connected, error otherwise.
+func CheckInternet() error {
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+	}
+
+	// Try multiple reliable endpoints
+	endpoints := []string{
+		"https://www.google.com",
+		"https://api.anthropic.com",
+		"https://api.openai.com",
+	}
+
+	var lastErr error
+	for _, url := range endpoints {
+		resp, err := client.Head(url)
+		if err == nil {
+			resp.Body.Close()
+			return nil
+		}
+		lastErr = err
+	}
+
+	return fmt.Errorf("no internet connection: %v", lastErr)
+}
+
+// ConnectionStatus represents the result of connectivity checks.
+type ConnectionStatus struct {
+	Internet    bool
+	InternetErr error
+	APIKey      bool
+	APIKeyErr   error
+	Provider    Provider
+}
+
+// CheckConnection performs all connectivity checks.
+func (r *Registry) CheckConnection(ctx context.Context) ConnectionStatus {
+	status := ConnectionStatus{
+		Provider: r.current,
+	}
+
+	// Check internet
+	if err := CheckInternet(); err != nil {
+		status.InternetErr = err
+	} else {
+		status.Internet = true
+	}
+
+	// Only check API key if we have internet and a key is configured
+	if status.Internet && r.HasAPIKey() {
+		if err := r.ValidateAPIKey(ctx); err != nil {
+			status.APIKeyErr = err
+		} else {
+			status.APIKey = true
+		}
+	} else if !r.HasAPIKey() {
+		status.APIKeyErr = fmt.Errorf("no API key configured")
+	}
+
+	return status
 }
 

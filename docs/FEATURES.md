@@ -185,7 +185,7 @@ Toggle with `/summarize smart` or `/summarize fast`.
 - Tracks tokens saved by summarization
 
 ### 6.1. File Condensation 📄
-Automatic handling of large files (>50KB):
+Automatic handling of large files (>100KB):
 
 - Large files are automatically condensed to show structure only
 - Shows key elements based on file type:
@@ -194,8 +194,18 @@ Automatic handling of large files (>50KB):
   - **JavaScript/TypeScript**: imports, exports, classes, functions
   - **Shell scripts**: shebang, function definitions, section comments
   - **Other**: First 20 lines + last 10 lines
-- Use `read_file` with `start_line`/`end_line` to read specific sections
 - Helps AI understand large files without consuming entire context
+
+**Reading Specific Sections:**
+Use `read_file` with `start_line`/`end_line` to read specific sections of ANY file:
+```
+read_file(path="/var/log/auth.log", start_line=100, end_line=150)
+read_file(path="/etc/ssh/sshd_config", start_line=1, end_line=30)
+```
+This works on all files, not just condensed ones—useful for:
+- Focusing on relevant parts of log files
+- Reading specific config sections
+- Inspecting particular functions in code
 
 ### 6.2. Document & Binary File Parsing 📄
 Native support for common forensics file formats (no external dependencies!):

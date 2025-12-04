@@ -226,9 +226,11 @@ SYSTEM HARDENING:
 
 FILE OPERATIONS:
 - read_file - Read contents of any text file
-  * Large files (>50KB) are automatically condensed to show structure only
-  * Use start_line/end_line parameters to read specific sections of large files
-  * Example: read_file(path="/etc/passwd", start_line=1, end_line=50)
+  * Large files (>100KB) are automatically condensed to show structure only
+  * Use start_line/end_line to read ANY specific section of ANY file:
+    - read_file(path="/var/log/syslog", start_line=100, end_line=150)
+    - read_file(path="/etc/passwd", start_line=1, end_line=20)
+  * This works on ALL files, not just condensed ones - use it to focus on relevant parts!
 - write_file - Write to a file
 - list_dir - List directory contents
 - search_files - Search for files by pattern

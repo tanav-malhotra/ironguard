@@ -201,13 +201,17 @@ Change with `/summarize smart` or `/summarize fast`.
 
 ### File Condensation
 
-Large files (>50KB) are automatically condensed to show only structural elements:
+Large files (>100KB) are automatically condensed to show only structural elements:
 - **Go**: Package, imports, type definitions, function signatures
 - **Python**: Imports, class definitions, function definitions
 - **JavaScript/TypeScript**: Imports, exports, classes, functions
 - **Shell scripts**: Shebang, function definitions, section comments
 
-Use `read_file` with `start_line`/`end_line` parameters to read specific sections of condensed files.
+Use `read_file` with `start_line`/`end_line` parameters to read specific sections of **any** file:
+```
+read_file(path="/var/log/auth.log", start_line=500, end_line=550)
+```
+This works on all files, not just condensed ones—useful for focusing on relevant parts of logs, configs, or code.
 
 ### Document & Binary File Support
 

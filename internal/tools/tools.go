@@ -170,7 +170,7 @@ func (r *Registry) registerDefaults() {
 	// Read file tool
 	r.Register(&Tool{
 		Name:        "read_file",
-		Description: "Read the contents of a file. Large files (>50KB) are automatically condensed to show structure only. Use start_line/end_line to read specific sections.",
+		Description: "Read the contents of a file. Large files (>100KB) are automatically condensed to show structure only. Use start_line/end_line to read specific sections of any file.",
 		Parameters: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -363,8 +363,9 @@ func (r *Registry) registerDefaults() {
 
 // Tool implementations
 
-// Maximum file size before condensation (in bytes) - ~50KB
-const maxFileSize = 50 * 1024
+// Maximum file size before condensation (in bytes) - 100KB
+// This is ~25-30K tokens, about 15% of a 200K context window
+const maxFileSize = 100 * 1024
 
 // isBinaryContent checks if content appears to be binary (not text).
 // Returns true if the content contains null bytes or has a high ratio of non-printable characters.

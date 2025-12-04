@@ -693,15 +693,20 @@ func toolResetShell(ctx context.Context, args json.RawMessage) (string, error) {
 func toolReadReadme(ctx context.Context, args json.RawMessage) (string, error) {
 	desktop := getDesktopPath()
 
-	// CyberPatriot README is always an HTML file on Desktop
+	// CyberPatriot README - check exact names first, then fallback to globs
+	// Official naming includes "CyberPatriot README.html" but we also check without
+	// extension for edge cases (practice images, custom setups)
 	patterns := []string{
-		filepath.Join(desktop, "README.html"),
-		filepath.Join(desktop, "README.htm"),
-		filepath.Join(desktop, "Readme.html"),
-		filepath.Join(desktop, "readme.html"),
+		// Exact official name with extension (actual filename on disk)
+		filepath.Join(desktop, "CyberPatriot README.html"),
+		filepath.Join(desktop, "CyberPatriot README.htm"),
+		// Without extension (edge case: practice images, text files)
+		filepath.Join(desktop, "CyberPatriot README"),
+		filepath.Join(desktop, "README"),
+		// Glob fallbacks for variations and third-party practice images
 		filepath.Join(desktop, "*README*.html"),
-		filepath.Join(desktop, "*[Rr]eadme*.html"),
-		filepath.Join(desktop, "*[Rr]eadme*.htm"),
+		filepath.Join(desktop, "*README*.htm"),
+		filepath.Join(desktop, "*[Rr]eadme*"),
 	}
 
 	for _, pattern := range patterns {

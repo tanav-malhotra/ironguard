@@ -170,18 +170,27 @@ func findScoreReport() (string, error) {
 
 	if runtime.GOOS == "windows" {
 		// Common Windows locations for CyberPatriot scoring report
+		// Check exact official names first, then fallback to globs for practice images
+		desktopPath := filepath.Join(os.Getenv("USERPROFILE"), "Desktop")
 		searchPaths = []string{
+			// Exact official name with extension
+			filepath.Join(desktopPath, "CyberPatriot Scoring Report.html"),
+			filepath.Join(desktopPath, "CyberPatriot Scoring Report.htm"),
+			// Without extension (edge case)
+			filepath.Join(desktopPath, "CyberPatriot Scoring Report"),
+			// Standard CyberPatriot install locations
 			`C:\CyberPatriot\Scoring Report.html`,
 			`C:\CyberPatriot\ScoringReport.html`,
-			filepath.Join(os.Getenv("USERPROFILE"), "Desktop", "Scoring Report.html"),
-			filepath.Join(os.Getenv("USERPROFILE"), "Desktop", "ScoringReport.html"),
+			// Generic names
+			filepath.Join(desktopPath, "Scoring Report.html"),
+			filepath.Join(desktopPath, "ScoringReport.html"),
+			// Public desktop
+			filepath.Join(os.Getenv("PUBLIC"), "Desktop", "CyberPatriot Scoring Report.html"),
 			filepath.Join(os.Getenv("PUBLIC"), "Desktop", "Scoring Report.html"),
-			`C:\Users\Public\Desktop\Scoring Report.html`,
 		}
 
-		// Also search for any HTML file with "score" in the name on Desktop
-		desktopPath := filepath.Join(os.Getenv("USERPROFILE"), "Desktop")
-		matches, _ := filepath.Glob(filepath.Join(desktopPath, "*[Ss]cor*.html"))
+		// Glob fallback for variations and third-party practice images
+		matches, _ := filepath.Glob(filepath.Join(desktopPath, "*[Ss]cor*[Rr]eport*"))
 		searchPaths = append(searchPaths, matches...)
 
 		// Check Program Files
@@ -196,18 +205,26 @@ func findScoreReport() (string, error) {
 		}
 	} else {
 		// Linux locations
+		// Check exact official names first, then fallback to globs for practice images
 		home := os.Getenv("HOME")
+		desktopPath := filepath.Join(home, "Desktop")
 		searchPaths = []string{
+			// Exact official name with extension
+			filepath.Join(desktopPath, "CyberPatriot Scoring Report.html"),
+			filepath.Join(desktopPath, "CyberPatriot Scoring Report.htm"),
+			// Without extension (edge case)
+			filepath.Join(desktopPath, "CyberPatriot Scoring Report"),
+			// Standard CyberPatriot install locations
 			"/opt/CyberPatriot/Scoring Report.html",
 			"/opt/CyberPatriot/ScoringReport.html",
-			filepath.Join(home, "Desktop", "Scoring Report.html"),
-			filepath.Join(home, "Desktop", "ScoringReport.html"),
+			// Generic names
+			filepath.Join(desktopPath, "Scoring Report.html"),
+			filepath.Join(desktopPath, "ScoringReport.html"),
 			"/home/CyberPatriot/Scoring Report.html",
 		}
 
-		// Search Desktop for any scoring file
-		desktopPath := filepath.Join(home, "Desktop")
-		matches, _ := filepath.Glob(filepath.Join(desktopPath, "*[Ss]cor*.html"))
+		// Glob fallback for variations and third-party practice images
+		matches, _ := filepath.Glob(filepath.Join(desktopPath, "*[Ss]cor*[Rr]eport*"))
 		searchPaths = append(searchPaths, matches...)
 	}
 

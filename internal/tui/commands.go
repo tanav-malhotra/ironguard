@@ -103,14 +103,22 @@ func (r *CommandRegistry) registerDefaults() {
 		{
 			Name:        "harden",
 			Description: "Start the hardening assistant",
-			Args:        "[windows|windows-server|linux|cisco|auto]",
+			Args:        "<windows|windows-server|linux|cisco|auto>",
+			ArgOptions:  []string{"windows", "windows-server", "linux", "cisco", "auto"},
+			Handler:     cmdHarden,
+		},
+		{
+			Name:        "start",
+			Description: "Start the hardening assistant (alias for /harden)",
+			Args:        "<windows|windows-server|linux|cisco|auto>",
 			ArgOptions:  []string{"windows", "windows-server", "linux", "cisco", "auto"},
 			Handler:     cmdHarden,
 		},
 		{
 			Name:        "key",
-			Description: "Set API key for current provider",
-			Args:        "<api-key>",
+			Description: "Set API key for a provider",
+			Args:        "<claude|openai|gemini> <api-key>",
+			ArgOptions:  []string{"claude", "openai", "gemini"},
 			Handler:     cmdKey,
 		},
 		{
@@ -199,14 +207,6 @@ func (r *CommandRegistry) registerDefaults() {
 			Args:        "<keys> (e.g., ctrl+c, alt+tab)",
 			Handler:     cmdHotkey,
 		},
-		// Competition mode commands
-		{
-			Name:        "mode",
-			Description: "Set competition mode",
-			Args:        "<harden|cisco>",
-			ArgOptions:  []string{"harden", "cisco"},
-			Handler:     cmdCompMode,
-		},
 		{
 			Name:        "windows",
 			Description: "List all open windows",
@@ -283,7 +283,7 @@ func (r *CommandRegistry) registerDefaults() {
 		{
 			Name:        "checkpoints",
 			Description: "Manage checkpoints (create, list, restore, edit, delete, branch, branches, clear)",
-			Args:        "[subcommand] [args]",
+			Args:        "<create|list|restore|edit|delete|branch|branches|clear>",
 			ArgOptions:  []string{"create", "list", "restore", "edit", "delete", "branch", "branches", "clear"},
 			Handler:     cmdCheckpoints,
 		},
@@ -705,17 +705,35 @@ Ctrl+C also pauses the AI (doesn't quit the app).`, strings.ToUpper(mode), osDes
 }
 
 func cmdKey(m *model, args string) string {
-	if args == "" {
-		return "Usage: /key <api-key>\nThis sets the API key for the current provider (" + string(m.cfg.Provider) + ")"
+	fields := strings.Fields(args)
+	if len(fields) < 2 {
+		return "Usage: /key <provider> <api-key>\nProviders: claude, openai, gemini"
 	}
-	m.apiKeys[string(m.cfg.Provider)] = args
-	m.agent.SetAPIKey(string(m.cfg.Provider), args)
-	
-	// Reset validation state so user can use /check to validate the new key
-	m.apiKeyValidated = false
-	m.apiKeyErr = nil
-	
-	return "API key set for " + string(m.cfg.Provider) + "\nUse /check to validate connectivity."
+
+	targetProvider := fields[0]
+	switch targetProvider {
+	case "claude", "openai", "gemini":
+	default:
+		return "Unknown provider. Use: claude, openai, gemini"
+	}
+
+	key := strings.Join(fields[1:], " ")
+	if key == "" {
+		return "Missing API key. Usage: /key <provider> <api-key>"
+	}
+
+	// Save and apply the key
+	m.apiKeys[targetProvider] = key
+	m.agent.SetAPIKey(targetProvider, key)
+
+	// If we updated the active provider, reset validation state
+	if targetProvider == string(m.cfg.Provider) {
+		m.apiKeyValidated = false
+		m.apiKeyErr = nil
+		m.checkingConn = true
+	}
+
+	return "API key set for " + targetProvider + "\nUse /check to validate connectivity."
 }
 
 func cmdQuit(m *model, _ string) string {
@@ -886,44 +904,6 @@ func cmdHotkey(m *model, args string) string {
 		Args:        args,
 	}
 	return "⌨️ Pressing hotkey..."
-}
-
-func cmdCompMode(m *model, args string) string {
-	switch args {
-	case "harden":
-		m.cfg.CompMode = config.CompModeHarden
-		return "🛡️ Competition mode: HARDENING\nOptimized for CyberPatriot image hardening (Windows/Linux)."
-	case "cisco", "packet-tracer", "pt", "quiz", "network-quiz":
-		m.cfg.CompMode = config.CompModeCisco
-		screenInfo := "OBSERVE (AI watches and guides)"
-		if m.cfg.ScreenMode == config.ScreenModeControl {
-			screenInfo = "CONTROL (AI can interact with screen)"
-		}
-		return fmt.Sprintf(`🌐 Competition mode: CISCO
-AI will help with Cisco Packet Tracer and NetAcad quiz challenges.
-
-Screen mode: %s
-
-In this mode, the AI can:
-  • Take screenshots to see the topology/questions
-  • Scroll to view more content
-  • Click, type, and drag (if screen control enabled)
-  • Guide you step-by-step (if observe mode)
-
-Use /screen control to enable full autonomous interaction.`, screenInfo)
-	case "":
-		modes := map[config.CompetitionMode]string{
-			config.CompModeHarden: "HARDENING",
-			config.CompModeCisco:  "CISCO",
-		}
-		screenMode := "OBSERVE"
-		if m.cfg.ScreenMode == config.ScreenModeControl {
-			screenMode = "CONTROL"
-		}
-		return fmt.Sprintf("Current competition mode: %s\nScreen mode: %s\nUsage: /mode <harden|cisco>", modes[m.cfg.CompMode], screenMode)
-	default:
-		return "Unknown mode. Use: /mode <harden|cisco>"
-	}
 }
 
 func cmdListWindows(m *model, _ string) string {

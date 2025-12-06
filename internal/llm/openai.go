@@ -302,7 +302,13 @@ func (c *OpenAIClient) buildRequest(req ChatRequest, stream bool) openaiRequest 
 		MaxTokens:       req.MaxTokens,
 		Temperature:     req.Temperature,
 		Stream:          stream,
-		ReasoningEffort: "high", // Maximum reasoning for accurate responses
+		// Use extra-high reasoning for codex-max, high otherwise
+		ReasoningEffort: func() string {
+			if strings.Contains(req.Model, "codex-max") {
+				return "extra_high"
+			}
+			return "high"
+		}(),
 	}
 
 	if openaiReq.MaxTokens == 0 {

@@ -160,10 +160,10 @@ func (pv *PopupViewer) Render() string {
 	switch pv.activeTab {
 	case PopupTabTodos:
 		content = pv.renderTodosContent(viewerWidth-6, viewerHeight-10)
-		footer = "↑↓ Navigate  ←→ Switch Tab  Esc Close"
+		footer = "↑↓ Navigate  ←→ Switch Tab  Esc - Close"
 	case PopupTabCheckpoints:
 		content = pv.renderCheckpointsContent(viewerWidth-6, viewerHeight-10)
-		footer = "↑↓ Navigate  ←→ Switch Tab  Enter Restore  D Delete  Esc Close"
+		footer = "↑↓ Navigate  ←→ Switch Tab  Enter - Restore  D - Delete  Esc - Close"
 	}
 
 	// Footer with controls

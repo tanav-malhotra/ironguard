@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -65,10 +66,22 @@ type openaiRequest struct {
 
 type openaiMsg struct {
 	Role       string           `json:"role"`
-	Content    string           `json:"content,omitempty"`
+	Content    interface{}      `json:"content,omitempty"` // string or []openaiContentPart for multi-modal
 	ToolCalls  []openaiToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string           `json:"tool_call_id,omitempty"`
 	Name       string           `json:"name,omitempty"`
+}
+
+// openaiContentPart represents a part of multi-modal content
+type openaiContentPart struct {
+	Type     string            `json:"type"` // "text" or "image_url"
+	Text     string            `json:"text,omitempty"`
+	ImageURL *openaiImageURL   `json:"image_url,omitempty"`
+}
+
+type openaiImageURL struct {
+	URL    string `json:"url"` // data:image/jpeg;base64,{base64_data} or http URL
+	Detail string `json:"detail,omitempty"` // "low", "high", or "auto"
 }
 
 type openaiToolCall struct {
@@ -218,9 +231,9 @@ func (c *OpenAIClient) ChatStream(ctx context.Context, req ChatRequest, callback
 
 		delta := streamResp.Choices[0].Delta
 
-		// Handle content
-		if delta.Content != "" {
-			callback(StreamDelta{Content: delta.Content})
+		// Handle content (may be string or nil for tool-only responses)
+		if contentStr, ok := delta.Content.(string); ok && contentStr != "" {
+			callback(StreamDelta{Content: contentStr})
 		}
 
 		// Handle tool calls
@@ -306,15 +319,15 @@ func (c *OpenAIClient) buildRequest(req ChatRequest, stream bool) openaiRequest 
 
 	// Convert messages
 	for _, msg := range req.Messages {
-		openaiMsg := openaiMsg{Role: msg.Role}
+		oaiMsg := openaiMsg{Role: msg.Role}
 
 		if msg.Role == "tool" {
-			openaiMsg.ToolCallID = msg.ToolCallID
-			openaiMsg.Content = msg.Content
-			openaiMsg.Name = msg.Name
+			oaiMsg.ToolCallID = msg.ToolCallID
+			oaiMsg.Content = msg.Content
+			oaiMsg.Name = msg.Name
 		} else if len(msg.ToolCalls) > 0 {
 			for _, tc := range msg.ToolCalls {
-				openaiMsg.ToolCalls = append(openaiMsg.ToolCalls, openaiToolCall{
+				oaiMsg.ToolCalls = append(oaiMsg.ToolCalls, openaiToolCall{
 					ID:   tc.ID,
 					Type: "function",
 					Function: openaiToolFunction{
@@ -323,11 +336,31 @@ func (c *OpenAIClient) buildRequest(req ChatRequest, stream bool) openaiRequest 
 					},
 				})
 			}
+		} else if len(msg.Images) > 0 {
+			// Multi-modal message with images
+			var parts []openaiContentPart
+			for _, img := range msg.Images {
+				dataURL := fmt.Sprintf("data:%s;base64,%s", img.MediaType, base64.StdEncoding.EncodeToString(img.Data))
+				parts = append(parts, openaiContentPart{
+					Type: "image_url",
+					ImageURL: &openaiImageURL{
+						URL:    dataURL,
+						Detail: "high",
+					},
+				})
+			}
+			if msg.Content != "" {
+				parts = append(parts, openaiContentPart{
+					Type: "text",
+					Text: msg.Content,
+				})
+			}
+			oaiMsg.Content = parts
 		} else {
-			openaiMsg.Content = msg.Content
+			oaiMsg.Content = msg.Content
 		}
 
-		openaiReq.Messages = append(openaiReq.Messages, openaiMsg)
+		openaiReq.Messages = append(openaiReq.Messages, oaiMsg)
 	}
 
 	// Convert tools
@@ -356,7 +389,10 @@ func (c *OpenAIClient) parseResponse(resp *openaiResponse) *ChatResponse {
 
 	if len(resp.Choices) > 0 {
 		choice := resp.Choices[0]
-		chatResp.Content = choice.Message.Content
+		// Content may be string or array (for multi-modal responses)
+		if contentStr, ok := choice.Message.Content.(string); ok {
+			chatResp.Content = contentStr
+		}
 		chatResp.FinishReason = choice.FinishReason
 
 		for _, tc := range choice.Message.ToolCalls {

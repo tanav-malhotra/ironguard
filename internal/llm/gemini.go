@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -65,6 +66,12 @@ type geminiPart struct {
 	Text             string                 `json:"text,omitempty"`
 	FunctionCall     *geminiFunctionCall    `json:"functionCall,omitempty"`
 	FunctionResponse *geminiFunctionResp    `json:"functionResponse,omitempty"`
+	InlineData       *geminiInlineData      `json:"inlineData,omitempty"`
+}
+
+type geminiInlineData struct {
+	MimeType string `json:"mimeType"`
+	Data     string `json:"data"` // base64-encoded
 }
 
 type geminiFunctionCall struct {
@@ -310,7 +317,19 @@ func (c *GeminiClient) buildRequest(req ChatRequest) geminiRequest {
 				})
 			}
 		} else {
-			content.Parts = []geminiPart{{Text: msg.Content}}
+			// Handle images first (multi-modal)
+			for _, img := range msg.Images {
+				content.Parts = append(content.Parts, geminiPart{
+					InlineData: &geminiInlineData{
+						MimeType: img.MediaType,
+						Data:     base64.StdEncoding.EncodeToString(img.Data),
+					},
+				})
+			}
+			// Then add text content
+			if msg.Content != "" {
+				content.Parts = append(content.Parts, geminiPart{Text: msg.Content})
+			}
 		}
 
 		geminiReq.Contents = append(geminiReq.Contents, content)

@@ -80,9 +80,12 @@ type Styles struct {
 	Value         lipgloss.Style
 	Muted         lipgloss.Style
 	UserMessage   lipgloss.Style
+	UserBubble    lipgloss.Style // Chat bubble for user messages
 	AIMessage     lipgloss.Style
+	AIBubble      lipgloss.Style // Chat bubble for AI messages
 	SystemMessage lipgloss.Style
 	ToolCall      lipgloss.Style
+	ToolBox       lipgloss.Style // Box around tool output
 	Error         lipgloss.Style
 	Success       lipgloss.Style
 	Warning       lipgloss.Style
@@ -168,16 +171,43 @@ func NewStyles(t Theme) Styles {
 			Foreground(t.Cyan).
 			Bold(true),
 
+		UserBubble: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#FFFFFF")).
+			Background(lipgloss.Color("#0066CC")).
+			Padding(0, 1).
+			MarginLeft(2),
+
 		AIMessage: lipgloss.NewStyle().
 			Foreground(t.TextPrimary),
 
+		AIBubble: lipgloss.NewStyle().
+			Foreground(t.TextPrimary).
+			Background(lipgloss.Color("#1A1F2E")).
+			BorderStyle(lipgloss.RoundedBorder()).
+			BorderForeground(t.Primary).
+			BorderLeft(true).
+			BorderRight(false).
+			BorderTop(false).
+			BorderBottom(false).
+			Padding(0, 1).
+			MarginRight(4),
+
 		SystemMessage: lipgloss.NewStyle().
-			Foreground(t.TextSecondary).
-			Italic(true),
+			Foreground(t.TextMuted).
+			Italic(true).
+			PaddingLeft(1),
 
 		ToolCall: lipgloss.NewStyle().
 			Foreground(t.Accent).
 			Bold(true),
+
+		ToolBox: lipgloss.NewStyle().
+			Foreground(t.TextSecondary).
+			BorderStyle(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("#2A3A4A")).
+			Padding(0, 1).
+			MarginLeft(2).
+			MarginRight(4),
 
 		Error: lipgloss.NewStyle().
 			Foreground(t.Error).

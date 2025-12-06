@@ -252,13 +252,55 @@ Remember information across sessions:
 
 **Storage:** `~/.ironguard/memory.json`
 
-### 8. Undo System ↩️
-Every file edit is automatically checkpointed:
+### 8. Checkpoint System ↩️
+IronGuard maintains a tree-structured checkpoint system for undo/restore capabilities:
 
-- `/undo` - Revert the last file change
-- `/history` - Show undoable actions
-- Supports file edits, creates, and deletes
-- AI is notified when user undoes something
+**Automatic Checkpoints:**
+- Every file edit, create, or delete creates a checkpoint automatically
+- Checkpoints include file content before and after modification
+- All checkpoints persist to `~/.ironguard/checkpoints.json`
+
+**Tree Structure with Branches:**
+- Restoring to an old checkpoint creates a new branch (like Git)
+- Original timeline is preserved, not overwritten
+- Multiple parallel timelines can exist
+- Branches are named: `main`, `branch-1`, `branch-2`, etc.
+
+**Checkpoint Viewer UI:**
+- Open with `/checkpoints` or right-click anywhere in the TUI
+- Navigate with ↑/↓ arrow keys
+- Press Enter to restore, D to delete, E to edit
+- Current position highlighted with `►`
+- Different checkpoint types have icons: ✏️ edit, 📄 create, 🗑️ delete, 📌 manual
+
+**Commands:**
+| Command | Description |
+|---------|-------------|
+| `/checkpoints` | Open checkpoint viewer |
+| `/checkpoints create [desc]` | Create a manual checkpoint |
+| `/checkpoints list` | List all checkpoints (text output) |
+| `/checkpoints restore <id>` | Restore to checkpoint (auto-branches) |
+| `/checkpoints edit <id> <desc>` | Edit checkpoint description |
+| `/checkpoints delete <id>` | Delete checkpoint (renumbers remaining) |
+| `/checkpoints branch` | Show current branch name |
+| `/checkpoints branches` | List all branches |
+| `/checkpoints clear` | Clear all checkpoints and start fresh |
+| `/undo` | Undo the last change (shortcut) |
+| `/history` | Show undoable actions (shortcut) |
+
+**Backup System:**
+- Checkpoint tree is backed up to `~/.ironguard/backups/` on every modification
+- Last 10 backups are kept
+- Fallback recovery if main checkpoint file corrupts
+
+**Persistence:**
+- Checkpoints are loaded from disk on startup
+- Use `--fresh` flag to start without loading saved state
+- Use `/checkpoints clear` to reset during a session
+
+**AI Notifications:**
+- AI is notified when user restores or undoes
+- AI can create checkpoints before destructive actions
 
 ### 9. Compact Mode 📝
 Toggle brief AI responses:
@@ -308,6 +350,11 @@ Satisfying audio feedback for scoring:
 - `--no-repeat-sound` — Play single ding instead of multiple (less noisy)
 - `--official-sound` — Use official CyberPatriot gain.wav instead of custom mp3
 
+**TUI commands (change during runtime):**
+- `/sound [on|off]` — Toggle sound effects
+- `/sound-repeat [on|off]` — Toggle multiple dings vs single
+- `/sound-official [on|off]` — Toggle official vs custom sound
+
 **Technical details:**
 - MP3 files are embedded in the binary using Go's `//go:embed`
 - No external files needed—single executable
@@ -316,7 +363,45 @@ Satisfying audio feedback for scoring:
 - Sound playback is non-blocking (doesn't interrupt AI work)
 - Volume boosted 2.5x for audibility
 
-### 13. Connectivity Check 🌐
+### 13. Keyboard Shortcuts ⌨️
+Quick access to common actions:
+
+| Key | Action |
+|-----|--------|
+| `Ctrl+L` | Clear input line |
+| `Ctrl+Z` | Undo input (restores previous text) |
+| `Ctrl+R` | Refresh/redraw screen (required after resize on Windows) |
+| `Tab` | Cycle autocomplete suggestions |
+| `Shift+Tab` | Cycle autocomplete backwards |
+| `↑/↓` | Navigate input history (when input empty) |
+| `PgUp/PgDn` | Scroll chat up/down |
+| `Home/End` | Scroll to top/bottom of chat |
+| `Right-click` | Open checkpoint viewer |
+| `Enter` | Send message (queues if AI busy) |
+| `Ctrl+Enter` | Send message and interrupt AI |
+| `Esc` | Close autocomplete dropdown |
+
+**Input Undo (Ctrl+Z):**
+Tracks your input changes and lets you undo them:
+- Saves state when you type a space (word boundary)
+- Saves state before clearing input (Ctrl+L)
+- Saves state when deleting multiple characters
+- Up to 50 undo states stored
+
+**Rotating Placeholders:**
+The input field shows rotating motivational messages:
+- "Reporting for duty..." (initial)
+- "Awaiting orders..."
+- "Ready when you are..."
+- "Systems online..."
+- "*cracks knuckles*"
+
+Placeholder changes each time you send a message or clear input.
+
+**Note on Terminal Resize:**
+Windows Terminal doesn't always send resize events to TUI applications. After resizing your terminal window, press `Ctrl+R` to update the display. The `/refresh` command also works.
+
+### 14. Connectivity Check 🌐
 Verify internet and API key before starting:
 
 **Automatic Check at Startup:**
@@ -380,9 +465,9 @@ API Key:  ✅ Valid
 │                                               │ Score: 85/100 (+5)      │
 │                                               │ Forensics: 2/3          │
 ├───────────────────────────────────────────────┴─────────────────────────┤
-│ > Type message... (@file, /command)                        [autopilot]  │
+│ > Reporting for duty...                                    [autopilot]  │
 │                                                                         │
-│ /stop: Stop AI | /quit: Exit | Ctrl+L: Clear | Tab: Autocomplete       │
+│ /stop: Stop AI | /quit: Exit | Ctrl+R: Refresh | Tab: Autocomplete     │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -429,14 +514,30 @@ API Key:  ✅ Valid
 | `/subagents [max]` | Set max concurrent subagents (1-10, default: 4) |
 | `/compact [on\|off]` | Toggle brief AI responses |
 | `/summarize <smart\|fast>` | Set context summarization mode |
+| `/sound [on\|off]` | Toggle sound effects |
+| `/sound-repeat [on\|off]` | Toggle multiple dings vs single |
+| `/sound-official [on\|off]` | Toggle official vs custom sound |
 | `/status` | Show current configuration |
 | `/clear` | Clear chat history |
 
-### Undo & Memory
+### Checkpoints & Undo
 | Command | Description |
 |---------|-------------|
+| `/checkpoints` | Open checkpoint viewer (or right-click) |
+| `/checkpoints create [desc]` | Create a manual checkpoint |
+| `/checkpoints list` | List all checkpoints |
+| `/checkpoints restore <id>` | Restore to checkpoint (auto-branches) |
+| `/checkpoints edit <id> <desc>` | Edit checkpoint description |
+| `/checkpoints delete <id>` | Delete a checkpoint |
+| `/checkpoints branch` | Show current branch |
+| `/checkpoints branches` | List all branches |
+| `/checkpoints clear` | Clear all checkpoints |
 | `/undo` | Revert the last file edit |
 | `/history` | Show undoable actions |
+
+### Memory
+| Command | Description |
+|---------|-------------|
 | `/remember <cat> <text>` | Save to persistent memory |
 | `/recall [query]` | Search persistent memory |
 | `/forget` | Clear all memories |

@@ -136,13 +136,30 @@ Configure the maximum number of concurrent sub-agents with `/subagents <max>` (d
 | `/subagents [max]` | Set max concurrent sub-agents |
 | `/compact [on\|off]` | Toggle brief AI responses |
 | `/summarize <smart\|fast>` | Set context summarization mode |
+| `/sound [on\|off]` | Toggle sound effects |
+| `/sound-repeat [on\|off]` | Toggle multiple dings vs single |
+| `/sound-official [on\|off]` | Toggle official vs custom sound |
 
-### Undo & Memory
+### Checkpoints & Undo
 
 | Command | Description |
 |---------|-------------|
+| `/checkpoints` | Open checkpoint viewer (or right-click) |
+| `/checkpoints create [desc]` | Create a manual checkpoint |
+| `/checkpoints list` | List all checkpoints |
+| `/checkpoints restore <id>` | Restore to a checkpoint (auto-branches) |
+| `/checkpoints edit <id> <desc>` | Edit checkpoint description |
+| `/checkpoints delete <id>` | Delete a checkpoint |
+| `/checkpoints branch` | Show current branch |
+| `/checkpoints branches` | List all branches |
+| `/checkpoints clear` | Clear all checkpoints |
 | `/undo` | Revert the last file edit |
 | `/history` | Show undoable actions |
+
+### Memory
+
+| Command | Description |
+|---------|-------------|
 | `/remember <cat> <text>` | Save to persistent memory |
 | `/recall [query]` | Search persistent memory |
 | `/forget` | Clear all memories |
@@ -165,8 +182,17 @@ Configure the maximum number of concurrent sub-agents with `/subagents <max>` (d
 
 | Key | Action |
 |-----|--------|
-| `Ctrl+L` | Clear screen |
+| `Ctrl+L` | Clear input line |
+| `Ctrl+Z` | Undo input (restore previous text) |
+| `Ctrl+R` | Refresh/redraw screen (fixes resize issues) |
+| `Ctrl+C` | Copy (terminal passthrough) |
+| `Ctrl+V` | Paste (terminal passthrough) |
 | `Tab` | Cycle autocomplete suggestions |
+| `↑/↓` | Navigate input history |
+| `PgUp/PgDn` | Scroll chat |
+| `Right-click` | Open checkpoint viewer |
+
+> **Note:** After resizing your terminal window, press `Ctrl+R` to refresh the display. Windows Terminal doesn't always send resize events automatically.
 
 ---
 
@@ -236,9 +262,29 @@ The AI can remember information across sessions:
 
 Memory is stored in `~/.ironguard/memory.json` and persists between sessions. Both you (`/remember`) and the AI (`remember` tool) can add to it.
 
-### Undo System
+### Checkpoint System
 
-Every file edit is automatically checkpointed. Use `/undo` to revert the last change. View history with `/history`.
+IronGuard maintains a tree-structured checkpoint system that tracks all file modifications:
+
+**Automatic Checkpoints:**
+- Every file edit creates a checkpoint automatically
+- Checkpoints are persisted to `~/.ironguard/checkpoints.json`
+- Previous sessions' checkpoints are restored on startup
+
+**Tree Structure with Branches:**
+- Restoring an old checkpoint creates a new branch (like Git)
+- Multiple parallel timelines are preserved
+- Navigate between branches with `/checkpoints branches`
+
+**Checkpoint Viewer:**
+- Open with `/checkpoints` or right-click anywhere
+- Navigate with ↑/↓, restore with Enter, delete with D
+
+**Backups:**
+- Checkpoint tree is backed up to `~/.ironguard/backups/` on every modification
+- Last 10 backups are kept for recovery
+
+Use `--fresh` flag to start without loading saved checkpoints.
 
 ### Token Tracking
 
@@ -256,6 +302,7 @@ Sound files are embedded in the binary—no external files needed. If audio init
 - `--no-sound` — Disable all sound effects
 - `--no-repeat-sound` — Play a single ding instead of multiple (e.g., 7 vulns = 1 ding instead of 7)
 - `--official-sound` — Use official CyberPatriot sound instead of custom mp3
+- `--fresh` — Start with fresh checkpoints (ignore saved state from previous sessions)
 
 ### Screen Interaction
 

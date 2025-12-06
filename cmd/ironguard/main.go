@@ -19,6 +19,7 @@ func main() {
 	noSound := flag.Bool("no-sound", false, "disable all sound effects")
 	noRepeatSound := flag.Bool("no-repeat-sound", false, "play single ding instead of multiple for points gained")
 	officialSound := flag.Bool("official-sound", false, "use official CyberPatriot sound instead of custom mp3")
+	freshCheckpoints := flag.Bool("fresh", false, "start with fresh checkpoints (ignore saved state)")
 	flag.Usage = func() {
 		fmt.Fprintf(flag.CommandLine.Output(), "ironguard – CyberPatriot AI helper\n\n")
 		fmt.Fprintf(flag.CommandLine.Output(), "Usage:\n  ironguard [flags]\n\nFlags:\n")
@@ -32,38 +33,16 @@ func main() {
 	}
 
 	// Check for admin/root privileges
-	if !*noAdmin && !isAdmin() {
-		fmt.Fprintln(os.Stderr, "")
-		fmt.Fprintln(os.Stderr, "╔════════════════════════════════════════════════════════════════╗")
-		fmt.Fprintln(os.Stderr, "║  ADMINISTRATOR PRIVILEGES REQUIRED                             ║")
-		fmt.Fprintln(os.Stderr, "╠════════════════════════════════════════════════════════════════╣")
-		fmt.Fprintln(os.Stderr, "║                                                                ║")
-		fmt.Fprintln(os.Stderr, "║  IronGuard needs elevated privileges to:                       ║")
-		fmt.Fprintln(os.Stderr, "║    • Modify system security settings                           ║")
-		fmt.Fprintln(os.Stderr, "║    • Edit protected configuration files                        ║")
-		fmt.Fprintln(os.Stderr, "║    • Manage user accounts and permissions                      ║")
-		fmt.Fprintln(os.Stderr, "║                                                                ║")
-		if runtime.GOOS == "windows" {
-			fmt.Fprintln(os.Stderr, "║  Run as Administrator:                                         ║")
-			fmt.Fprintln(os.Stderr, "║    Right-click → Run as administrator                          ║")
-		} else {
-			fmt.Fprintln(os.Stderr, "║  Run with sudo:                                                ║")
-			fmt.Fprintln(os.Stderr, "║    sudo ironguard                                              ║")
-		}
-		fmt.Fprintln(os.Stderr, "║                                                                ║")
-		fmt.Fprintln(os.Stderr, "║  To skip this check (not recommended):                         ║")
-		fmt.Fprintln(os.Stderr, "║    ironguard --no-admin                                        ║")
-		fmt.Fprintln(os.Stderr, "║                                                                ║")
-		fmt.Fprintln(os.Stderr, "╚════════════════════════════════════════════════════════════════╝")
-		fmt.Fprintln(os.Stderr, "")
-		os.Exit(1)
-	}
-
+	runningAsAdmin := isAdmin()
+	
 	// Default: start the TUI.
 	cfg := config.DefaultConfig()
 	cfg.NoSound = *noSound
 	cfg.NoRepeatSound = *noRepeatSound
 	cfg.OfficialSound = *officialSound
+	cfg.FreshCheckpoints = *freshCheckpoints
+	cfg.RunningAsAdmin = runningAsAdmin
+	cfg.AdminCheckSkipped = *noAdmin
 	if err := tui.Run(cfg); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)

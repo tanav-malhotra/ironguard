@@ -3,12 +3,15 @@ package tui
 import (
 	"context"
 	"fmt"
+	"math/rand"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"golang.org/x/term"
 
 	"github.com/tanav-malhotra/ironguard/internal/agent"
 	"github.com/tanav-malhotra/ironguard/internal/audio"
@@ -18,6 +21,36 @@ import (
 	"github.com/tanav-malhotra/ironguard/internal/tools"
 )
 
+// Rotating placeholder messages for the input field
+var inputPlaceholders = []string{
+	"Reporting for duty...",
+	"Awaiting orders...",
+	"Ready when you are...",
+	"Systems online...",
+	"*cracks knuckles*",
+}
+
+// randomPlaceholder returns a random placeholder message
+func randomPlaceholder() string {
+	return inputPlaceholders[rand.Intn(len(inputPlaceholders))]
+}
+
+// pushUndo saves the current input state to the undo stack
+func (m *model) pushUndo(state string) {
+	// Don't push empty states or duplicates
+	if state == "" {
+		return
+	}
+	if len(m.undoStack) > 0 && m.undoStack[len(m.undoStack)-1] == state {
+		return
+	}
+	m.undoStack = append(m.undoStack, state)
+	// Limit stack size to 50 entries
+	if len(m.undoStack) > 50 {
+		m.undoStack = m.undoStack[1:]
+	}
+}
+
 // Run starts the top-level TUI program.
 func Run(cfg config.Config) error {
 	// Configure and initialize audio system (non-fatal if it fails)
@@ -26,9 +59,12 @@ func Run(cfg config.Config) error {
 		// Audio init failed - continue without sound
 		// This is fine, sound is optional
 	}
-	
+
 	m := newModel(cfg)
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	p := tea.NewProgram(m,
+		tea.WithAltScreen(),
+		tea.WithMouseCellMotion(), // Helps with resize detection on Windows
+	)
 	_, err := p.Run()
 	return err
 }
@@ -68,6 +104,11 @@ type model struct {
 	scrollOffset  int
 	messageQueue  []QueuedMessage // queued user messages (Enter=queue, Ctrl+Enter=interrupt)
 	pendingAction *PendingAction
+	inputHistory  []string // History of sent messages (for ↑/↓ navigation)
+	historyIndex  int      // Current position in sent history (-1 = not browsing)
+	historyDraft  string   // Saved draft when browsing history
+	undoStack     []string // Stack of previous input states (for Ctrl+Z)
+	lastInputLen  int      // Track input length for undo snapshots
 
 	// Autocomplete state
 	showAutocomplete    bool
@@ -82,6 +123,10 @@ type model struct {
 	confirmMessage string
 	confirmToolID  string
 
+	// Checkpoint viewer
+	showCheckpointViewer bool
+	checkpointViewerIdx  int
+
 	// API keys (in-memory only)
 	apiKeys map[string]string
 
@@ -93,11 +138,11 @@ type model struct {
 	sidebarWidth int
 
 	// Connectivity status (checked at startup)
-	internetOK     bool
-	internetErr    error
+	internetOK      bool
+	internetErr     error
 	apiKeyValidated bool
-	apiKeyErr      error
-	checkingConn   bool  // true while connectivity check is in progress
+	apiKeyErr       error
+	checkingConn    bool // true while connectivity check is in progress
 
 	// Styling
 	theme  Theme
@@ -121,10 +166,10 @@ type model struct {
 	currentScore  int
 	previousScore int
 	scoreDelta    int
-	
+
 	// Vulnerability tracking
-	vulnsFound int
-	vulnsTotal int
+	vulnsFound     int
+	vulnsTotal     int
 	prevVulnsFound int // For calculating dings
 
 	// MCP server manager
@@ -144,7 +189,7 @@ type AITodo struct {
 
 func newModel(cfg config.Config) model {
 	ti := textinput.New()
-	ti.Placeholder = "Type a message or /command…"
+	ti.Placeholder = "Reporting for duty..."
 	ti.Focus()
 	ti.CharLimit = 2000
 	ti.Width = 60
@@ -154,9 +199,6 @@ func newModel(cfg config.Config) model {
 
 	// Create agent
 	ag := agent.New(&cfg)
-
-	// Welcome message is set after initialization for API key check
-	welcomeMsg := ""
 
 	// Create MCP manager
 	mcpMgr := mcp.NewManager()
@@ -168,9 +210,9 @@ func newModel(cfg config.Config) model {
 	// Sync screen mode with tools package on startup
 	tools.SetScreenMode(cfg.ScreenMode)
 
-	return model{
+	m := model{
 		cfg:          cfg,
-		messages:     []Message{NewSystemMessage(welcomeMsg)},
+		messages:     []Message{},
 		input:        ti,
 		apiKeys:      make(map[string]string),
 		sidebarWidth: 32, // Wider for manual tasks
@@ -182,12 +224,26 @@ func newModel(cfg config.Config) model {
 		mcpManager:   mcpMgr,
 		checkingConn: true, // Will be set to false when connectivity check completes
 	}
+
+	// Generate welcome message here (Init uses value receiver so changes wouldn't persist)
+	welcomeMsg := m.generateWelcomeScreen()
+	m.messages = append(m.messages, NewSystemMessage(welcomeMsg))
+
+	// Initialize input history
+	m.inputHistory = []string{}
+	m.historyIndex = -1 // -1 means not browsing history
+	m.historyDraft = ""
+
+	// Start scrolled to TOP so welcome banner is visible
+	// This will be recalculated once we know the window size
+	m.scrollOffset = 99999 // Will be clamped to max in renderChat
+
+	return m
 }
 
 func (m model) Init() tea.Cmd {
-	// Generate welcome message with banner
-	welcomeMsg := m.generateWelcomeScreen()
-	m.messages = append(m.messages, NewSystemMessage(welcomeMsg))
+	// Note: Welcome message is generated in newModel, not here
+	// because Init uses a value receiver and changes wouldn't persist
 	return tea.Batch(textinput.Blink, m.listenToAgent(), m.checkConnectivity())
 }
 
@@ -195,44 +251,42 @@ func (m model) Init() tea.Cmd {
 func (m model) checkConnectivity() tea.Cmd {
 	return func() tea.Msg {
 		result := ConnectivityCheckMsg{}
-		
+
 		// Check internet first
 		if err := llm.CheckInternet(); err != nil {
 			result.InternetErr = err
 			return result
 		}
 		result.InternetOK = true
-		
+
 		// Check API key if we have one
 		if m.agent.HasAPIKey() {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
-			
+
 			if err := m.agent.ValidateAPIKey(ctx); err != nil {
 				result.APIKeyErr = err
 			} else {
 				result.APIKeyOK = true
 			}
 		}
-		
+
 		return result
 	}
 }
 
 // generateWelcomeScreen creates the startup banner and instructions
 func (m model) generateWelcomeScreen() string {
-	// Box width = 75 chars (including borders)
-	// Inner width = 73 chars
 	banner := `
-    ██╗██████╗  ██████╗ ███╗   ██╗ ██████╗ ██╗   ██╗ █████╗ ██████╗ ██████╗ 
-    ██║██╔══██╗██╔═══██╗████╗  ██║██╔════╝ ██║   ██║██╔══██╗██╔══██╗██╔══██╗
-    ██║██████╔╝██║   ██║██╔██╗ ██║██║  ███╗██║   ██║███████║██████╔╝██║  ██║
-    ██║██╔══██╗██║   ██║██║╚██╗██║██║   ██║██║   ██║██╔══██║██╔══██╗██║  ██║
-    ██║██║  ██║╚██████╔╝██║ ╚████║╚██████╔╝╚██████╔╝██║  ██║██║  ██║██████╔╝
-    ╚═╝╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═══╝ ╚═════╝  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝ 
-                  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-                       AUTONOMOUS SECURITY HARDENING SYSTEM
-                  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`
+  ██╗██████╗  ██████╗ ███╗   ██╗ ██████╗ ██╗   ██╗ █████╗ ██████╗ ██████╗ 
+  ██║██╔══██╗██╔═══██╗████╗  ██║██╔════╝ ██║   ██║██╔══██╗██╔══██╗██╔══██╗
+  ██║██████╔╝██║   ██║██╔██╗ ██║██║  ███╗██║   ██║███████║██████╔╝██║  ██║
+  ██║██╔══██╗██║   ██║██║╚██╗██║██║   ██║██║   ██║██╔══██║██╔══██╗██║  ██║
+  ██║██║  ██║╚██████╔╝██║ ╚████║╚██████╔╝╚██████╔╝██║  ██║██║  ██║██████╔╝
+  ╚═╝╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═══╝ ╚═════╝  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝ 
+
+                    AUTONOMOUS SECURITY HARDENING SYSTEM                  
+  ────────────────────────────────────────────────────────────────────────`
 
 	// Check if API key is configured
 	hasAPIKey := m.agent.HasAPIKey()
@@ -240,47 +294,68 @@ func (m model) generateWelcomeScreen() string {
 	var statusLine string
 	if hasAPIKey {
 		statusLine = `
- ┌─────────────────────────────────────────────────────────────────────────┐
- │  [*] SYSTEM ONLINE                                STATUS: OPERATIONAL   │
- └─────────────────────────────────────────────────────────────────────────┘`
+
+  ┌──────────────────────────────────────────────────────────────────────┐
+  │  [✓] SYSTEM ONLINE                              STATUS: OPERATIONAL  │
+  └──────────────────────────────────────────────────────────────────────┘`
 	} else {
 		statusLine = `
- ┌─────────────────────────────────────────────────────────────────────────┐
- │  [ ] AWAITING CONFIGURATION                          STATUS: STANDBY    │
- └─────────────────────────────────────────────────────────────────────────┘`
+
+  ┌──────────────────────────────────────────────────────────────────────┐
+  │  [ ] AWAITING CONFIGURATION                        STATUS: STANDBY   │
+  └──────────────────────────────────────────────────────────────────────┘`
 	}
 
 	quickStart := `
- ╭─────────────────────────────────────────────────────────────────────────╮
- │                             QUICK START                                 │
- ├─────────────────────────────────────────────────────────────────────────┤
- │                                                                         │
- │   STEP 1   /key <api-key>           Configure AI provider               │
- │   STEP 2   /harden                  Begin autonomous hardening          │
- │                                                                         │
- ╰─────────────────────────────────────────────────────────────────────────╯
 
- ╭─────────────────────────────────────────────────────────────────────────╮
- │                             CAPABILITIES                                │
- ├─────────────────────────────────────────────────────────────────────────┤
- │                                                                         │
- │   > Forensics Analysis           Automatically answers all questions    │
- │   > Vulnerability Remediation    Fixes security misconfigurations       │
- │   > User Management              Removes unauthorized accounts          │
- │   > Score Optimization           Iterates until maximum achieved        │
- │   > Screen Control               GUI automation when enabled            │
- │                                                                         │
- ╰─────────────────────────────────────────────────────────────────────────╯
+  QUICK START
+  ────────────────────────────────────────────────────────────────────────
+  STEP 1   /key <api-key>                       Configure AI provider
+  STEP 2   /harden                              Begin autonomous hardening
 
- ╭─────────────────────────────────────────────────────────────────────────╮
- │  CONTROLS                                                               │
- ├─────────────────────────────────────────────────────────────────────────┤
- │  /help              All commands         Tab            Autocomplete    │
- │  /stop              Halt operation       Enter          Send message    │
- │  /quit              Exit program         Ctrl+Enter     Interrupt       │
- ╰─────────────────────────────────────────────────────────────────────────╯`
+  CAPABILITIES
+  ────────────────────────────────────────────────────────────────────────
+  › Forensics Analysis                     Automatically answers questions
+  › Vulnerability Remediation              Fixes security misconfigs
+  › User Management                        Removes unauthorized accounts
+  › Score Optimization                     Iterates until maximum achieved
+  › Screen Control                         GUI automation when enabled
+  › Checkpoint System                      Undo/restore AI actions
+
+  CONTROLS
+  ────────────────────────────────────────────────────────────────────────
+  /help             All commands                Tab           Autocomplete
+  /stop             Halt operation              Enter         Send message
+  /quit             Exit program                Ctrl+Enter    Interrupt AI
+  ↑/↓               Input history               PgUp/PgDn     Scroll chat
+  @file             Attach file                 Right-click   Checkpoints
+  Ctrl+L            Clear input                 Ctrl+Z        Undo clear
+  Ctrl+R            Refresh screen              /undo         Undo AI action
+
+  CHECKPOINT COMMANDS
+  ────────────────────────────────────────────────────────────────────────
+  /checkpoints          Open checkpoint viewer (or right-click)
+  /checkpoints create   Create manual checkpoint
+  /checkpoints restore  Restore to a checkpoint
+  /undo                 Undo the last action
+
+  TIP: Use @filename to attach files, e.g. "analyze @report.pdf"`
 
 	return banner + statusLine + quickStart
+}
+
+// refreshTerminalSize queries the current terminal size and returns a WindowSizeMsg.
+func (m model) refreshTerminalSize() tea.Cmd {
+	return func() tea.Msg {
+		// Try to get terminal size from stdout
+		fd := int(os.Stdout.Fd())
+		width, height, err := term.GetSize(fd)
+		if err != nil {
+			// Fallback to current size
+			return nil
+		}
+		return tea.WindowSizeMsg{Width: width, Height: height}
+	}
 }
 
 // listenToAgent creates a command that listens for agent events.
@@ -295,12 +370,46 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		return m.handleKeyMsg(msg)
+
+	case tea.MouseMsg:
+		// Handle mouse events
+		switch msg.Button {
+		case tea.MouseButtonWheelUp:
+			m.scrollOffset += 3
+			maxScroll := m.getMaxScrollOffset()
+			if m.scrollOffset > maxScroll {
+				m.scrollOffset = maxScroll
+			}
+			return &m, nil
+		case tea.MouseButtonWheelDown:
+			m.scrollOffset -= 3
+			if m.scrollOffset < 0 {
+				m.scrollOffset = 0
+			}
+			return &m, nil
+		case tea.MouseButtonRight:
+			// Right-click opens checkpoint viewer
+			m.showCheckpointViewer = true
+			m.checkpointViewerIdx = 0
+			return &m, nil
+		}
+		return &m, nil
+
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
 		m.input.Width = msg.Width - m.sidebarWidth - 8
+		if m.input.Width < 20 {
+			m.input.Width = 20
+		}
 		m.ready = true
-		return m, nil
+		// Clamp scroll offset to valid range
+		maxScroll := m.getMaxScrollOffset()
+		if m.scrollOffset > maxScroll {
+			m.scrollOffset = maxScroll
+		}
+		// Clear screen on resize to prevent artifacts
+		return m, tea.ClearScreen
 	case AgentEventMsg:
 		return m.handleAgentEvent(msg.Event)
 	case ConnectivityCheckMsg:
@@ -312,8 +421,37 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// Track state before update for undo
+	prevValue := m.input.Value()
+	prevLen := len(prevValue)
+
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
+
+	newValue := m.input.Value()
+	newLen := len(newValue)
+
+	// If input became empty (user deleted all text), rotate placeholder
+	if prevLen > 0 && newLen == 0 {
+		m.pushUndo(prevValue) // Save before clearing
+		m.input.Placeholder = randomPlaceholder()
+	} else if newLen > 0 {
+		// Save undo snapshot on significant changes:
+		// - After typing a space (word boundary)
+		// - When deleting multiple characters
+		// - Every 10 characters typed
+		if newLen > prevLen {
+			// Typing
+			if strings.HasSuffix(newValue, " ") || newLen-m.lastInputLen >= 10 {
+				m.pushUndo(prevValue)
+				m.lastInputLen = newLen
+			}
+		} else if prevLen-newLen >= 3 {
+			// Deleted 3+ characters at once (like Ctrl+Backspace)
+			m.pushUndo(prevValue)
+			m.lastInputLen = newLen
+		}
+	}
 
 	// Update autocomplete based on input
 	m.updateAutocomplete()
@@ -426,20 +564,20 @@ func (m *model) handleAgentEvent(event agent.Event) (tea.Model, tea.Cmd) {
 		m.previousScore = m.currentScore
 		m.currentScore = event.Score
 		m.scoreDelta = m.currentScore - m.previousScore
-		
+
 		// Update vulnerability tracking if provided
 		if event.VulnsFound > 0 || event.VulnsTotal > 0 {
 			m.prevVulnsFound = m.vulnsFound
 			m.vulnsFound = event.VulnsFound
 			m.vulnsTotal = event.VulnsTotal
-			
+
 			// Play ding sounds for each new vuln found
 			newVulns := m.vulnsFound - m.prevVulnsFound
 			if newVulns > 0 {
 				audio.PlayPointsGainedMultiple(newVulns)
 			}
 		}
-		
+
 		// Play victory sound at 100/100
 		if m.currentScore == 100 && m.previousScore < 100 {
 			audio.PlayMaxPointsAchieved()
@@ -451,6 +589,11 @@ func (m *model) handleAgentEvent(event agent.Event) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Handle checkpoint viewer
+	if m.showCheckpointViewer {
+		return m.handleCheckpointViewerKey(msg)
+	}
+
 	// Handle confirmation dialog
 	if m.showConfirm {
 		switch msg.String() {
@@ -469,10 +612,44 @@ func (m *model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// First check by key string for better cross-terminal compatibility
+	keyStr := msg.String()
+
+	switch keyStr {
+	case "up":
+		return m.handleArrowUp()
+	case "down":
+		return m.handleArrowDown()
+	case "pgup":
+		m.scrollOffset += 10
+		maxScroll := m.getMaxScrollOffset()
+		if m.scrollOffset > maxScroll {
+			m.scrollOffset = maxScroll
+		}
+		return m, nil
+	case "pgdown":
+		m.scrollOffset -= 10
+		if m.scrollOffset < 0 {
+			m.scrollOffset = 0
+		}
+		return m, nil
+	case "home":
+		m.scrollOffset = m.getMaxScrollOffset()
+		return m, nil
+	case "end":
+		m.scrollOffset = 0
+		return m, nil
+	}
+
 	switch msg.Type {
 	case tea.KeyCtrlC:
 		// Ctrl+C is commonly used to copy text in terminals - let it pass through
 		// Use /stop to cancel AI, /quit to exit
+		return m, nil
+
+	case tea.KeyCtrlV:
+		// Ctrl+V - paste is handled by terminal emulator
+		// Just let it pass through
 		return m, nil
 
 	case tea.KeyCtrlQ:
@@ -488,15 +665,44 @@ func (m *model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyCtrlL:
-		m.messages = []Message{}
-		m.agent.ClearHistory()
+		// Clear input line (Ctrl+L so terminal doesn't intercept)
+		if m.input.Value() != "" {
+			m.pushUndo(m.input.Value()) // Save for Ctrl+Z undo
+			m.input.SetValue("")
+			m.input.Placeholder = randomPlaceholder()
+			m.showAutocomplete = false
+		}
 		return m, nil
+
+	case tea.KeyCtrlZ:
+		// Undo - restore previous input state
+		if len(m.undoStack) > 0 {
+			// Pop from undo stack
+			lastState := m.undoStack[len(m.undoStack)-1]
+			m.undoStack = m.undoStack[:len(m.undoStack)-1]
+			m.input.SetValue(lastState)
+			m.input.CursorEnd()
+			m.lastInputLen = len(lastState)
+			m.updateAutocomplete()
+		}
+		return m, nil
+
+	case tea.KeyCtrlR:
+		// Quick refresh - re-query terminal size and redraw
+		return m, tea.Batch(m.refreshTerminalSize(), tea.ClearScreen)
 
 	case tea.KeyTab:
 		if m.showAutocomplete && len(m.autocompleteItems) > 0 {
 			// Select current item first, then move to next for next Tab press
 			selected := m.autocompleteItems[m.autocompleteIdx]
-			if m.autocompleteForArgs {
+			if m.autocompleteCmdName == "@" {
+				// File completion - replace from last @ to cursor
+				val := m.input.Value()
+				atIdx := strings.LastIndex(val, "@")
+				if atIdx >= 0 {
+					m.input.SetValue(val[:atIdx+1] + selected.Text + " ")
+				}
+			} else if m.autocompleteForArgs {
 				// Completing an argument
 				m.input.SetValue("/" + m.autocompleteCmdName + " " + selected.Text)
 			} else {
@@ -531,28 +737,10 @@ func (m *model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyUp:
-		if m.showAutocomplete && len(m.autocompleteItems) > 0 {
-			m.autocompleteIdx--
-			if m.autocompleteIdx < 0 {
-				m.autocompleteIdx = len(m.autocompleteItems) - 1
-			}
-			// Don't update input - just highlight, Enter/Tab will select
-			return m, nil
-		}
-		if m.scrollOffset < len(m.messages)-1 {
-			m.scrollOffset++
-		}
-		return m, nil
+		return m.handleArrowUp()
 
 	case tea.KeyDown:
-		if m.showAutocomplete && len(m.autocompleteItems) > 0 {
-			m.autocompleteIdx = (m.autocompleteIdx + 1) % len(m.autocompleteItems)
-			return m, nil
-		}
-		if m.scrollOffset > 0 {
-			m.scrollOffset--
-		}
-		return m, nil
+		return m.handleArrowDown()
 
 	case tea.KeyEnter:
 		val := strings.TrimSpace(m.input.Value())
@@ -566,6 +754,7 @@ func (m *model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				// Complete the argument and execute the command
 				fullCmd := "/" + m.autocompleteCmdName + " " + selected.Text
 				m.input.SetValue("")
+				m.input.Placeholder = randomPlaceholder()
 				m.showAutocomplete = false
 				m.autocompleteForArgs = false
 				return m.handleSlashCommand(fullCmd)
@@ -575,6 +764,7 @@ func (m *model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				if cmd != nil && cmd.Args == "" {
 					// No arguments required - execute immediately
 					m.input.SetValue("")
+					m.input.Placeholder = randomPlaceholder()
 					m.showAutocomplete = false
 					return m.handleSlashCommand("/" + selected.Text)
 				}
@@ -586,7 +776,15 @@ func (m *model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		// Add to input history (avoid duplicates of last entry)
+		if len(m.inputHistory) == 0 || m.inputHistory[len(m.inputHistory)-1] != val {
+			m.inputHistory = append(m.inputHistory, val)
+		}
+		m.historyIndex = -1 // Reset history navigation
+		m.historyDraft = ""
+
 		m.input.SetValue("")
+		m.input.Placeholder = randomPlaceholder()
 		m.showAutocomplete = false
 		m.scrollOffset = 0
 
@@ -613,7 +811,15 @@ func (m *model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		// Add to input history (avoid duplicates of last entry)
+		if len(m.inputHistory) == 0 || m.inputHistory[len(m.inputHistory)-1] != val {
+			m.inputHistory = append(m.inputHistory, val)
+		}
+		m.historyIndex = -1 // Reset history navigation
+		m.historyDraft = ""
+
 		m.input.SetValue("")
+		m.input.Placeholder = randomPlaceholder()
 		m.showAutocomplete = false
 		m.scrollOffset = 0
 
@@ -638,11 +844,144 @@ func (m *model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.startChat(val)
 	}
 
+	// Track state before update for undo
+	prevValue := m.input.Value()
+	prevLen := len(prevValue)
+
 	// Update text input
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
+
+	newValue := m.input.Value()
+	newLen := len(newValue)
+
+	// If input became empty (user deleted all text), rotate placeholder
+	if prevLen > 0 && newLen == 0 {
+		m.pushUndo(prevValue)
+		m.input.Placeholder = randomPlaceholder()
+	} else if newLen > 0 && prevLen-newLen >= 3 {
+		// Deleted 3+ characters at once
+		m.pushUndo(prevValue)
+	}
+
 	m.updateAutocomplete()
 	return m, cmd
+}
+
+// handleArrowUp handles up arrow key for autocomplete and input history
+func (m *model) handleArrowUp() (tea.Model, tea.Cmd) {
+	if m.showAutocomplete && len(m.autocompleteItems) > 0 {
+		m.autocompleteIdx--
+		if m.autocompleteIdx < 0 {
+			m.autocompleteIdx = len(m.autocompleteItems) - 1
+		}
+		return m, nil
+	}
+	// Navigate input history (go to older entries)
+	if len(m.inputHistory) > 0 {
+		if m.historyIndex == -1 {
+			// Starting to browse history - save current input as draft
+			m.historyDraft = m.input.Value()
+			m.historyIndex = len(m.inputHistory) - 1
+		} else if m.historyIndex > 0 {
+			m.historyIndex--
+		}
+		m.input.SetValue(m.inputHistory[m.historyIndex])
+		m.input.CursorEnd()
+	}
+	return m, nil
+}
+
+// handleArrowDown handles down arrow key for autocomplete and input history
+func (m *model) handleArrowDown() (tea.Model, tea.Cmd) {
+	if m.showAutocomplete && len(m.autocompleteItems) > 0 {
+		m.autocompleteIdx = (m.autocompleteIdx + 1) % len(m.autocompleteItems)
+		return m, nil
+	}
+	// Navigate input history (go to newer entries)
+	if m.historyIndex != -1 {
+		if m.historyIndex < len(m.inputHistory)-1 {
+			m.historyIndex++
+			m.input.SetValue(m.inputHistory[m.historyIndex])
+			m.input.CursorEnd()
+		} else {
+			// Back to the draft (current unsent input)
+			m.historyIndex = -1
+			m.input.SetValue(m.historyDraft)
+			m.input.CursorEnd()
+		}
+	}
+	return m, nil
+}
+
+// handleCheckpointViewerKey handles key events when the checkpoint viewer is open.
+func (m *model) handleCheckpointViewerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	cm := m.agent.GetCheckpointManager()
+	nodes := cm.ListCheckpoints()
+	
+	switch msg.String() {
+	case "esc", "q":
+		m.showCheckpointViewer = false
+		return m, nil
+		
+	case "up", "k":
+		if m.checkpointViewerIdx > 0 {
+			m.checkpointViewerIdx--
+		}
+		return m, nil
+		
+	case "down", "j":
+		if m.checkpointViewerIdx < len(nodes)-1 {
+			m.checkpointViewerIdx++
+		}
+		return m, nil
+		
+	case "enter":
+		// Restore to selected checkpoint
+		if m.checkpointViewerIdx >= 0 && m.checkpointViewerIdx < len(nodes) {
+			node := nodes[m.checkpointViewerIdx]
+			restoredNode, newBranch, err := cm.RestoreToCheckpoint(node.ID)
+			if err != nil {
+				m.messages = append(m.messages, NewSystemMessage(fmt.Sprintf("❌ Failed to restore: %s", err)))
+			} else {
+				msg := fmt.Sprintf("✅ Restored to checkpoint #%d: %s", restoredNode.ID, restoredNode.Description)
+				if newBranch != "" {
+					msg += fmt.Sprintf(" (new branch: %s)", newBranch)
+				}
+				m.messages = append(m.messages, NewSystemMessage(msg))
+				m.agent.QueueSystemMessage(fmt.Sprintf("[SYSTEM] User restored to checkpoint #%d: %s", restoredNode.ID, restoredNode.Description))
+			}
+		}
+		m.showCheckpointViewer = false
+		return m, nil
+		
+	case "d", "D":
+		// Delete selected checkpoint
+		if m.checkpointViewerIdx >= 0 && m.checkpointViewerIdx < len(nodes) {
+			node := nodes[m.checkpointViewerIdx]
+			if err := cm.DeleteCheckpoint(node.ID); err != nil {
+				m.messages = append(m.messages, NewSystemMessage(fmt.Sprintf("❌ Cannot delete: %s", err)))
+			} else {
+				m.messages = append(m.messages, NewSystemMessage(fmt.Sprintf("✅ Deleted checkpoint #%d", node.ID)))
+				// Adjust selection if needed
+				if m.checkpointViewerIdx >= len(nodes)-1 {
+					m.checkpointViewerIdx = len(nodes) - 2
+				}
+				if m.checkpointViewerIdx < 0 {
+					m.checkpointViewerIdx = 0
+				}
+			}
+		}
+		return m, nil
+		
+	case "e", "E":
+		// Edit mode - for now just close and show a message
+		m.showCheckpointViewer = false
+		m.messages = append(m.messages, NewSystemMessage("Use /checkpoints edit <id> <description> to edit a checkpoint."))
+		return m, nil
+	}
+	
+	return m, nil
 }
 
 func (m *model) startChat(message string) tea.Cmd {
@@ -650,14 +989,24 @@ func (m *model) startChat(message string) tea.Cmd {
 		// Expand @ mentions in the message
 		expandedMessage, mentions := ExpandMentionsInMessage(message)
 
-		// Log mentions for user visibility
+		// Collect images from mentions
+		var images []llm.ImageContent
 		for _, mention := range mentions {
-			if mention.Type == MentionFile && mention.Content != "" {
-				// File was loaded successfully - the content is in expandedMessage
+			if mention.IsImage && len(mention.ImageData) > 0 {
+				images = append(images, llm.ImageContent{
+					Data:      mention.ImageData,
+					MediaType: mention.MediaType,
+					Path:      mention.Path,
+				})
 			}
 		}
 
-		go m.agent.Chat(context.Background(), expandedMessage)
+		// Use ChatWithImages if we have images, otherwise regular Chat
+		if len(images) > 0 {
+			go m.agent.ChatWithImages(context.Background(), expandedMessage, images)
+		} else {
+			go m.agent.Chat(context.Background(), expandedMessage)
+		}
 		return nil
 	}
 }
@@ -687,6 +1036,14 @@ func (m *model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 
 	// Handle pending actions
 	if m.pendingAction != nil {
+		// Special case: refresh action returns immediately with ClearScreen
+		if m.pendingAction.Type == ActionRefresh {
+			m.pendingAction = nil
+			m.messages = append(m.messages, NewSystemMessage("🔄 Display refreshed"))
+			// Re-query terminal size and clear screen
+			return m, tea.Batch(m.refreshTerminalSize(), tea.ClearScreen)
+		}
+
 		if m.cfg.Mode == config.ModeConfirm && m.pendingAction.Type != ActionChat {
 			m.showConfirm = true
 			m.confirmAction = m.pendingAction
@@ -705,6 +1062,41 @@ func (m *model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 func (m *model) updateAutocomplete() {
 	val := m.input.Value()
 
+	// Check for @ file mentions anywhere in input
+	if atIdx := strings.LastIndex(val, "@"); atIdx >= 0 {
+		// Get the partial path after the last @
+		partial := val[atIdx+1:]
+		// Only autocomplete if we're still typing the path (no space after @)
+		if !strings.Contains(partial, " ") {
+			files := GetFileCompletions(partial, 10)
+			if len(files) > 0 {
+				m.autocompleteItems = make([]AutocompleteItem, len(files))
+				for i, f := range files {
+					// Show just the filename for display
+					name := f
+					if idx := strings.LastIndex(f, string(os.PathSeparator)); idx >= 0 {
+						name = f[idx+1:]
+					}
+					m.autocompleteItems[i] = AutocompleteItem{
+						Text:        f,
+						Description: "file",
+						IsArg:       true, // Treat as arg for insertion behavior
+					}
+					// Use short name for display
+					m.autocompleteItems[i].Text = name
+				}
+				m.showAutocomplete = true
+				m.autocompleteForArgs = true
+				m.autocompleteCmdName = "@" // Special marker for file completion
+				if m.autocompleteIdx >= len(m.autocompleteItems) {
+					m.autocompleteIdx = 0
+				}
+				return
+			}
+		}
+	}
+
+	// Handle / commands
 	if !strings.HasPrefix(val, "/") {
 		m.showAutocomplete = false
 		m.autocompleteItems = nil
@@ -916,25 +1308,66 @@ func (m model) View() string {
 		return "Loading IronGuard..."
 	}
 
+	// Calculate dimensions - ensure minimum sizes
 	chatWidth := m.width - m.sidebarWidth - 3
-	chatHeight := m.height - 6
+	if chatWidth < 20 {
+		chatWidth = 20
+	}
+
+	// Reserve space for input (3 lines) and status bar (1 line)
+	chatHeight := m.height - 5
+	if chatHeight < 5 {
+		chatHeight = 5
+	}
+
+	// The main content area height (chat + input) should match sidebar height
+	mainAreaHeight := m.height - 2
 
 	sidebar := m.renderSidebar()
 	chat := m.renderChat(chatWidth, chatHeight)
-	inputArea := m.renderInputOnly(chatWidth) // Just the input box
+	inputArea := m.renderInputOnly(chatWidth)
 	statusBar := m.renderStatusBar()
 
 	// If autocomplete is showing, overlay it on the chat
 	if m.showAutocomplete && len(m.autocompleteItems) > 0 {
 		autocomplete := m.renderAutocomplete(chatWidth)
-		// Replace bottom lines of chat with autocomplete overlay
 		chat = m.overlayAutocomplete(chat, autocomplete, chatWidth, chatHeight)
 	}
 
+	// Create main content with fixed height to match sidebar
 	mainContent := lipgloss.JoinVertical(lipgloss.Left, chat, inputArea)
+
+	// Force main content to have same height as sidebar
+	mainContentStyle := lipgloss.NewStyle().
+		Width(chatWidth + 2).
+		Height(mainAreaHeight).
+		MaxHeight(mainAreaHeight)
+	mainContent = mainContentStyle.Render(mainContent)
+
+	// Join horizontally - both should now have same height
 	content := lipgloss.JoinHorizontal(lipgloss.Top, mainContent, sidebar)
 
-	return lipgloss.JoinVertical(lipgloss.Left, content, statusBar)
+	// Clear screen artifacts by padding to full width
+	fullWidth := lipgloss.NewStyle().Width(m.width)
+	content = fullWidth.Render(content)
+	statusBar = fullWidth.Render(statusBar)
+
+	finalView := lipgloss.JoinVertical(lipgloss.Left, content, statusBar)
+
+	// Overlay checkpoint viewer if active
+	if m.showCheckpointViewer {
+		viewer := m.renderCheckpointViewer()
+		finalView = CenterOverlay(viewer, finalView, m.width, m.height)
+	}
+
+	return finalView
+}
+
+func (m model) renderCheckpointViewer() string {
+	cm := m.agent.GetCheckpointManager()
+	viewer := NewCheckpointViewer(cm, m.width, m.height, m.styles)
+	viewer.selectedIdx = m.checkpointViewerIdx
+	return viewer.Render()
 }
 
 func (m model) renderSidebar() string {
@@ -943,7 +1376,17 @@ func (m model) renderSidebar() string {
 
 	// Header with title
 	sb.WriteString(m.styles.Title.Render("◈ IRONGUARD") + "\n")
-	sb.WriteString(m.styles.Muted.Render(strings.Repeat("─", lineWidth)) + "\n\n")
+	sb.WriteString(m.styles.Muted.Render(strings.Repeat("─", lineWidth)) + "\n")
+
+	// Admin warning if not running with privileges
+	if !m.cfg.RunningAsAdmin {
+		warnStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#FFB000")).
+			Bold(true)
+		sb.WriteString(warnStyle.Render("⚠ NOT ADMIN") + "\n")
+		sb.WriteString(m.styles.Muted.Render("  Limited access") + "\n")
+	}
+	sb.WriteString("\n")
 
 	// Score display (prominent)
 	sb.WriteString(m.styles.Label.Render("SCORE") + "\n")
@@ -957,7 +1400,7 @@ func (m model) renderSidebar() string {
 			scoreStr += m.styles.Error.Render(fmt.Sprintf(" %d", m.scoreDelta))
 		}
 		sb.WriteString(m.styles.Value.Render("  "+scoreStr) + "\n")
-		
+
 		// Vulnerabilities found/total
 		if m.vulnsTotal > 0 {
 			vulnStr := fmt.Sprintf("  %d/%d vulns", m.vulnsFound, m.vulnsTotal)
@@ -1086,14 +1529,23 @@ func (m model) renderSidebar() string {
 	// Pad to fill height to prevent glitching
 	content := sb.String()
 	contentLines := strings.Count(content, "\n")
-	targetHeight := m.height - 4
+	sidebarHeight := m.height - 2
+	if sidebarHeight < 10 {
+		sidebarHeight = 10
+	}
+
+	// Ensure content fills the sidebar height
+	targetHeight := sidebarHeight - 2 // Account for borders
 	for i := contentLines; i < targetHeight; i++ {
 		content += "\n"
 	}
 
+	// Use MaxHeight to prevent overflow
 	return m.styles.Sidebar.
 		Width(m.sidebarWidth).
-		Height(m.height - 2).
+		Height(sidebarHeight).
+		MaxHeight(sidebarHeight).
+		MaxWidth(m.sidebarWidth).
 		Render(content)
 }
 
@@ -1123,44 +1575,204 @@ func (m model) renderScoreBar(score, width int) string {
 }
 
 func (m model) renderChat(width, height int) string {
-	var lines []string
+	// Build all content lines (each message may be multiple lines)
+	var allLines []string
+	var prevRole MessageRole
 
-	for _, msg := range m.messages {
-		line := m.formatMessage(msg, width-4)
-		lines = append(lines, line)
+	// Separator style
+	separatorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#333333"))
+	separator := separatorStyle.Render(strings.Repeat("─", width-6))
+
+	for i, msg := range m.messages {
+		// Add visual separation between different message types
+		if i > 0 {
+			// Add separator line when message type changes
+			if prevRole != msg.Role {
+				allLines = append(allLines, "")
+				// Add a subtle separator line for major transitions
+				if (prevRole == RoleUser && msg.Role == RoleAI) ||
+					(prevRole == RoleAI && msg.Role == RoleUser) ||
+					prevRole == RoleSystem {
+					// Always add separator after system messages
+					allLines = append(allLines, separator)
+				}
+				allLines = append(allLines, "")
+			}
+		}
+
+		formatted := m.formatMessage(msg, width-4)
+		msgLines := strings.Split(formatted, "\n")
+		allLines = append(allLines, msgLines...)
+
+		// Always add separator after system messages (even if next is also system)
+		if msg.Role == RoleSystem {
+			allLines = append(allLines, separator)
+		}
+
+		prevRole = msg.Role
 	}
 
-	visibleLines := lines
-	totalLines := len(lines)
-	if totalLines > height && height > 0 {
-		start := totalLines - height - m.scrollOffset
+	totalLines := len(allLines)
+
+	// Reserve 1 line for scroll indicators if needed
+	displayHeight := height - 1
+	if displayHeight < 3 {
+		displayHeight = 3
+	}
+
+	// Calculate visible window
+	var visibleLines []string
+	var hasMoreAbove, hasMoreBelow bool
+
+	if totalLines <= displayHeight {
+		// All content fits - no scrolling needed
+		visibleLines = allLines
+	} else {
+		// Calculate start position based on scroll offset
+		// scrollOffset=0 means we're at the bottom (newest)
+		// scrollOffset>0 means we've scrolled up
+		end := totalLines - m.scrollOffset
+		start := end - displayHeight
+
+		if start < 0 {
+			start = 0
+			end = displayHeight
+			if end > totalLines {
+				end = totalLines
+			}
+		}
+		if end > totalLines {
+			end = totalLines
+			start = end - displayHeight
+			if start < 0 {
+				start = 0
+			}
+		}
+
+		visibleLines = allLines[start:end]
+		hasMoreAbove = start > 0
+		hasMoreBelow = end < totalLines
+	}
+
+	// Build content with scroll indicators (always show both if scrollable)
+	var content strings.Builder
+
+	// Calculate lines above and below
+	var linesAbove, linesBelow int
+	if totalLines > displayHeight {
+		end := totalLines - m.scrollOffset
+		start := end - displayHeight
 		if start < 0 {
 			start = 0
 		}
-		end := start + height
 		if end > totalLines {
 			end = totalLines
 		}
-		visibleLines = lines[start:end]
+		linesAbove = start
+		linesBelow = totalLines - end
 	}
 
-	content := strings.Join(visibleLines, "\n")
-
-	if m.scrollOffset > 0 {
-		content += "\n" + m.styles.Muted.Render(fmt.Sprintf("↓ %d more", m.scrollOffset))
+	if hasMoreAbove {
+		content.WriteString(m.styles.Muted.Render(fmt.Sprintf("↑ %d lines above", linesAbove)))
+		content.WriteString("\n")
 	}
 
+	content.WriteString(strings.Join(visibleLines, "\n"))
+
+	if hasMoreBelow {
+		content.WriteString("\n")
+		content.WriteString(m.styles.Muted.Render(fmt.Sprintf("↓ %d lines below", linesBelow)))
+	}
+
+	// Ensure chat pane doesn't overflow its bounds
 	return m.styles.ChatPane.
 		Width(width).
 		Height(height).
-		Render(content)
+		MaxHeight(height).
+		MaxWidth(width).
+		Render(content.String())
+}
+
+// getMaxScrollOffset calculates the maximum scroll offset based on content
+func (m model) getMaxScrollOffset() int {
+	// Count total lines in all messages, including spacing
+	totalLines := 0
+	chatWidth := m.width - m.sidebarWidth - 7
+	if chatWidth < 20 {
+		chatWidth = 20
+	}
+
+	var prevRole MessageRole
+	for i, msg := range m.messages {
+		// Account for spacing between message types
+		if i > 0 {
+			if (prevRole == RoleUser && msg.Role == RoleAI) ||
+				(prevRole == RoleAI && msg.Role == RoleUser) ||
+				(prevRole == RoleTool && msg.Role == RoleAI) {
+				totalLines++ // Extra blank line
+			}
+		}
+
+		formatted := m.formatMessage(msg, chatWidth)
+		totalLines += strings.Count(formatted, "\n") + 1
+		prevRole = msg.Role
+	}
+
+	// Calculate visible height
+	visibleHeight := m.height - 6
+	if visibleHeight < 5 {
+		visibleHeight = 5
+	}
+
+	maxOffset := totalLines - visibleHeight
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+	return maxOffset
 }
 
 func (m model) formatMessage(msg Message, width int) string {
+	// Calculate max content width for bubbles
+	maxBubbleWidth := width - 8
+	if maxBubbleWidth < 20 {
+		maxBubbleWidth = 20
+	}
+
 	switch msg.Role {
 	case RoleUser:
-		prefix := m.styles.UserMessage.Render("You: ")
-		return prefix + msg.Content
+		// Right-aligned user message with clean styling
+		content := msg.Content
+
+		// Wrap long content
+		if len(content) > maxBubbleWidth-6 {
+			content = wrapText(content, maxBubbleWidth-6)
+		}
+
+		// Build styled message
+		var lines []string
+
+		// Show "You" label right-aligned
+		label := m.styles.UserMessage.Render("You ▾")
+		labelWidth := lipgloss.Width(label)
+		labelPadding := width - labelWidth - 1
+		if labelPadding < 0 {
+			labelPadding = 0
+		}
+		lines = append(lines, strings.Repeat(" ", labelPadding)+label)
+
+		// Content in a subtle box, right-aligned
+		contentLines := strings.Split(content, "\n")
+		for _, line := range contentLines {
+			styledLine := m.styles.Value.Render(line)
+			lineWidth := lipgloss.Width(styledLine)
+			linePadding := width - lineWidth - 3
+			if linePadding < 0 {
+				linePadding = 0
+			}
+			lines = append(lines, strings.Repeat(" ", linePadding)+"  "+styledLine)
+		}
+
+		return strings.Join(lines, "\n")
 
 	case RoleAI:
 		var sb strings.Builder
@@ -1177,84 +1789,166 @@ func (m model) formatMessage(msg Message, width int) string {
 
 			if msg.ThinkingVisible {
 				// Expanded view
-				sb.WriteString(m.styles.ThinkingBox.Render("💭 THINKING (click to collapse):\n" + msg.Thinking))
+				sb.WriteString(m.styles.ThinkingBox.Render("💭 THINKING:\n" + msg.Thinking))
 			} else {
 				// Collapsed view
-				sb.WriteString(m.styles.ThinkingCollapsed.Render("💭 " + truncate(thinkingPreview, 60) + " [expand]"))
+				sb.WriteString(m.styles.ThinkingCollapsed.Render("💭 " + truncate(thinkingPreview, 50) + " [...]"))
 			}
 			sb.WriteString("\n")
 		}
 
-		prefix := m.styles.AIMessage.Bold(true).Render("AI: ")
+		// Left-aligned AI response with styled bubble
 		content := msg.Content
 		if msg.IsStreaming {
-			content += m.styles.Muted.Render("▌")
+			content += m.styles.Muted.Render(" ▌")
 		}
-		sb.WriteString(prefix + content)
+
+		// Show AI label on its own line
+		sb.WriteString(m.styles.AIMessage.Bold(true).Foreground(m.theme.Primary).Render("◆ IronGuard") + "\n")
+
+		// Wrap and render content
+		if len(content) > maxBubbleWidth {
+			content = wrapText(content, maxBubbleWidth-2)
+		}
+		sb.WriteString(m.styles.AIBubble.Width(maxBubbleWidth).Render(content))
+
 		return sb.String()
 
 	case RoleSystem:
-		return m.styles.SystemMessage.Render(msg.Content)
+		// System messages are subtle, centered-ish notifications
+		content := msg.Content
+
+		// Add visual separator for important system messages
+		if strings.HasPrefix(content, "Error:") || strings.HasPrefix(content, "⚠") {
+			return m.styles.Error.Render("  ⚠ " + content)
+		} else if strings.HasPrefix(content, "✓") || strings.HasPrefix(content, "✔") {
+			return m.styles.Success.Render("  " + content)
+		}
+
+		// Regular system messages
+		return m.styles.SystemMessage.Render("  ─ " + content)
 
 	case RoleTool:
 		var sb strings.Builder
 
-		// Tool calls displayed as actions/thoughts, not messages
+		// Tool box width
+		toolWidth := maxBubbleWidth - 4
+		if toolWidth < 30 {
+			toolWidth = 30
+		}
+
+		// Determine icon and status
+		var icon, statusColor string
+		if msg.ToolError != "" {
+			icon = "✗"
+			statusColor = "error"
+		} else if msg.ToolOutput != "" {
+			icon = "✓"
+			statusColor = "success"
+		} else {
+			icon = "◌"
+			statusColor = "pending"
+		}
+
 		// Collapsed view: compact single line
 		if msg.Collapsed {
-			// Show as a subtle action indicator
-			actionIcon := "├─"
-			if msg.ToolError != "" {
-				actionIcon = "├✗"
-				sb.WriteString(m.styles.Muted.Render(actionIcon + " "))
-				sb.WriteString(m.styles.Error.Render(msg.ToolName))
-			} else {
-				sb.WriteString(m.styles.Muted.Render(actionIcon + " "))
-				sb.WriteString(m.styles.ToolCall.Render(msg.ToolName))
+			line := fmt.Sprintf("  %s %s", icon, msg.ToolName)
+			if msg.ToolOutput != "" && statusColor == "success" {
+				preview := strings.ReplaceAll(msg.ToolOutput, "\n", " ")
+				line += m.styles.Muted.Render(" → " + truncate(preview, 35))
+			} else if msg.ToolError != "" {
+				line += m.styles.Error.Render(" → error")
 			}
-			if msg.ToolOutput != "" {
-				sb.WriteString(m.styles.Muted.Render(" → " + truncate(msg.ToolOutput, 40)))
+
+			switch statusColor {
+			case "error":
+				return m.styles.Error.Render(line) + m.styles.Muted.Render(" [+]")
+			case "success":
+				return m.styles.Success.Render("  "+icon+" ") + m.styles.ToolCall.Render(msg.ToolName) + m.styles.Muted.Render(" → "+truncate(strings.ReplaceAll(msg.ToolOutput, "\n", " "), 35)+" [+]")
+			default:
+				return m.styles.Warning.Render("  "+icon+" ") + m.styles.ToolCall.Render(msg.ToolName) + m.styles.Muted.Render(" ...")
 			}
-			sb.WriteString(m.styles.Muted.Render(" [+]"))
-		} else {
-			// Expanded view: show as thought/action block
-			sb.WriteString(m.styles.Muted.Render("┌─ "))
-			sb.WriteString(m.styles.ToolCall.Render(msg.ToolName))
-			sb.WriteString(m.styles.Muted.Render(" ─────────────────────────"))
-			
-			if msg.ToolInput != "" {
-				inputLines := strings.Split(msg.ToolInput, "\n")
-				if len(inputLines) > 3 {
-					sb.WriteString("\n" + m.styles.Muted.Render("│ ") + m.styles.Muted.Render(truncate(inputLines[0], 55)+" (+"+fmt.Sprintf("%d", len(inputLines)-1)+" lines)"))
-				} else {
-					sb.WriteString("\n" + m.styles.Muted.Render("│ ") + m.styles.Muted.Render(truncate(msg.ToolInput, 60)))
-				}
-			}
-			if msg.ToolOutput != "" {
-				outputLines := strings.Split(msg.ToolOutput, "\n")
-				if len(outputLines) > 4 {
-					// Show first 2 lines with line count
-					sb.WriteString("\n" + m.styles.Muted.Render("│ ") + m.styles.Value.Render(truncate(outputLines[0], 55)))
-					sb.WriteString("\n" + m.styles.Muted.Render("│ ") + m.styles.Value.Render(truncate(outputLines[1], 55)))
-					sb.WriteString("\n" + m.styles.Muted.Render("│ ... "+fmt.Sprintf("%d", len(outputLines)-2)+" more lines"))
-				} else {
-					for _, line := range outputLines {
-						if line != "" {
-							sb.WriteString("\n" + m.styles.Muted.Render("│ ") + m.styles.Value.Render(truncate(line, 60)))
-						}
-					}
-				}
-			}
-			if msg.ToolError != "" {
-				sb.WriteString("\n" + m.styles.Muted.Render("│ ") + m.styles.Error.Render("Error: "+msg.ToolError))
-			}
-			sb.WriteString("\n" + m.styles.Muted.Render("└────────────────────────────────────────"))
 		}
+
+		// Expanded view: bordered box with details
+		var boxContent strings.Builder
+
+		// Header with tool name
+		boxContent.WriteString(m.styles.ToolCall.Render("⚡ " + msg.ToolName))
+
+		// Show input if present
+		if msg.ToolInput != "" {
+			boxContent.WriteString("\n" + m.styles.Muted.Render("Input: "))
+			inputPreview := strings.ReplaceAll(msg.ToolInput, "\n", " ")
+			boxContent.WriteString(m.styles.Muted.Render(truncate(inputPreview, toolWidth-10)))
+		}
+
+		// Show output
+		if msg.ToolOutput != "" {
+			boxContent.WriteString("\n" + m.styles.Label.Render("Output:"))
+			outputLines := strings.Split(msg.ToolOutput, "\n")
+			maxLines := 6
+			for i, line := range outputLines {
+				if i >= maxLines {
+					boxContent.WriteString("\n" + m.styles.Muted.Render(fmt.Sprintf("... %d more lines", len(outputLines)-maxLines)))
+					break
+				}
+				if strings.TrimSpace(line) != "" {
+					boxContent.WriteString("\n" + m.styles.Value.Render(truncate(line, toolWidth-2)))
+				}
+			}
+		}
+
+		// Show error
+		if msg.ToolError != "" {
+			boxContent.WriteString("\n" + m.styles.Error.Render("Error: "+msg.ToolError))
+		}
+
+		// Wrap in tool box style
+		sb.WriteString(m.styles.ToolBox.Width(toolWidth).Render(boxContent.String()))
+		sb.WriteString(m.styles.Muted.Render(" [-]"))
+
 		return sb.String()
 
 	default:
 		return msg.Content
 	}
+}
+
+// wrapText wraps text to the specified width
+func wrapText(text string, width int) string {
+	if width <= 0 {
+		return text
+	}
+
+	var result strings.Builder
+	words := strings.Fields(text)
+	lineLen := 0
+
+	for i, word := range words {
+		wordLen := len(word)
+
+		if lineLen+wordLen+1 > width && lineLen > 0 {
+			result.WriteString("\n")
+			lineLen = 0
+		}
+
+		if lineLen > 0 {
+			result.WriteString(" ")
+			lineLen++
+		}
+
+		result.WriteString(word)
+		lineLen += wordLen
+
+		// Preserve explicit newlines in original text
+		if i < len(words)-1 && strings.Contains(text, word+"\n") {
+			result.WriteString("\n")
+			lineLen = 0
+		}
+	}
+
+	return result.String()
 }
 
 // overlayAutocomplete places the autocomplete popup over the bottom of the chat area
@@ -1319,9 +2013,40 @@ func (m model) renderInputOnly(width int) string {
 		sb.WriteString(confirmBox + "\n")
 	}
 
-	// Input box with styled prompt
-	inputStyle := m.styles.InputPane.Width(width)
-	sb.WriteString(inputStyle.Render(m.input.View()))
+	// Clean input box styling
+	inputBox := lipgloss.NewStyle().
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(m.theme.Primary).
+		Padding(0, 1).
+		Width(width)
+	
+	sb.WriteString(inputBox.Render(m.input.View()))
+	
+	// Status line below input - show current directory and score
+	cwd, _ := os.Getwd()
+	if len(cwd) > 40 {
+		cwd = "..." + cwd[len(cwd)-37:]
+	}
+	
+	var statusParts []string
+	statusParts = append(statusParts, m.styles.Muted.Render("📁 "+cwd))
+	
+	if m.currentScore > 0 {
+		scoreStr := fmt.Sprintf("🎯 %d/100", m.currentScore)
+		if m.currentScore >= 90 {
+			statusParts = append(statusParts, m.styles.Success.Render(scoreStr))
+		} else if m.currentScore >= 70 {
+			statusParts = append(statusParts, m.styles.Warning.Render(scoreStr))
+		} else {
+			statusParts = append(statusParts, m.styles.Error.Render(scoreStr))
+		}
+	}
+	
+	if m.agentBusy {
+		statusParts = append(statusParts, m.styles.Warning.Render("⚡ AI working..."))
+	}
+	
+	sb.WriteString("\n  " + strings.Join(statusParts, "  │  "))
 
 	return sb.String()
 }

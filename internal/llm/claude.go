@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -76,6 +77,14 @@ type claudeBlock struct {
 	Input     json.RawMessage `json:"input,omitempty"`
 	ToolUseID string          `json:"tool_use_id,omitempty"`
 	Content   string          `json:"content,omitempty"`
+	// Image support
+	Source    *claudeImageSource `json:"source,omitempty"`
+}
+
+type claudeImageSource struct {
+	Type      string `json:"type"`       // "base64"
+	MediaType string `json:"media_type"` // "image/jpeg", "image/png", etc.
+	Data      string `json:"data"`       // base64-encoded image data
 }
 
 type claudeTool struct {
@@ -309,11 +318,24 @@ func (c *ClaudeClient) buildRequest(req ChatRequest, stream bool) claudeRequest 
 				})
 			}
 		} else {
-			// Regular text message
-			claudeMsg.Content = []claudeBlock{{
-				Type: "text",
-				Text: msg.Content,
-			}}
+			// Handle images first (multi-modal)
+			for _, img := range msg.Images {
+				claudeMsg.Content = append(claudeMsg.Content, claudeBlock{
+					Type: "image",
+					Source: &claudeImageSource{
+						Type:      "base64",
+						MediaType: img.MediaType,
+						Data:      base64.StdEncoding.EncodeToString(img.Data),
+					},
+				})
+			}
+			// Then add text content
+			if msg.Content != "" {
+				claudeMsg.Content = append(claudeMsg.Content, claudeBlock{
+					Type: "text",
+					Text: msg.Content,
+				})
+			}
 		}
 
 		claudeReq.Messages = append(claudeReq.Messages, claudeMsg)

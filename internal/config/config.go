@@ -114,6 +114,13 @@ type Config struct {
 	NoRepeatSound   bool // Play single ding instead of multiple for points gained
 	OfficialSound   bool // Use official CyberPatriot gain.wav instead of custom mp3
 
+	// Checkpoint settings
+	FreshCheckpoints bool // Start with fresh checkpoints (ignore saved state)
+
+	// Admin/privilege status
+	RunningAsAdmin    bool // Whether running with admin/root privileges
+	AdminCheckSkipped bool // Whether user used --no-admin flag
+
 	// Environment detection (basic)
 	OS           string
 	Architecture string

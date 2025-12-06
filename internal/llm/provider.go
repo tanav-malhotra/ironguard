@@ -25,6 +25,16 @@ type Message struct {
 	// For tool results
 	ToolCallID string `json:"tool_call_id,omitempty"`
 	Name       string `json:"name,omitempty"` // tool name for tool results
+
+	// Multi-modal content (images)
+	Images []ImageContent `json:"images,omitempty"`
+}
+
+// ImageContent represents an image attachment.
+type ImageContent struct {
+	Data      []byte `json:"-"`          // Raw image data (not serialized)
+	MediaType string `json:"media_type"` // "image/jpeg", "image/png", "image/gif", "image/webp"
+	Path      string `json:"path"`       // Original file path (for reference)
 }
 
 // ToolCall represents a tool/function call requested by the model.

@@ -18,11 +18,14 @@ const (
 
 // Mention represents an @ mention in user input.
 type Mention struct {
-	Type     MentionType
-	Original string // Original text (e.g., "@README.html")
-	Path     string // Resolved path or URL
-	Content  string // File content (if loaded)
-	Error    string // Error message if failed to load
+	Type      MentionType
+	Original  string // Original text (e.g., "@README.html")
+	Path      string // Resolved path or URL
+	Content   string // File content (if loaded)
+	Error     string // Error message if failed to load
+	IsImage   bool   // True if this is an image file
+	ImageData []byte // Raw image data for multi-modal
+	MediaType string // MIME type for images
 }
 
 // ParseMentions extracts @ mentions from user input.
@@ -66,10 +69,81 @@ func ParseMentions(input string) (string, []Mention) {
 	return input, mentions
 }
 
+// isImageFile checks if a file is an image based on extension.
+func isImageFile(path string) bool {
+	ext := strings.ToLower(filepath.Ext(path))
+	switch ext {
+	case ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico", ".svg":
+		return true
+	}
+	return false
+}
+
+// isBinaryFile checks if a file is likely binary based on extension.
+func isBinaryFile(path string) bool {
+	ext := strings.ToLower(filepath.Ext(path))
+	binaryExts := map[string]bool{
+		".exe": true, ".dll": true, ".so": true, ".dylib": true,
+		".bin": true, ".dat": true, ".db": true, ".sqlite": true,
+		".zip": true, ".tar": true, ".gz": true, ".7z": true, ".rar": true,
+		".pdf": true, ".doc": true, ".xls": true, ".ppt": true,
+		".mp3": true, ".mp4": true, ".avi": true, ".mov": true, ".wav": true,
+		".pcap": true, ".pcapng": true,
+	}
+	return binaryExts[ext]
+}
+
+// getMediaType returns the MIME type for an image file
+func getMediaType(path string) string {
+	ext := strings.ToLower(filepath.Ext(path))
+	switch ext {
+	case ".png":
+		return "image/png"
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".gif":
+		return "image/gif"
+	case ".webp":
+		return "image/webp"
+	default:
+		return "image/png"
+	}
+}
+
 // LoadMentionContent loads the content of file mentions.
 func LoadMentionContent(mentions []Mention) []Mention {
 	for i := range mentions {
 		if mentions[i].Type == MentionFile {
+			// Check if it's an image file - load as binary for multi-modal
+			if isImageFile(mentions[i].Path) {
+				data, err := os.ReadFile(mentions[i].Path)
+				if err != nil {
+					mentions[i].Error = err.Error()
+				} else {
+					mentions[i].IsImage = true
+					mentions[i].ImageData = data
+					mentions[i].MediaType = getMediaType(mentions[i].Path)
+					mentions[i].Content = "[Image attached: " + filepath.Base(mentions[i].Path) + "]"
+				}
+				continue
+			}
+			
+			// Check if it's a binary file
+			if isBinaryFile(mentions[i].Path) {
+				ext := strings.ToLower(filepath.Ext(mentions[i].Path))
+				var hint string
+				switch ext {
+				case ".pdf":
+					hint = "Use read_pdf tool to extract text from this file."
+				case ".pcap", ".pcapng":
+					hint = "Use analyze_pcap tool to analyze this capture file."
+				default:
+					hint = "This is a binary file and cannot be read as text."
+				}
+				mentions[i].Content = "[BINARY FILE: " + mentions[i].Path + "]\n" + hint
+				continue
+			}
+			
 			content, err := os.ReadFile(mentions[i].Path)
 			if err != nil {
 				mentions[i].Error = err.Error()

@@ -136,6 +136,16 @@ func New(cfg *config.Config) *Agent {
 		a.events <- Event{Type: EventStatusUpdate, Content: "Note: Could not load memory from previous sessions"}
 	}
 	
+	// Initialize checkpoints (load from disk or fresh)
+	if !cfg.FreshCheckpoints && a.checkpoints.HasSavedState() {
+		if err := a.checkpoints.Load(); err != nil {
+			a.events <- Event{Type: EventStatusUpdate, Content: "Note: Could not load checkpoints, starting fresh"}
+			a.checkpoints.Initialize()
+		}
+	} else {
+		a.checkpoints.Initialize()
+	}
+	
 	// Initialize subagent manager
 	a.subAgentManager = NewSubAgentManager(llmReg, toolReg)
 	
@@ -397,7 +407,8 @@ func (a *Agent) SetMCPManager(m tools.MCPManager) {
 }
 
 // Chat sends a user message and processes the response.
-func (a *Agent) Chat(ctx context.Context, userMessage string) {
+// ChatWithImages sends a message with optional image attachments.
+func (a *Agent) ChatWithImages(ctx context.Context, userMessage string, images []llm.ImageContent) {
 	a.busyMu.Lock()
 	if a.busy {
 		a.busyMu.Unlock()
@@ -422,13 +433,25 @@ func (a *Agent) Chat(ctx context.Context, userMessage string) {
 	a.currentCtx = ctx
 	defer cancel()
 
-	// Add user message
+	// Add user message with images
 	a.mu.Lock()
 	a.messages = append(a.messages, llm.Message{
 		Role:    "user",
 		Content: userMessage,
+		Images:  images,
 	})
 	a.mu.Unlock()
+
+	// Continue with the same conversation loop as Chat
+	a.runConversationLoop(ctx)
+}
+
+func (a *Agent) Chat(ctx context.Context, userMessage string) {
+	a.ChatWithImages(ctx, userMessage, nil)
+}
+
+// runConversationLoop handles the main conversation loop (extracted for reuse)
+func (a *Agent) runConversationLoop(ctx context.Context) {
 
 	// Process conversation loop
 	for {
@@ -510,7 +533,7 @@ func (a *Agent) Chat(ctx context.Context, userMessage string) {
 			a.events <- Event{Type: EventStatusUpdate, Content: fmt.Sprintf("Running %s...", tc.Name)}
 
 			// Create checkpoint for file-modifying operations
-			var checkpoint *Checkpoint
+			var checkpointNode *CheckpointNode
 			if tc.Name == "write_file" || tc.Name == "edit_file" || tc.Name == "search_replace" {
 				// Extract file path from arguments
 				var fileArgs struct {
@@ -523,7 +546,7 @@ func (a *Agent) Chat(ctx context.Context, userMessage string) {
 						filePath = fileArgs.FilePath
 					}
 					if filePath != "" {
-						checkpoint, _ = a.checkpoints.CreateFileCheckpoint(filePath, fmt.Sprintf("Edit %s", filePath))
+						checkpointNode, _ = a.checkpoints.CreateFileCheckpoint(filePath, fmt.Sprintf("Edit %s", filePath))
 					}
 				}
 			}
@@ -532,7 +555,7 @@ func (a *Agent) Chat(ctx context.Context, userMessage string) {
 			if err != nil {
 				toolInfo.Error = err.Error()
 				output = fmt.Sprintf("Error: %s", err.Error())
-			} else if checkpoint != nil {
+			} else if checkpointNode != nil {
 				// Update checkpoint with new content
 				var fileArgs struct {
 					Path     string `json:"path"`
@@ -545,7 +568,7 @@ func (a *Agent) Chat(ctx context.Context, userMessage string) {
 					}
 					if filePath != "" {
 						if newContent, err := os.ReadFile(filePath); err == nil {
-							a.checkpoints.UpdateCheckpointNewContent(checkpoint.ID, newContent)
+							a.checkpoints.UpdateCheckpointNewContent(checkpointNode.ID, newContent)
 						}
 					}
 				}
@@ -1351,5 +1374,10 @@ func (a *Agent) parseAndSendScoreUpdate(output string) {
 		VulnsFound: vulnsFound,
 		VulnsTotal: vulnsTotal,
 	}
+}
+
+// Checkpoints returns the checkpoint manager for TUI access.
+func (a *Agent) Checkpoints() *CheckpointManager {
+	return a.checkpoints
 }
 

@@ -280,6 +280,13 @@ func (r *CommandRegistry) registerDefaults() {
 			Description: "Show action history (checkpoints)",
 			Handler:     cmdHistory,
 		},
+		{
+			Name:        "checkpoints",
+			Description: "Manage checkpoints (create, list, restore, edit, delete, branch, branches, clear)",
+			Args:        "[subcommand] [args]",
+			ArgOptions:  []string{"create", "list", "restore", "edit", "delete", "branch", "branches", "clear"},
+			Handler:     cmdCheckpoints,
+		},
 		// Memory commands
 		{
 			Name:        "remember",
@@ -304,6 +311,34 @@ func (r *CommandRegistry) registerDefaults() {
 			Name:        "check",
 			Description: "Check internet and API key connectivity",
 			Handler:     cmdCheck,
+		},
+		// Display
+		{
+			Name:        "refresh",
+			Description: "Redraw the screen (fixes UI glitches)",
+			Handler:     cmdRefresh,
+		},
+		// Sound settings
+		{
+			Name:        "sound",
+			Description: "Toggle sound effects",
+			Args:        "[on|off]",
+			ArgOptions:  []string{"on", "off"},
+			Handler:     cmdSound,
+		},
+		{
+			Name:        "sound-repeat",
+			Description: "Toggle repeat sounds (multiple dings vs single)",
+			Args:        "[on|off]",
+			ArgOptions:  []string{"on", "off"},
+			Handler:     cmdSoundRepeat,
+		},
+		{
+			Name:        "sound-official",
+			Description: "Toggle official CyberPatriot sound vs custom",
+			Args:        "[on|off]",
+			ArgOptions:  []string{"on", "off"},
+			Handler:     cmdSoundOfficial,
 		},
 	}
 }
@@ -370,9 +405,13 @@ func cmdHelp(m *model, _ string) string {
 	help += "\nKeybindings:\n"
 	help += "  Enter        - Send message (queues if AI busy)\n"
 	help += "  Ctrl+Enter   - Interrupt AI & send immediately\n"
-	help += "  Tab          - Select autocomplete item\n"
-	help += "  ↑/↓          - Navigate autocomplete\n"
-	help += "  Ctrl+L       - Clear screen\n"
+	help += "  Tab          - Autocomplete / cycle options\n"
+	help += "  ↑/↓          - Input history / autocomplete\n"
+	help += "  PgUp/PgDn    - Scroll chat\n"
+	help += "  Ctrl+L       - Clear input line\n"
+	help += "  Ctrl+Z       - Undo clear (restore input)\n"
+	help += "  Ctrl+R       - Refresh screen (fixes resize)\n"
+	help += "  Right-click  - Open checkpoint viewer\n"
 	return help
 }
 
@@ -931,6 +970,7 @@ const (
 	ActionMCPRemove
 	ActionSubAgentLimitChanged
 	ActionSettingChanged
+	ActionRefresh // Redraw screen (fixes UI glitches)
 )
 
 // PendingAction represents an action waiting to be executed.
@@ -1239,15 +1279,15 @@ func cmdUndo(m *model, args string) string {
 	result := fmt.Sprintf("✅ Undone: %s\n", cp.Description)
 	
 	switch cp.Type {
-	case "file_edit", "file_create":
+	case agent.CheckpointFileEdit, agent.CheckpointFileCreate:
 		if cp.FileExisted {
 			result += fmt.Sprintf("   Restored: %s", cp.FilePath)
 		} else {
 			result += fmt.Sprintf("   Deleted: %s (was newly created)", cp.FilePath)
 		}
-	case "file_delete":
+	case agent.CheckpointFileDelete:
 		result += fmt.Sprintf("   Restored: %s", cp.FilePath)
-	case "command":
+	case agent.CheckpointCommand:
 		if cp.UndoCommand != "" {
 			result += fmt.Sprintf("   Run this to fully undo: %s", cp.UndoCommand)
 		}
@@ -1274,28 +1314,182 @@ func cmdHistory(m *model, args string) string {
 		
 		typeIcon := "📝"
 		switch cp.Type {
-		case "file_edit":
+		case agent.CheckpointFileEdit:
 			typeIcon = "✏️"
-		case "file_create":
+		case agent.CheckpointFileCreate:
 			typeIcon = "📄"
-		case "file_delete":
+		case agent.CheckpointFileDelete:
 			typeIcon = "🗑️"
-		case "command":
+		case agent.CheckpointCommand:
 			typeIcon = "⚡"
-		case "user_create", "user_delete", "user_modify":
+		case agent.CheckpointUserCreate, agent.CheckpointUserDelete, agent.CheckpointUserModify:
 			typeIcon = "👤"
-		case "service":
+		case agent.CheckpointService:
 			typeIcon = "⚙️"
-		case "firewall":
+		case agent.CheckpointFirewall:
 			typeIcon = "🔥"
+		case agent.CheckpointManual:
+			typeIcon = "📌"
+		case agent.CheckpointSession:
+			typeIcon = "🚀"
 		}
 		
 		timeAgo := formatTimeAgo(cp.Timestamp)
 		result += fmt.Sprintf("  %d. %s %s (%s)\n", i+1, typeIcon, cp.Description, timeAgo)
 	}
 	
-	result += "\nUse /undo to revert the most recent action."
+	result += "\nUse /undo to revert the most recent action, or /checkpoints for advanced options."
 	return result
+}
+
+// Checkpoints command - manage checkpoints with subcommands
+func cmdCheckpoints(m *model, args string) string {
+	cm := m.agent.GetCheckpointManager()
+	
+	// Parse subcommand
+	parts := strings.Fields(args)
+	subCmd := ""
+	subArgs := ""
+	if len(parts) > 0 {
+		subCmd = strings.ToLower(parts[0])
+		if len(parts) > 1 {
+			subArgs = strings.Join(parts[1:], " ")
+		}
+	}
+	
+	switch subCmd {
+	case "", "view":
+		// Default action: open checkpoint viewer
+		m.showCheckpointViewer = true
+		return "Opening checkpoint viewer..."
+		
+	case "create":
+		desc := subArgs
+		if desc == "" {
+			desc = "Manual checkpoint"
+		}
+		node := cm.CreateManualCheckpoint(desc)
+		return fmt.Sprintf("✅ Created checkpoint #%d: %s", node.ID, node.TimeLabel)
+		
+	case "list":
+		nodes := cm.ListCheckpoints()
+		if len(nodes) == 0 {
+			return "No checkpoints yet."
+		}
+		
+		result := fmt.Sprintf("📍 Checkpoints (%d total) [Branch: %s]\n\n", len(nodes), cm.GetCurrentBranch())
+		current := cm.GetCurrentCheckpoint()
+		
+		for _, node := range nodes {
+			marker := "  "
+			if current != nil && node.ID == current.ID {
+				marker = "► "
+			}
+			
+			branchInfo := ""
+			if node.BranchName != "main" {
+				branchInfo = fmt.Sprintf(" [%s]", node.BranchName)
+			}
+			
+			result += fmt.Sprintf("%s%d. %s%s\n", marker, node.ID, node.TimeLabel, branchInfo)
+		}
+		return result
+		
+	case "restore":
+		if subArgs == "" {
+			return "Usage: /checkpoints restore <id>"
+		}
+		var id int
+		if _, err := fmt.Sscanf(subArgs, "%d", &id); err != nil {
+			return fmt.Sprintf("Invalid checkpoint ID: %s", subArgs)
+		}
+		
+		node, newBranch, err := cm.RestoreToCheckpoint(id)
+		if err != nil {
+			return fmt.Sprintf("❌ Failed to restore: %s", err)
+		}
+		
+		result := fmt.Sprintf("✅ Restored to checkpoint #%d: %s", node.ID, node.Description)
+		if newBranch != "" {
+			result += fmt.Sprintf("\n   Created new branch: %s", newBranch)
+		}
+		
+		// Notify AI about the restore
+		m.agent.QueueSystemMessage(fmt.Sprintf("[SYSTEM] User restored to checkpoint #%d: %s", node.ID, node.Description))
+		
+		return result
+		
+	case "edit":
+		parts := strings.SplitN(subArgs, " ", 2)
+		if len(parts) < 2 {
+			return "Usage: /checkpoints edit <id> <new description>"
+		}
+		
+		var id int
+		if _, err := fmt.Sscanf(parts[0], "%d", &id); err != nil {
+			return fmt.Sprintf("Invalid checkpoint ID: %s", parts[0])
+		}
+		
+		if err := cm.EditCheckpoint(id, parts[1]); err != nil {
+			return fmt.Sprintf("❌ Failed to edit: %s", err)
+		}
+		
+		return fmt.Sprintf("✅ Updated checkpoint #%d description", id)
+		
+	case "delete":
+		if subArgs == "" {
+			return "Usage: /checkpoints delete <id>"
+		}
+		var id int
+		if _, err := fmt.Sscanf(subArgs, "%d", &id); err != nil {
+			return fmt.Sprintf("Invalid checkpoint ID: %s", subArgs)
+		}
+		
+		if err := cm.DeleteCheckpoint(id); err != nil {
+			return fmt.Sprintf("❌ Failed to delete: %s", err)
+		}
+		
+		return fmt.Sprintf("✅ Deleted checkpoint #%d", id)
+		
+	case "branch":
+		return fmt.Sprintf("📍 Current branch: %s", cm.GetCurrentBranch())
+		
+	case "branches":
+		branches := cm.ListBranches()
+		if len(branches) == 0 {
+			return "No branches yet."
+		}
+		
+		result := "🌿 Branches:\n"
+		current := cm.GetCurrentBranch()
+		for _, branch := range branches {
+			marker := "  "
+			if branch == current {
+				marker = "► "
+			}
+			result += fmt.Sprintf("%s%s\n", marker, branch)
+		}
+		return result
+		
+	case "clear":
+		cm.Clear()
+		cm.Initialize()
+		return "✅ All checkpoints cleared. Started fresh."
+		
+	default:
+		return `Usage: /checkpoints [subcommand]
+
+Subcommands:
+  (none)        Open checkpoint viewer
+  create [desc] Create a manual checkpoint
+  list          List all checkpoints
+  restore <id>  Restore to a checkpoint (creates branch if needed)
+  edit <id>     Edit checkpoint description
+  delete <id>   Delete a checkpoint
+  branch        Show current branch
+  branches      List all branches
+  clear         Clear all checkpoints and start fresh`
+	}
 }
 
 // Remember command - save to persistent memory
@@ -1458,4 +1652,79 @@ func formatTimeAgo(t time.Time) string {
 // Helper to convert checkpoint type to string for display
 func checkpointTypeString(ct agent.CheckpointType) string {
 	return string(ct)
+}
+
+// Display command handlers
+
+func cmdRefresh(m *model, _ string) string {
+	m.pendingAction = &PendingAction{
+		Type:        ActionRefresh,
+		Description: "Redraw screen",
+	}
+	return "🔄 Refreshing display..."
+}
+
+// Sound command handlers
+
+func cmdSound(m *model, args string) string {
+	args = strings.ToLower(strings.TrimSpace(args))
+
+	switch args {
+	case "on", "true", "1":
+		m.cfg.NoSound = false
+		return "🔊 Sound effects enabled"
+	case "off", "false", "0":
+		m.cfg.NoSound = true
+		return "🔇 Sound effects disabled"
+	case "":
+		// Show current status
+		if m.cfg.NoSound {
+			return "🔇 Sound effects: OFF\nUsage: /sound [on|off]"
+		}
+		return "🔊 Sound effects: ON\nUsage: /sound [on|off]"
+	default:
+		return "Usage: /sound [on|off]"
+	}
+}
+
+func cmdSoundRepeat(m *model, args string) string {
+	args = strings.ToLower(strings.TrimSpace(args))
+
+	switch args {
+	case "on", "true", "1":
+		m.cfg.NoRepeatSound = false
+		return "🔔 Repeat sounds enabled (multiple dings for multiple points)"
+	case "off", "false", "0":
+		m.cfg.NoRepeatSound = true
+		return "🔔 Repeat sounds disabled (single ding regardless of points)"
+	case "":
+		// Show current status
+		if m.cfg.NoRepeatSound {
+			return "🔔 Repeat sounds: OFF (single ding)\nUsage: /sound-repeat [on|off]"
+		}
+		return "🔔 Repeat sounds: ON (multiple dings)\nUsage: /sound-repeat [on|off]"
+	default:
+		return "Usage: /sound-repeat [on|off]"
+	}
+}
+
+func cmdSoundOfficial(m *model, args string) string {
+	args = strings.ToLower(strings.TrimSpace(args))
+
+	switch args {
+	case "on", "true", "1":
+		m.cfg.OfficialSound = true
+		return "🎵 Using official CyberPatriot sound"
+	case "off", "false", "0":
+		m.cfg.OfficialSound = false
+		return "🎵 Using custom IronGuard sound"
+	case "":
+		// Show current status
+		if m.cfg.OfficialSound {
+			return "🎵 Sound type: OFFICIAL CyberPatriot\nUsage: /sound-official [on|off]"
+		}
+		return "🎵 Sound type: CUSTOM IronGuard\nUsage: /sound-official [on|off]"
+	default:
+		return "Usage: /sound-official [on|off]"
+	}
 }

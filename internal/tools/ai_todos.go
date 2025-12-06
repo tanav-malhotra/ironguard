@@ -30,11 +30,45 @@ var globalAITodoStore = &AITodoStore{
 	nextID: 1,
 }
 
+// GetAITodoStore returns the global AI todo store for direct manipulation.
+func GetAITodoStore() *AITodoStore {
+	return globalAITodoStore
+}
+
 // GetAITodos returns all AI todos.
 func GetAITodos() []AITodoEntry {
 	globalAITodoStore.mu.RLock()
 	defer globalAITodoStore.mu.RUnlock()
 	return append([]AITodoEntry{}, globalAITodoStore.todos...)
+}
+
+// UpdateStatus updates the status of a todo by ID.
+func (s *AITodoStore) UpdateStatus(id int, status string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for i := range s.todos {
+		if s.todos[i].ID == id {
+			s.todos[i].Status = status
+			s.todos[i].UpdatedAt = time.Now()
+			return nil
+		}
+	}
+	return fmt.Errorf("task #%d not found", id)
+}
+
+// Delete removes a todo by ID.
+func (s *AITodoStore) Delete(id int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for i := range s.todos {
+		if s.todos[i].ID == id {
+			s.todos = append(s.todos[:i], s.todos[i+1:]...)
+			return nil
+		}
+	}
+	return fmt.Errorf("task #%d not found", id)
 }
 
 // ClearAITodos removes all AI todos.

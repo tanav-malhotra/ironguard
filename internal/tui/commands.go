@@ -1359,8 +1359,10 @@ func cmdCheckpoints(m *model, args string) string {
 	
 	switch subCmd {
 	case "", "view":
-		// Default action: open checkpoint viewer
-		m.showCheckpointViewer = true
+		// Default action: open popup viewer on checkpoints tab
+		m.showPopup = true
+		m.popupViewer = NewPopupViewer(cm, m.width, m.height, m.styles)
+		m.popupViewer.SetTab(PopupTabCheckpoints)
 		return "Opening checkpoint viewer..."
 		
 	case "create":

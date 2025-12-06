@@ -123,9 +123,9 @@ type model struct {
 	confirmMessage string
 	confirmToolID  string
 
-	// Checkpoint viewer
-	showCheckpointViewer bool
-	checkpointViewerIdx  int
+	// Popup viewer (tabbed: AI Todos + Checkpoints)
+	showPopup   bool
+	popupViewer *PopupViewer
 
 	// API keys (in-memory only)
 	apiKeys map[string]string
@@ -159,9 +159,6 @@ type model struct {
 	// Manual tasks
 	manualTasks *ManualTaskManager
 
-	// AI Todo list (for AI to track its own tasks)
-	aiTodos []AITodo
-
 	// Score tracking
 	currentScore  int
 	previousScore int
@@ -177,14 +174,6 @@ type model struct {
 
 	// Program reference for sending commands
 	program *tea.Program
-}
-
-// AITodo represents a task the AI created for itself.
-type AITodo struct {
-	ID          int
-	Description string
-	Status      string // "pending", "in_progress", "completed", "cancelled"
-	CreatedAt   string
 }
 
 func newModel(cfg config.Config) model {
@@ -391,12 +380,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return &m, nil
 		case tea.MouseButtonRight:
-			// Right-click toggles checkpoint viewer
-			if m.showCheckpointViewer {
-				m.showCheckpointViewer = false
+			// Right-click toggles popup viewer (tabs: AI Todos, Checkpoints)
+			if m.showPopup {
+				m.showPopup = false
+				m.popupViewer = nil
 			} else {
-				m.showCheckpointViewer = true
-				m.checkpointViewerIdx = 0
+				m.showPopup = true
+				cm := m.agent.GetCheckpointManager()
+				m.popupViewer = NewPopupViewer(cm, m.width, m.height, m.styles)
 			}
 			return &m, nil
 		}
@@ -596,9 +587,9 @@ func (m *model) handleAgentEvent(event agent.Event) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// Handle checkpoint viewer
-	if m.showCheckpointViewer {
-		return m.handleCheckpointViewerKey(msg)
+	// Handle popup viewer (tabs: AI Todos, Checkpoints)
+	if m.showPopup {
+		return m.handlePopupViewerKey(msg)
 	}
 
 	// Handle confirmation dialog
@@ -921,70 +912,84 @@ func (m *model) handleArrowDown() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// handleCheckpointViewerKey handles key events when the checkpoint viewer is open.
-func (m *model) handleCheckpointViewerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	cm := m.agent.GetCheckpointManager()
-	nodes := cm.ListCheckpoints()
+// handlePopupViewerKey handles key events when the popup viewer is open.
+func (m *model) handlePopupViewerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.popupViewer == nil {
+		m.showPopup = false
+		return m, nil
+	}
 
 	switch msg.String() {
 	case "esc", "q":
-		m.showCheckpointViewer = false
+		m.showPopup = false
+		m.popupViewer = nil
+		return m, nil
+
+	case "left", "h":
+		// Switch to previous tab
+		m.popupViewer.PrevTab()
+		return m, nil
+
+	case "right", "l":
+		// Switch to next tab
+		m.popupViewer.NextTab()
 		return m, nil
 
 	case "up", "k":
-		if m.checkpointViewerIdx > 0 {
-			m.checkpointViewerIdx--
-		}
+		m.popupViewer.Up()
 		return m, nil
 
 	case "down", "j":
-		if m.checkpointViewerIdx < len(nodes)-1 {
-			m.checkpointViewerIdx++
-		}
+		m.popupViewer.Down()
 		return m, nil
 
 	case "enter":
-		// Restore to selected checkpoint
-		if m.checkpointViewerIdx >= 0 && m.checkpointViewerIdx < len(nodes) {
-			node := nodes[m.checkpointViewerIdx]
-			restoredNode, newBranch, err := cm.RestoreToCheckpoint(node.ID)
-			if err != nil {
-				m.messages = append(m.messages, NewSystemMessage(fmt.Sprintf("❌ Failed to restore: %s", err)))
-			} else {
-				msg := fmt.Sprintf("✅ Restored to checkpoint #%d: %s", restoredNode.ID, restoredNode.Description)
-				if newBranch != "" {
-					msg += fmt.Sprintf(" (new branch: %s)", newBranch)
+		// Only works in Checkpoints tab - restore to selected checkpoint
+		if m.popupViewer.activeTab == PopupTabCheckpoints {
+			node := m.popupViewer.SelectedCheckpoint()
+			if node != nil {
+				cm := m.agent.GetCheckpointManager()
+				restoredNode, newBranch, err := cm.RestoreToCheckpoint(node.ID)
+				if err != nil {
+					m.messages = append(m.messages, NewSystemMessage(fmt.Sprintf("❌ Failed to restore: %s", err)))
+				} else {
+					msg := fmt.Sprintf("✅ Restored to checkpoint #%d: %s", restoredNode.ID, restoredNode.Description)
+					if newBranch != "" {
+						msg += fmt.Sprintf(" (new branch: %s)", newBranch)
+					}
+					m.messages = append(m.messages, NewSystemMessage(msg))
+					m.agent.QueueSystemMessage(fmt.Sprintf("[SYSTEM] User restored to checkpoint #%d: %s", restoredNode.ID, restoredNode.Description))
 				}
-				m.messages = append(m.messages, NewSystemMessage(msg))
-				m.agent.QueueSystemMessage(fmt.Sprintf("[SYSTEM] User restored to checkpoint #%d: %s", restoredNode.ID, restoredNode.Description))
 			}
+			m.showPopup = false
+			m.popupViewer = nil
 		}
-		m.showCheckpointViewer = false
 		return m, nil
 
 	case "d", "D":
-		// Delete selected checkpoint
-		if m.checkpointViewerIdx >= 0 && m.checkpointViewerIdx < len(nodes) {
-			node := nodes[m.checkpointViewerIdx]
-			if err := cm.DeleteCheckpoint(node.ID); err != nil {
-				m.messages = append(m.messages, NewSystemMessage(fmt.Sprintf("❌ Cannot delete: %s", err)))
-			} else {
-				m.messages = append(m.messages, NewSystemMessage(fmt.Sprintf("✅ Deleted checkpoint #%d", node.ID)))
-				// Adjust selection if needed
-				if m.checkpointViewerIdx >= len(nodes)-1 {
-					m.checkpointViewerIdx = len(nodes) - 2
-				}
-				if m.checkpointViewerIdx < 0 {
-					m.checkpointViewerIdx = 0
+		// Delete selected item (checkpoints only - AI todos are read-only)
+		if m.popupViewer.activeTab == PopupTabCheckpoints {
+			node := m.popupViewer.SelectedCheckpoint()
+			if node != nil {
+				cm := m.agent.GetCheckpointManager()
+				if err := cm.DeleteCheckpoint(node.ID); err != nil {
+					m.messages = append(m.messages, NewSystemMessage(fmt.Sprintf("❌ Cannot delete: %s", err)))
+				} else {
+					m.messages = append(m.messages, NewSystemMessage(fmt.Sprintf("✅ Deleted checkpoint #%d", node.ID)))
+					// Refresh popup data
+					m.popupViewer.RefreshData(cm)
 				}
 			}
 		}
 		return m, nil
 
 	case "e", "E":
-		// Edit mode - for now just close and show a message
-		m.showCheckpointViewer = false
-		m.messages = append(m.messages, NewSystemMessage("Use /checkpoints edit <id> <description> to edit a checkpoint."))
+		// Edit mode - for checkpoints only for now
+		if m.popupViewer.activeTab == PopupTabCheckpoints {
+			m.showPopup = false
+			m.popupViewer = nil
+			m.messages = append(m.messages, NewSystemMessage("Use /checkpoints edit <id> <description> to edit a checkpoint."))
+		}
 		return m, nil
 	}
 
@@ -1359,20 +1364,13 @@ func (m model) View() string {
 
 	finalView := lipgloss.JoinVertical(lipgloss.Left, content, statusBar)
 
-	// Overlay checkpoint viewer if active
-	if m.showCheckpointViewer {
-		viewer := m.renderCheckpointViewer()
+	// Overlay popup viewer if active
+	if m.showPopup && m.popupViewer != nil {
+		viewer := m.popupViewer.Render()
 		finalView = CenterOverlay(viewer, finalView, m.width, m.height)
 	}
 
 	return finalView
-}
-
-func (m model) renderCheckpointViewer() string {
-	cm := m.agent.GetCheckpointManager()
-	viewer := NewCheckpointViewer(cm, m.width, m.height, m.styles)
-	viewer.selectedIdx = m.checkpointViewerIdx
-	return viewer.Render()
 }
 
 func (m model) renderSidebar() string {

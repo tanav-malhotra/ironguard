@@ -23,6 +23,9 @@ type PopupViewer struct {
 	todoSelectedIdx int
 	cpSelectedIdx   int
 
+	// References
+	cm *agent.CheckpointManager
+
 	// Data
 	todos       []tools.AITodoEntry
 	checkpoints []*agent.CheckpointNode
@@ -48,6 +51,7 @@ func NewPopupViewer(cm *agent.CheckpointManager, width, height int, styles Style
 		activeTab:       PopupTabTodos, // Default to AI Todos tab
 		todoSelectedIdx: 0,
 		cpSelectedIdx:   0,
+		cm:              cm,
 		todos:           tools.GetAITodos(),
 		checkpoints:     nodes,
 		currentCpID:     currentID,
@@ -134,6 +138,11 @@ func (pv *PopupViewer) SelectedTodo() *tools.AITodoEntry {
 
 // Render renders the popup viewer with terminal-style aesthetic.
 func (pv *PopupViewer) Render() string {
+	// Live-refresh data so AI updates appear immediately while open
+	if pv.cm != nil {
+		pv.RefreshData(pv.cm)
+	}
+
 	// Calculate dimensions
 	viewerWidth := pv.width - 10
 	if viewerWidth > 76 {
@@ -186,10 +195,10 @@ func (pv *PopupViewer) Render() string {
 	switch pv.activeTab {
 	case PopupTabTodos:
 		content = pv.renderTodosTerminal(innerWidth, contentHeight)
-		footer = "↑↓ select  ←→ tab  ESC close"
+		footer = "↑↓ select  ←→ tab  ESC - close"
 	case PopupTabCheckpoints:
 		content = pv.renderCheckpointsTerminal(innerWidth, contentHeight)
-		footer = "↑↓ select  ←→ tab  ENTER restore  D delete  ESC close"
+		footer = "↑↓ select  ←→ tab  ENTER - restore  D - delete  ESC - close"
 	}
 
 	// Add content lines
@@ -392,7 +401,7 @@ func (pv *PopupViewer) renderTodosTerminal(width, height int) string {
 	return strings.Join(lines, "\n")
 }
 
-// renderCheckpointsTerminal renders checkpoints in terminal style.
+// renderCheckpointsTerminal renders checkpoints in terminal style with branch tree.
 func (pv *PopupViewer) renderCheckpointsTerminal(width, height int) string {
 	if len(pv.checkpoints) == 0 {
 		emptyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280"))
@@ -402,91 +411,147 @@ func (pv *PopupViewer) renderCheckpointsTerminal(width, height int) string {
 			pv.centerText(emptyStyle.Render("Use /checkpoints create for manual saves."), width)
 	}
 
-	// Branch info
-	branchStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#00D4FF"))
-	mutedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280"))
-	branchLine := mutedStyle.Render("branch: ") + branchStyle.Render(pv.cpBranch)
+	// Group checkpoints by branch
+	branchMap := make(map[string][]*agent.CheckpointNode)
+	branchOrder := []string{}
+	for _, cp := range pv.checkpoints {
+		branch := cp.BranchName
+		if branch == "" {
+			branch = "main"
+		}
+		if _, exists := branchMap[branch]; !exists {
+			branchOrder = append(branchOrder, branch)
+		}
+		branchMap[branch] = append(branchMap[branch], cp)
+	}
 
-	// Calculate visible items
-	listHeight := height - 3 // Leave room for branch line
+	// Build flat list with branch headers for display
+	type displayItem struct {
+		isBranchHeader bool
+		branchName     string
+		checkpoint     *agent.CheckpointNode
+		isLastInBranch bool
+		globalIdx      int // index in pv.checkpoints for selection
+	}
+	var displayItems []displayItem
+
+	globalIdx := 0
+	for _, branch := range branchOrder {
+		cps := branchMap[branch]
+		// Add branch header
+		displayItems = append(displayItems, displayItem{
+			isBranchHeader: true,
+			branchName:     branch,
+		})
+		// Add checkpoints under this branch
+		for i, cp := range cps {
+			displayItems = append(displayItems, displayItem{
+				isBranchHeader: false,
+				checkpoint:     cp,
+				isLastInBranch: i == len(cps)-1,
+				globalIdx:      globalIdx,
+			})
+			globalIdx++
+		}
+	}
+
+	// Calculate which display item corresponds to selected checkpoint
+	selectedDisplayIdx := 0
+	for i, item := range displayItems {
+		if !item.isBranchHeader && item.globalIdx == pv.cpSelectedIdx {
+			selectedDisplayIdx = i
+			break
+		}
+	}
+
+	// Calculate visible range
+	listHeight := height - 2
 	startIdx := 0
-	if pv.cpSelectedIdx >= listHeight {
-		startIdx = pv.cpSelectedIdx - listHeight + 1
+	if selectedDisplayIdx >= listHeight {
+		startIdx = selectedDisplayIdx - listHeight + 1
 	}
 	endIdx := startIdx + listHeight
-	if endIdx > len(pv.checkpoints) {
-		endIdx = len(pv.checkpoints)
+	if endIdx > len(displayItems) {
+		endIdx = len(displayItems)
 	}
 
+	branchStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#00D4FF")).Bold(true)
+	mutedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280"))
+	treeStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#4A5568"))
+
 	var lines []string
-	lines = append(lines, pv.centerText(branchLine, width), "")
 
 	// Scroll indicator at top
 	if startIdx > 0 {
-		scrollStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#4A5568"))
-		lines = append(lines, scrollStyle.Render(fmt.Sprintf("  ↑ %d more", startIdx)))
+		lines = append(lines, mutedStyle.Render(fmt.Sprintf("  ↑ %d more", startIdx)))
 	}
 
 	for i := startIdx; i < endIdx; i++ {
-		node := pv.checkpoints[i]
-		line := pv.renderCheckpointTerminal(node, i == pv.cpSelectedIdx, width)
-		lines = append(lines, line)
+		item := displayItems[i]
+
+		if item.isBranchHeader {
+			// Branch header line
+			branchIcon := "◆"
+			if item.branchName == pv.cpBranch {
+				branchIcon = "►" // Current branch indicator
+			}
+			line := fmt.Sprintf(" %s %s", branchIcon, item.branchName)
+			lines = append(lines, branchStyle.Render(line))
+		} else {
+			// Checkpoint line with tree connector
+			cp := item.checkpoint
+			icon := pv.getTerminalIcon(cp.Type)
+
+			// Tree connector
+			connector := "├─"
+			if item.isLastInBranch {
+				connector = "└─"
+			}
+
+			// Current checkpoint marker
+			currentMark := " "
+			if cp.ID == pv.currentCpID {
+				currentMark = "●"
+			}
+
+			// Description (truncated)
+			desc := cp.Description
+			maxDescLen := width - 22
+			if len(desc) > maxDescLen {
+				desc = desc[:maxDescLen-3] + "..."
+			}
+
+			line := fmt.Sprintf(" %s %s%s #%-2d %-5s %s",
+				treeStyle.Render(connector), currentMark, icon, cp.ID, cp.TimeLabel, desc)
+
+			// Pad to width
+			lineWidth := lipgloss.Width(line)
+			if lineWidth < width {
+				line += strings.Repeat(" ", width-lineWidth)
+			}
+
+			// Style based on selection
+			if item.globalIdx == pv.cpSelectedIdx {
+				style := lipgloss.NewStyle().
+					Background(lipgloss.Color("#00D4FF")).
+					Foreground(lipgloss.Color("#0A0E14")).
+					Bold(true)
+				lines = append(lines, style.Render(line))
+			} else if cp.ID == pv.currentCpID {
+				style := lipgloss.NewStyle().Foreground(lipgloss.Color("#00E676"))
+				lines = append(lines, style.Render(line))
+			} else {
+				lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("#E8EDF4")).Render(line))
+			}
+		}
 	}
 
 	// Scroll indicator at bottom
-	if endIdx < len(pv.checkpoints) {
-		scrollStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#4A5568"))
-		lines = append(lines, scrollStyle.Render(fmt.Sprintf("  ↓ %d more", len(pv.checkpoints)-endIdx)))
+	if endIdx < len(displayItems) {
+		lines = append(lines, mutedStyle.Render(fmt.Sprintf("  ↓ %d more", len(displayItems)-endIdx)))
 	}
 
 	return strings.Join(lines, "\n")
-}
-
-// renderCheckpointTerminal renders a single checkpoint in terminal style.
-func (pv *PopupViewer) renderCheckpointTerminal(node *agent.CheckpointNode, selected bool, width int) string {
-	// Type icon (ASCII-friendly)
-	icon := pv.getTerminalIcon(node.Type)
-
-	// Current marker
-	marker := "  "
-	if node.ID == pv.currentCpID {
-		marker = "► "
-	}
-
-	// Branch indicator
-	branchInfo := ""
-	if node.BranchName != "main" {
-		branchInfo = fmt.Sprintf(" @%s", node.BranchName)
-	}
-
-	// Description (truncated)
-	desc := node.Description
-	maxDescLen := width - 20 - len(branchInfo)
-	if len(desc) > maxDescLen {
-		desc = desc[:maxDescLen-3] + "..."
-	}
-
-	// Format line: ► [✎] #1 2m ago  description @branch
-	line := fmt.Sprintf("%s%s #%-2d %-6s %s%s", marker, icon, node.ID, node.TimeLabel, desc, branchInfo)
-
-	// Pad to width
-	for len(line) < width {
-		line += " "
-	}
-
-	// Style based on selection
-	if selected {
-		style := lipgloss.NewStyle().
-			Background(lipgloss.Color("#00D4FF")).
-			Foreground(lipgloss.Color("#0A0E14")).
-			Bold(true)
-		return style.Render(line)
-	} else if node.ID == pv.currentCpID {
-		style := lipgloss.NewStyle().Foreground(lipgloss.Color("#00E676"))
-		return style.Render(line)
-	}
-
-	return lipgloss.NewStyle().Foreground(lipgloss.Color("#E8EDF4")).Render(line)
 }
 
 // getTerminalIcon returns ASCII-friendly icons for checkpoint types.

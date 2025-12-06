@@ -247,19 +247,204 @@ func (cv *CheckpointViewer) renderEmpty() string {
 	return boxStyle.Render(content)
 }
 
-// CenterOverlay centers the viewer in the terminal using lipgloss.Place.
-func CenterOverlay(overlay, background string, termWidth, termHeight int) string {
-	// Use lipgloss.Place to center the overlay
-	// We use a dark gray instead of pure black for the whitespace background
-	_ = background // Background parameter kept for API compatibility
-	return lipgloss.Place(
-		termWidth,
-		termHeight,
-		lipgloss.Center,
-		lipgloss.Center,
-		overlay,
-		lipgloss.WithWhitespaceBackground(lipgloss.Color("#0A0E14")),
-	)
+// CenterOverlay places the popup over the background content, keeping the background visible and dimmed.
+// Only the chat area (left side) is dimmed; sidebar and input remain undimmed.
+func CenterOverlay(overlay, background string, termWidth, termHeight int, sidebarWidth int) string {
+	bgLines := strings.Split(background, "\n")
+	overlayLines := strings.Split(overlay, "\n")
+
+	overlayHeight := len(overlayLines)
+	overlayWidth := 0
+	for _, line := range overlayLines {
+		if w := lipgloss.Width(line); w > overlayWidth {
+			overlayWidth = w
+		}
+	}
+
+	// Center position
+	startY := (termHeight - overlayHeight) / 2
+	startX := (termWidth - overlayWidth) / 2
+	if startY < 0 {
+		startY = 0
+	}
+	if startX < 0 {
+		startX = 0
+	}
+
+	// Dim style for background
+	dimStyle := lipgloss.NewStyle().Faint(true)
+
+	// Determine chat area width (approximate left pane)
+	chatWidth := termWidth - sidebarWidth - 3
+	if chatWidth < 0 {
+		chatWidth = 0
+	}
+	// Avoid dimming the column of the sidebar separator
+	chatDimWidth := chatWidth - 1
+	if chatDimWidth < 0 {
+		chatDimWidth = 0
+	}
+
+	// Define non-dim rows: bottom input/status area (last 5 rows)
+	noDimStartRow := termHeight - 5
+	if noDimStartRow < 0 {
+		noDimStartRow = 0
+	}
+
+	// Ensure background height
+	for len(bgLines) < termHeight {
+		bgLines = append(bgLines, "")
+	}
+
+	// Compose overlay onto dimmed background
+	for oy, oLine := range overlayLines {
+		y := startY + oy
+		if y < 0 || y >= termHeight {
+			continue
+		}
+
+		bgLine := truncateToWidth(bgLines[y], termWidth)
+
+		// Pad overlay line to overlayWidth
+		oWidth := lipgloss.Width(oLine)
+		if oWidth < overlayWidth {
+			oLine += strings.Repeat(" ", overlayWidth-oWidth)
+		}
+
+		left := truncateToWidth(bgLine, startX)
+		right := substringFromWidth(bgLine, startX+overlayWidth, termWidth-(startX+overlayWidth))
+
+		if y >= noDimStartRow {
+			// Do not dim bottom/input area
+			bgLines[y] = left + oLine + right
+			continue
+		}
+
+		// Dim only chat portion on left
+		leftDim := dimPrefix(left, chatDimWidth, dimStyle)
+
+		// Remaining chat width after overlay
+		remainingChat := chatDimWidth - (startX + overlayWidth)
+		if remainingChat < 0 {
+			remainingChat = 0
+		}
+		rightDim := dimPrefix(right, remainingChat, dimStyle)
+
+		bgLines[y] = leftDim + oLine + rightDim
+	}
+
+	// Dim the rest of the lines
+	for y := 0; y < termHeight; y++ {
+		if y < startY || y >= startY+overlayHeight {
+			if y < noDimStartRow {
+				bgLines[y] = dimPrefix(bgLines[y], chatDimWidth, dimStyle)
+			}
+		}
+	}
+
+	return strings.Join(bgLines, "\n")
+}
+
+// truncateToWidth truncates a string (ANSI-safe) to a visual width and pads if needed.
+func truncateToWidth(s string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	current := 0
+	var b strings.Builder
+	inEscape := false
+	for _, r := range s {
+		if r == '\x1b' {
+			inEscape = true
+			b.WriteRune(r)
+			continue
+		}
+		if inEscape {
+			b.WriteRune(r)
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
+				inEscape = false
+			}
+			continue
+		}
+		if current+1 > width {
+			break
+		}
+		b.WriteRune(r)
+		current++
+	}
+	for current < width {
+		b.WriteRune(' ')
+		current++
+	}
+	return b.String()
+}
+
+// substringFromWidth extracts a substring starting from a visual offset/length (ANSI-safe) and pads.
+func substringFromWidth(s string, offset, length int) string {
+	if length <= 0 {
+		return ""
+	}
+
+	current := 0
+	started := false
+	var b strings.Builder
+	resultWidth := 0
+	inEscape := false
+
+	for _, r := range s {
+		if r == '\x1b' {
+			inEscape = true
+			if started {
+				b.WriteRune(r)
+			}
+			continue
+		}
+		if inEscape {
+			if started {
+				b.WriteRune(r)
+			}
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
+				inEscape = false
+			}
+			continue
+		}
+
+		if !started {
+			if current >= offset {
+				started = true
+				b.WriteRune(r)
+				resultWidth++
+			}
+			current++
+		} else {
+			if resultWidth >= length {
+				break
+			}
+			b.WriteRune(r)
+			resultWidth++
+		}
+	}
+
+	for resultWidth < length {
+		b.WriteRune(' ')
+		resultWidth++
+	}
+
+	return b.String()
+}
+
+// dimPrefix dims only the first prefixWidth columns of the line (ANSI-safe), leaves the rest untouched.
+func dimPrefix(s string, prefixWidth int, dimStyle lipgloss.Style) string {
+	if prefixWidth <= 0 {
+		return s
+	}
+	totalWidth := lipgloss.Width(s)
+	if prefixWidth >= totalWidth {
+		return dimStyle.Render(s)
+	}
+	left := truncateToWidth(s, prefixWidth)
+	right := substringFromWidth(s, prefixWidth, totalWidth-prefixWidth)
+	return dimStyle.Render(left) + right
 }
 
 

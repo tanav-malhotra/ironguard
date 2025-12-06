@@ -127,6 +127,9 @@ type Config struct {
 
 	// Detailed OS info (populated by DetectOS)
 	OSInfo OSInfo
+
+	// Persisted hardening target (mode) so AI never loses track
+	HardenMode string
 }
 
 // DefaultConfig returns the configuration optimized for CyberPatriot competition.

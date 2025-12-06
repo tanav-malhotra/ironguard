@@ -269,6 +269,11 @@ func (r *CommandRegistry) registerDefaults() {
 			Description: "Show token usage statistics",
 			Handler:     cmdTokens,
 		},
+		{
+			Name:        "todos",
+			Description: "Show AI's task list",
+			Handler:     cmdTodos,
+		},
 		// Undo/checkpoint commands
 		{
 			Name:        "undo",
@@ -642,18 +647,22 @@ Example: /harden %s 100
 	case "windows":
 		m.cfg.CompMode = config.CompModeHarden
 		m.cfg.OSInfo.Type = config.OSTypeWindows10
+		m.cfg.HardenMode = "windows"
 	case "windows-server":
 		m.cfg.CompMode = config.CompModeHarden
 		m.cfg.OSInfo.Type = config.OSTypeWindowsServer
 		m.cfg.OSInfo.IsServer = true
+		m.cfg.HardenMode = "windows-server"
 	case "linux":
 		m.cfg.CompMode = config.CompModeHarden
 		// Keep detected Linux type or default to Ubuntu
 		if m.cfg.OSInfo.Type == config.OSTypeUnknown {
 			m.cfg.OSInfo.Type = config.OSTypeUbuntu
 		}
+		m.cfg.HardenMode = "linux"
 	case "cisco":
 		m.cfg.CompMode = config.CompModeCisco
+		m.cfg.HardenMode = "cisco"
 		if m.cfg.ScreenMode != config.ScreenModeControl {
 			return `⚠️ CISCO MODE WORKS BEST WITH SCREEN CONTROL
 
@@ -672,18 +681,21 @@ In CONTROL mode: AI can click, type, scroll, and complete tasks autonomously.`
 		osInfo := config.DetectOS()
 		m.cfg.OSInfo = osInfo
 		m.cfg.CompMode = config.CompModeHarden
+		m.cfg.HardenMode = "auto"
 	}
+
+	// Pin hardening target in a non-ephemeral system message so the AI never forgets
+	osDesc := m.cfg.OSInfo.Type.String()
+	if m.cfg.OSInfo.Version != "" {
+		osDesc += " " + m.cfg.OSInfo.Version
+	}
+	m.agent.QueueSystemMessage(fmt.Sprintf("[SYSTEM] Hardening target locked: mode=%s os=%s", mode, osDesc))
 
 	// Start autonomous hardening
 	m.pendingAction = &PendingAction{
 		Type:        ActionAuto,
 		Description: fmt.Sprintf("Start autonomous hardening (target: %d pts, mode: %s)", targetScore, mode),
 		Args:        fmt.Sprintf("%d", targetScore),
-	}
-
-	osDesc := m.cfg.OSInfo.Type.String()
-	if m.cfg.OSInfo.Version != "" {
-		osDesc += " " + m.cfg.OSInfo.Version
 	}
 
 	return fmt.Sprintf(`🛡️ IRONGUARD AUTONOMOUS HARDENING ACTIVATED
@@ -725,14 +737,14 @@ func cmdKey(m *model, args string) string {
 	// Save and apply the key
 	m.apiKeys[targetProvider] = key
 	m.agent.SetAPIKey(targetProvider, key)
-
+	
 	// If we updated the active provider, reset validation state
 	if targetProvider == string(m.cfg.Provider) {
-		m.apiKeyValidated = false
-		m.apiKeyErr = nil
+	m.apiKeyValidated = false
+	m.apiKeyErr = nil
 		m.checkingConn = true
 	}
-
+	
 	return "API key set for " + targetProvider + "\nUse /check to validate connectivity."
 }
 
@@ -1244,6 +1256,60 @@ Note: Token counts are estimates (~3-4 chars per token).`,
 		stats.SummaryCount,
 		stats.TokensSavedBySummary,
 	)
+}
+
+// Todos command - shows AI's task list
+func cmdTodos(m *model, args string) string {
+	todos := tools.GetAITodos()
+	if len(todos) == 0 {
+		return "📭 No AI tasks yet. The AI creates tasks when planning work."
+	}
+
+	var sb strings.Builder
+	sb.WriteString("📋 AI TASK LIST\n")
+	sb.WriteString("══════════════════════════════════════════════════════\n\n")
+
+	// Status icons
+	statusIcons := map[string]string{
+		"pending":     "○",
+		"in_progress": "◐",
+		"completed":   "●",
+		"cancelled":   "×",
+	}
+
+	priorityLabels := map[string]string{
+		"high":   "[HIGH]",
+		"medium": "[MED]",
+		"low":    "[LOW]",
+	}
+
+	pending, inProgress, completed := 0, 0, 0
+	for _, todo := range todos {
+		icon := statusIcons[todo.Status]
+		if icon == "" {
+			icon = "○"
+		}
+		priority := priorityLabels[todo.Priority]
+		if priority == "" {
+			priority = "[MED]"
+		}
+
+		sb.WriteString(fmt.Sprintf(" %s %s #%d: %s\n", icon, priority, todo.ID, todo.Description))
+
+		switch todo.Status {
+		case "pending":
+			pending++
+		case "in_progress":
+			inProgress++
+		case "completed":
+			completed++
+		}
+	}
+
+	sb.WriteString(fmt.Sprintf("\n══════════════════════════════════════════════════════\n"))
+	sb.WriteString(fmt.Sprintf("○ %d pending  ◐ %d active  ● %d done\n", pending, inProgress, completed))
+
+	return sb.String()
 }
 
 // Undo command

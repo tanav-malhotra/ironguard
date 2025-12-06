@@ -64,7 +64,7 @@ func Run(cfg config.Config) error {
 	m := newModel(cfg)
 	p := tea.NewProgram(m,
 		tea.WithAltScreen(),
-		tea.WithMouseCellMotion(), // Helps with resize detection on Windows
+		tea.WithMouseCellMotion(), // Mouse click capture (not all motion - that causes escape sequence issues)
 	)
 	_, err := p.Run()
 	return err
@@ -128,8 +128,6 @@ type model struct {
 	// Popup viewer (tabbed: AI Todos + Checkpoints)
 	showPopup   bool
 	popupViewer *PopupViewer
-	// Suppress next key event (Windows terminals may paste on right-click)
-	suppressNextInput bool
 
 	// API keys (in-memory only)
 	apiKeys map[string]string
@@ -159,7 +157,8 @@ type model struct {
 	cwd string
 
 	// Mouse handling
-	lastRightClick time.Time
+	lastRightClick          time.Time
+	popupWasOpenBeforePress bool
 
 	// Scroll tracking
 	lastScrollMax int
@@ -341,13 +340,13 @@ func (m model) generateWelcomeScreen() string {
 
   CONTROLS
   ────────────────────────────────────────────────────────────────────────
-  /help        All commands           Tab           Autocomplete
-  /stop        Halt operation         Enter         Send message
-  /quit        Exit program           Ctrl+Enter    Interrupt AI
-  ↑/↓          Input history          PgUp/PgDn     Scroll chat
-  @file        Attach file            Right-click   Open checkpoint viewer
-  Ctrl+L       Clear input            Ctrl+Z        Undo clear
-  Ctrl+R       Refresh screen         /undo         Undo AI action
+  /help        All commands            Tab           Autocomplete
+  /stop        Halt operation          Enter         Send message
+  /quit        Exit program            Ctrl+Enter    Interrupt AI
+  ↑/↓          Input history           PgUp/PgDn     Scroll chat
+  @file        Attach file             Right-click   Open ironguard viewer
+  Ctrl+L       Clear input             Ctrl+Z        Undo
+  Ctrl+R       Refresh screen          /undo         Undo AI action
 
   CHECKPOINT COMMANDS
   ────────────────────────────────────────────────────────────────────────
@@ -382,6 +381,11 @@ func (m model) listenToAgent() tea.Cmd {
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Save input state at the VERY START - before anything can modify it
+	// This captures the state before terminal right-click paste
+	inputBeforeUpdate := m.input.Value()
+	cursorBeforeUpdate := m.input.Position()
+
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		return m.handleKeyMsg(msg)
@@ -403,34 +407,40 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return &m, nil
 		case tea.MouseButtonRight:
+			// ALWAYS restore input to undo any paste from terminal right-click
+			m.input.SetValue(inputBeforeUpdate)
+			m.input.SetCursor(cursorBeforeUpdate)
+
 			now := time.Now()
 			switch msg.Action {
 			case tea.MouseActionPress:
-				// Debounce press toggles
-				if now.Sub(m.lastRightClick) < 250*time.Millisecond {
+				// Debounce rapid clicks
+				if now.Sub(m.lastRightClick) < 150*time.Millisecond {
 					return &m, nil
 				}
 				m.lastRightClick = now
 
 				if m.showPopup {
+					// Popup is open - close it immediately (toggle behavior)
 					m.showPopup = false
 					m.popupViewer = nil
+					m.popupWasOpenBeforePress = true // Mark that popup was already open
 				} else {
+					// Popup is closed - open it now
+					m.popupWasOpenBeforePress = false // Mark that this press opened the popup
 					m.showPopup = true
 					cm := m.agent.GetCheckpointManager()
 					m.popupViewer = NewPopupViewer(cm, m.width, m.height, m.styles)
 				}
-				// Prevent the terminal's right-click paste from entering input
-				m.suppressNextInput = true
 				return &m, nil
 
 			case tea.MouseActionRelease:
-				// If held longer than 250ms, close on release
-				if m.showPopup && now.Sub(m.lastRightClick) >= 250*time.Millisecond {
+				// If this press opened the popup AND user held > 250ms, close on release (peek behavior)
+				if !m.popupWasOpenBeforePress && m.showPopup && now.Sub(m.lastRightClick) > 250*time.Millisecond {
 					m.showPopup = false
 					m.popupViewer = nil
-					return &m, nil
 				}
+				m.popupWasOpenBeforePress = false // Reset for next interaction
 				return &m, nil
 			}
 			return &m, nil
@@ -636,12 +646,6 @@ func (m *model) handleAgentEvent(event agent.Event) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// Skip the first key event immediately after right-click to prevent terminal paste
-	if m.suppressNextInput {
-		m.suppressNextInput = false
-		return m, nil
-	}
-
 	// Handle popup viewer (tabs: AI Todos, Checkpoints)
 	if m.showPopup {
 		return m.handlePopupViewerKey(msg)
@@ -807,6 +811,12 @@ func (m *model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.autocompleteForArgs {
 				// Complete the argument and execute the command
 				fullCmd := "/" + m.autocompleteCmdName + " " + selected.Text
+				// Save to history
+				if len(m.inputHistory) == 0 || m.inputHistory[len(m.inputHistory)-1] != fullCmd {
+					m.inputHistory = append(m.inputHistory, fullCmd)
+				}
+				m.historyIndex = -1
+				m.historyDraft = ""
 				m.input.SetValue("")
 				m.input.Placeholder = randomPlaceholder()
 				m.showAutocomplete = false
@@ -817,10 +827,17 @@ func (m *model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				cmd := m.cmdRegistry.Get(selected.Text)
 				if cmd != nil && cmd.Args == "" {
 					// No arguments required - execute immediately
+					cmdStr := "/" + selected.Text
+					// Save to history
+					if len(m.inputHistory) == 0 || m.inputHistory[len(m.inputHistory)-1] != cmdStr {
+						m.inputHistory = append(m.inputHistory, cmdStr)
+					}
+					m.historyIndex = -1
+					m.historyDraft = ""
 					m.input.SetValue("")
 					m.input.Placeholder = randomPlaceholder()
 					m.showAutocomplete = false
-					return m.handleSlashCommand("/" + selected.Text)
+					return m.handleSlashCommand(cmdStr)
 				}
 				// Has arguments - complete and show arg options
 				m.input.SetValue("/" + selected.Text + " ")
@@ -909,6 +926,11 @@ func (m *model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	newValue := m.input.Value()
 	newLen := len(newValue)
 
+	// If input changed, clear autocomplete suppression (user typed something new)
+	if newValue != prevValue {
+		m.autocompleteSuppressed = false
+	}
+
 	// If input became empty (user deleted all text), rotate placeholder
 	if prevLen > 0 && newLen == 0 {
 		m.pushUndo(prevValue)
@@ -942,6 +964,9 @@ func (m *model) handleArrowUp() (tea.Model, tea.Cmd) {
 		}
 		m.input.SetValue(m.inputHistory[m.historyIndex])
 		m.input.CursorEnd()
+		// Suppress autocomplete until user makes a change
+		m.autocompleteSuppressed = true
+		m.showAutocomplete = false
 	}
 	return m, nil
 }
@@ -958,11 +983,17 @@ func (m *model) handleArrowDown() (tea.Model, tea.Cmd) {
 			m.historyIndex++
 			m.input.SetValue(m.inputHistory[m.historyIndex])
 			m.input.CursorEnd()
+			// Suppress autocomplete until user makes a change
+			m.autocompleteSuppressed = true
+			m.showAutocomplete = false
 		} else {
 			// Back to the draft (current unsent input)
 			m.historyIndex = -1
 			m.input.SetValue(m.historyDraft)
 			m.input.CursorEnd()
+			// Suppress autocomplete until user makes a change
+			m.autocompleteSuppressed = true
+			m.showAutocomplete = false
 		}
 	}
 	return m, nil
@@ -974,7 +1005,7 @@ func (m *model) handlePopupViewerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.showPopup = false
 		return m, nil
 	}
-	
+
 	switch msg.String() {
 	case "esc", "q":
 		m.showPopup = false
@@ -990,65 +1021,65 @@ func (m *model) handlePopupViewerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Switch to next tab
 		m.popupViewer.NextTab()
 		return m, nil
-		
+
 	case "up", "k":
 		m.popupViewer.Up()
 		return m, nil
-		
+
 	case "down", "j":
 		m.popupViewer.Down()
 		return m, nil
-		
+
 	case "enter":
 		// Only works in Checkpoints tab - restore to selected checkpoint
 		if m.popupViewer.activeTab == PopupTabCheckpoints {
 			node := m.popupViewer.SelectedCheckpoint()
 			if node != nil {
 				cm := m.agent.GetCheckpointManager()
-			restoredNode, newBranch, err := cm.RestoreToCheckpoint(node.ID)
-			if err != nil {
-				m.messages = append(m.messages, NewSystemMessage(fmt.Sprintf("❌ Failed to restore: %s", err)))
-			} else {
-				msg := fmt.Sprintf("✅ Restored to checkpoint #%d: %s", restoredNode.ID, restoredNode.Description)
-				if newBranch != "" {
-					msg += fmt.Sprintf(" (new branch: %s)", newBranch)
+				restoredNode, newBranch, err := cm.RestoreToCheckpoint(node.ID)
+				if err != nil {
+					m.messages = append(m.messages, NewSystemMessage(fmt.Sprintf("❌ Failed to restore: %s", err)))
+				} else {
+					msg := fmt.Sprintf("✅ Restored to checkpoint #%d: %s", restoredNode.ID, restoredNode.Description)
+					if newBranch != "" {
+						msg += fmt.Sprintf(" (new branch: %s)", newBranch)
+					}
+					m.messages = append(m.messages, NewSystemMessage(msg))
+					m.agent.QueueSystemMessage(fmt.Sprintf("[SYSTEM] User restored to checkpoint #%d: %s", restoredNode.ID, restoredNode.Description))
 				}
-				m.messages = append(m.messages, NewSystemMessage(msg))
-				m.agent.QueueSystemMessage(fmt.Sprintf("[SYSTEM] User restored to checkpoint #%d: %s", restoredNode.ID, restoredNode.Description))
 			}
-		}
 			m.showPopup = false
 			m.popupViewer = nil
 		}
 		return m, nil
-		
+
 	case "d", "D":
 		// Delete selected item (checkpoints only - AI todos are read-only)
 		if m.popupViewer.activeTab == PopupTabCheckpoints {
 			node := m.popupViewer.SelectedCheckpoint()
 			if node != nil {
 				cm := m.agent.GetCheckpointManager()
-			if err := cm.DeleteCheckpoint(node.ID); err != nil {
-				m.messages = append(m.messages, NewSystemMessage(fmt.Sprintf("❌ Cannot delete: %s", err)))
-			} else {
-				m.messages = append(m.messages, NewSystemMessage(fmt.Sprintf("✅ Deleted checkpoint #%d", node.ID)))
+				if err := cm.DeleteCheckpoint(node.ID); err != nil {
+					m.messages = append(m.messages, NewSystemMessage(fmt.Sprintf("❌ Cannot delete: %s", err)))
+				} else {
+					m.messages = append(m.messages, NewSystemMessage(fmt.Sprintf("✅ Deleted checkpoint #%d", node.ID)))
 					// Refresh popup data
 					m.popupViewer.RefreshData(cm)
 				}
 			}
 		}
 		return m, nil
-		
+
 	case "e", "E":
 		// Edit mode - for checkpoints only for now
 		if m.popupViewer.activeTab == PopupTabCheckpoints {
 			m.showPopup = false
 			m.popupViewer = nil
-		m.messages = append(m.messages, NewSystemMessage("Use /checkpoints edit <id> <description> to edit a checkpoint."))
+			m.messages = append(m.messages, NewSystemMessage("Use /checkpoints edit <id> <description> to edit a checkpoint."))
 		}
 		return m, nil
 	}
-	
+
 	return m, nil
 }
 
@@ -1435,7 +1466,7 @@ func (m model) View() string {
 	// Overlay popup viewer if active
 	if m.showPopup && m.popupViewer != nil {
 		viewer := m.popupViewer.Render()
-		finalView = CenterOverlay(viewer, finalView, m.width, m.height)
+		finalView = CenterOverlay(viewer, finalView, m.width, m.height, m.sidebarWidth)
 	}
 
 	return finalView
@@ -2122,18 +2153,18 @@ func (m model) renderInputOnly(width int) string {
 		BorderForeground(m.theme.Primary).
 		Padding(0, 1).
 		Width(width)
-	
+
 	sb.WriteString(inputBox.Render(m.input.View()))
-	
+
 	// Status line below input - show current directory and score
 	cwd, _ := os.Getwd()
 	if len(cwd) > 40 {
 		cwd = "..." + cwd[len(cwd)-37:]
 	}
-	
+
 	var statusParts []string
 	statusParts = append(statusParts, m.styles.Muted.Render("📁 "+cwd))
-	
+
 	if m.currentScore > 0 {
 		scoreStr := fmt.Sprintf("🎯 %d/100", m.currentScore)
 		if m.currentScore >= 90 {
@@ -2144,11 +2175,11 @@ func (m model) renderInputOnly(width int) string {
 			statusParts = append(statusParts, m.styles.Error.Render(scoreStr))
 		}
 	}
-	
+
 	if m.agentBusy {
 		statusParts = append(statusParts, m.styles.Warning.Render("⚡ AI working..."))
 	}
-	
+
 	sb.WriteString("\n  " + strings.Join(statusParts, "  │  "))
 
 	return sb.String()
@@ -2255,19 +2286,12 @@ func (m model) renderStatusBar() string {
 
 	// Session tokens (always show)
 	sessionStr := fmt.Sprintf("TOK %dk", stats.TotalTokens/1000)
-		rightParts = append(rightParts, m.styles.Muted.Render(sessionStr))
+	rightParts = append(rightParts, m.styles.Muted.Render(sessionStr))
 
 	// Checkpoint/save count
 	saveCount := m.agent.GetCheckpointManager().UndoableCount()
 	if saveCount > 0 {
 		rightParts = append(rightParts, m.styles.Muted.Render(fmt.Sprintf("SAVE %d", saveCount)))
-	}
-
-	// API key indicator
-	if m.agent.HasAPIKey() {
-		rightParts = append(rightParts, m.styles.Success.Render("KEY ✓"))
-	} else {
-		rightParts = append(rightParts, m.styles.Error.Render("KEY ×"))
 	}
 
 	right := strings.Join(rightParts, " │ ")

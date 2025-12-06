@@ -282,7 +282,7 @@ func (r *CommandRegistry) registerDefaults() {
 		},
 		{
 			Name:        "checkpoints",
-			Description: "Manage checkpoints (create, list, restore, edit, delete, branch, branches, clear)",
+			Description: "Manage checkpoints",
 			Args:        "<create|list|restore|edit|delete|branch|branches|clear>",
 			ArgOptions:  []string{"create", "list", "restore", "edit", "delete", "branch", "branches", "clear"},
 			Handler:     cmdCheckpoints,

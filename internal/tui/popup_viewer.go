@@ -132,132 +132,181 @@ func (pv *PopupViewer) SelectedTodo() *tools.AITodoEntry {
 	return nil
 }
 
-// Render renders the popup viewer.
+// Render renders the popup viewer with terminal-style aesthetic.
 func (pv *PopupViewer) Render() string {
 	// Calculate dimensions
 	viewerWidth := pv.width - 10
-	if viewerWidth > 80 {
-		viewerWidth = 80
+	if viewerWidth > 76 {
+		viewerWidth = 76
 	}
 	if viewerWidth < 40 {
 		viewerWidth = 40
 	}
 
-	viewerHeight := pv.height - 10
-	if viewerHeight > 30 {
-		viewerHeight = 30
+	viewerHeight := pv.height - 8
+	if viewerHeight > 28 {
+		viewerHeight = 28
 	}
 	if viewerHeight < 10 {
 		viewerHeight = 10
 	}
 
-	// Render tabs
-	tabs := pv.renderTabs(viewerWidth - 4)
+	innerWidth := viewerWidth - 4
 
-	// Render content based on active tab
+	// Colors
+	borderColor := lipgloss.Color("#00D4FF")
+	mutedColor := lipgloss.Color("#4A5568")
+	accentColor := lipgloss.Color("#00D4FF")
+
+	// Build the popup manually with ROUNDED box-drawing characters
+	var lines []string
+
+	// Top border with title (rounded corners)
+	title := " IRONGUARD VIEWER "
+	topLeft := "╭"
+	topRight := "╮"
+	topLine := strings.Repeat("─", (innerWidth-len(title))/2) + title + strings.Repeat("─", (innerWidth-len(title)+1)/2)
+	lines = append(lines, lipgloss.NewStyle().Foreground(borderColor).Render(topLeft+topLine+topRight))
+
+	// Empty line
+	lines = append(lines, pv.renderBoxLine("", innerWidth, borderColor))
+
+	// Tabs
+	tabs := pv.renderTerminalTabs(innerWidth)
+	lines = append(lines, pv.renderBoxLine(tabs, innerWidth, borderColor))
+
+	// Separator under tabs
+	sepLine := strings.Repeat("─", innerWidth)
+	lines = append(lines, lipgloss.NewStyle().Foreground(borderColor).Render("├"+sepLine+"┤"))
+
+	// Content area
+	contentHeight := viewerHeight - 8 // Account for header, tabs, separator, footer
 	var content string
 	var footer string
 	switch pv.activeTab {
 	case PopupTabTodos:
-		content = pv.renderTodosContent(viewerWidth-6, viewerHeight-10)
-		footer = "↑↓ Navigate  ←→ Switch Tab  Esc - Close"
+		content = pv.renderTodosTerminal(innerWidth, contentHeight)
+		footer = "↑↓ select  ←→ tab  ESC close"
 	case PopupTabCheckpoints:
-		content = pv.renderCheckpointsContent(viewerWidth-6, viewerHeight-10)
-		footer = "↑↓ Navigate  ←→ Switch Tab  Enter - Restore  D - Delete  Esc - Close"
+		content = pv.renderCheckpointsTerminal(innerWidth, contentHeight)
+		footer = "↑↓ select  ←→ tab  ENTER restore  D delete  ESC close"
 	}
 
-	// Footer with controls
-	footerStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#4A5568")).
-		Align(lipgloss.Center).
-		Width(viewerWidth - 4)
-	footerRendered := footerStyle.Render(footer)
+	// Add content lines
+	contentLines := strings.Split(content, "\n")
+	for i := 0; i < contentHeight; i++ {
+		line := ""
+		if i < len(contentLines) {
+			line = contentLines[i]
+		}
+		lines = append(lines, pv.renderBoxLine(line, innerWidth, borderColor))
+	}
 
-	// Combine everything
-	body := lipgloss.JoinVertical(lipgloss.Left,
-		"",
-		tabs,
-		"",
-		content,
-		"",
-		footerRendered,
-	)
+	// Separator above footer
+	lines = append(lines, lipgloss.NewStyle().Foreground(borderColor).Render("├"+sepLine+"┤"))
 
-	// Box style
-	boxStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#1E2A3A")).
-		Padding(1, 2).
-		Width(viewerWidth).
-		Height(viewerHeight)
+	// Footer
+	footerStyle := lipgloss.NewStyle().Foreground(mutedColor)
+	footerPadded := pv.centerText(footerStyle.Render(footer), innerWidth)
+	lines = append(lines, pv.renderBoxLine(footerPadded, innerWidth, borderColor))
 
-	return boxStyle.Render(body)
+	// Bottom border (rounded corners)
+	bottomLeft := "╰"
+	bottomRight := "╯"
+	bottomLine := strings.Repeat("─", innerWidth)
+	lines = append(lines, lipgloss.NewStyle().Foreground(borderColor).Render(bottomLeft+bottomLine+bottomRight))
+
+	// Add accent glow effect (subtle)
+	glowStyle := lipgloss.NewStyle().
+		Foreground(accentColor)
+
+	return glowStyle.Render(strings.Join(lines, "\n"))
 }
 
-func (pv *PopupViewer) renderTabs(width int) string {
-	tabWidth := (width - 4) / 2
+// renderBoxLine renders a line with box borders.
+func (pv *PopupViewer) renderBoxLine(content string, innerWidth int, borderColor lipgloss.Color) string {
+	borderStyle := lipgloss.NewStyle().Foreground(borderColor)
+	contentWidth := lipgloss.Width(content)
+	padding := innerWidth - contentWidth
+	if padding < 0 {
+		padding = 0
+	}
+	return borderStyle.Render("│") + content + strings.Repeat(" ", padding) + borderStyle.Render("│")
+}
 
-	// Tab styles
-	activeStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("#0A0E14")).
-		Background(lipgloss.Color("#00D4FF")).
-		Align(lipgloss.Center).
-		Width(tabWidth).
-		Padding(0, 1)
+// centerText centers text within a given width.
+func (pv *PopupViewer) centerText(text string, width int) string {
+	textWidth := lipgloss.Width(text)
+	if textWidth >= width {
+		return text
+	}
+	leftPad := (width - textWidth) / 2
+	rightPad := width - textWidth - leftPad
+	return strings.Repeat(" ", leftPad) + text + strings.Repeat(" ", rightPad)
+}
 
-	inactiveStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#8892A2")).
-		Background(lipgloss.Color("#1E2A3A")).
-		Align(lipgloss.Center).
-		Width(tabWidth).
-		Padding(0, 1)
-
-	var todosTab, checkpointsTab string
-
+// renderTerminalTabs renders tabs in terminal style.
+func (pv *PopupViewer) renderTerminalTabs(width int) string {
 	todoCount := len(pv.todos)
 	cpCount := len(pv.checkpoints)
 
+	// Tab labels
+	todosLabel := fmt.Sprintf("[ AI TASKS (%d) ]", todoCount)
+	cpLabel := fmt.Sprintf("[ CHECKPOINTS (%d) ]", cpCount)
+
+	// Styles
+	activeStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#0A0E14")).
+		Background(lipgloss.Color("#00D4FF"))
+
+	inactiveStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#6B7280"))
+
+	var todosTab, cpTab string
 	if pv.activeTab == PopupTabTodos {
-		todosTab = activeStyle.Render(fmt.Sprintf("📋 AI TODOS (%d)", todoCount))
-		checkpointsTab = inactiveStyle.Render(fmt.Sprintf("📍 CHECKPOINTS (%d)", cpCount))
+		todosTab = activeStyle.Render(todosLabel)
+		cpTab = inactiveStyle.Render(cpLabel)
 	} else {
-		todosTab = inactiveStyle.Render(fmt.Sprintf("📋 AI TODOS (%d)", todoCount))
-		checkpointsTab = activeStyle.Render(fmt.Sprintf("📍 CHECKPOINTS (%d)", cpCount))
+		todosTab = inactiveStyle.Render(todosLabel)
+		cpTab = activeStyle.Render(cpLabel)
 	}
 
-	return lipgloss.JoinHorizontal(lipgloss.Top, todosTab, " ", checkpointsTab)
+	// Center the tabs
+	tabs := todosTab + "  " + cpTab
+	return pv.centerText(tabs, width)
 }
 
-func (pv *PopupViewer) renderTodosContent(width, height int) string {
+// renderTodosTerminal renders the AI todos in terminal style.
+func (pv *PopupViewer) renderTodosTerminal(width, height int) string {
 	if len(pv.todos) == 0 {
-		emptyStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#8892A2")).
-			Align(lipgloss.Center).
-			Width(width)
-		return emptyStyle.Render("\n\nNo AI tasks yet.\n\nThe AI will create tasks here when it\nplans work using create_todo or plan_tasks.\n")
+		emptyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280"))
+		return pv.centerText(emptyStyle.Render("No AI tasks yet."), width) + "\n\n" +
+			pv.centerText(emptyStyle.Render("The AI will create tasks here when it"), width) + "\n" +
+			pv.centerText(emptyStyle.Render("plans work using create_todo or plan_tasks."), width)
 	}
 
-	// Status icons
+	// Status icons (terminal-friendly)
 	statusIcons := map[string]string{
 		"pending":     "○",
 		"in_progress": "◐",
 		"completed":   "●",
-		"cancelled":   "✗",
+		"cancelled":   "×",
 	}
 
-	priorityIcons := map[string]string{
-		"high":   "🔴",
-		"medium": "🟡",
-		"low":    "🟢",
+	priorityMarkers := map[string]string{
+		"high":   "!!!",
+		"medium": "!! ",
+		"low":    "!  ",
 	}
 
 	// Calculate visible items
+	listHeight := height - 3 // Leave room for summary
 	startIdx := 0
-	if pv.todoSelectedIdx >= height {
-		startIdx = pv.todoSelectedIdx - height + 1
+	if pv.todoSelectedIdx >= listHeight {
+		startIdx = pv.todoSelectedIdx - listHeight + 1
 	}
-	endIdx := startIdx + height
+	endIdx := startIdx + listHeight
 	if endIdx > len(pv.todos) {
 		endIdx = len(pv.todos)
 	}
@@ -266,56 +315,61 @@ func (pv *PopupViewer) renderTodosContent(width, height int) string {
 
 	// Scroll indicator at top
 	if startIdx > 0 {
-		scrollUp := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#4A5568")).
-			Render(fmt.Sprintf("↑ %d more above", startIdx))
-		lines = append(lines, scrollUp)
+		scrollStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#4A5568"))
+		lines = append(lines, scrollStyle.Render(fmt.Sprintf("  ↑ %d more", startIdx)))
 	}
 
 	for i := startIdx; i < endIdx; i++ {
 		todo := pv.todos[i]
 		icon := statusIcons[todo.Status]
-		pIcon := priorityIcons[todo.Priority]
-		if pIcon == "" {
-			pIcon = "🟡"
+		if icon == "" {
+			icon = "○"
+		}
+		priority := priorityMarkers[todo.Priority]
+		if priority == "" {
+			priority = "   "
 		}
 
-		line := fmt.Sprintf("%s %s #%d: %s", icon, pIcon, todo.ID, todo.Description)
+		// Format: [○] !!! #1 Task description...
+		line := fmt.Sprintf(" %s %s #%-2d %s", icon, priority, todo.ID, todo.Description)
 
 		// Truncate if needed
 		if len(line) > width-2 {
 			line = line[:width-5] + "..."
 		}
 
+		// Pad to width
+		for len(line) < width {
+			line += " "
+		}
+
 		// Style based on selection and status
-		style := lipgloss.NewStyle().Width(width)
 		if i == pv.todoSelectedIdx {
-			style = style.
+			style := lipgloss.NewStyle().
 				Background(lipgloss.Color("#00D4FF")).
 				Foreground(lipgloss.Color("#0A0E14")).
 				Bold(true)
+			lines = append(lines, style.Render(line))
 		} else {
+			var style lipgloss.Style
 			switch todo.Status {
 			case "completed":
-				style = style.Foreground(lipgloss.Color("#00E676"))
+				style = lipgloss.NewStyle().Foreground(lipgloss.Color("#00E676"))
 			case "in_progress":
-				style = style.Foreground(lipgloss.Color("#FFB000"))
+				style = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFB000"))
 			case "cancelled":
-				style = style.Foreground(lipgloss.Color("#FF5370"))
+				style = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5370")).Strikethrough(true)
 			default:
-				style = style.Foreground(lipgloss.Color("#E8EDF4"))
+				style = lipgloss.NewStyle().Foreground(lipgloss.Color("#E8EDF4"))
 			}
+			lines = append(lines, style.Render(line))
 		}
-
-		lines = append(lines, style.Render(line))
 	}
 
 	// Scroll indicator at bottom
 	if endIdx < len(pv.todos) {
-		scrollDown := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#4A5568")).
-			Render(fmt.Sprintf("↓ %d more below", len(pv.todos)-endIdx))
-		lines = append(lines, scrollDown)
+		scrollStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#4A5568"))
+		lines = append(lines, scrollStyle.Render(fmt.Sprintf("  ↓ %d more", len(pv.todos)-endIdx)))
 	}
 
 	// Summary line
@@ -331,131 +385,133 @@ func (pv *PopupViewer) renderTodosContent(width, height int) string {
 		}
 	}
 
-	summaryStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#8892A2")).
-		Align(lipgloss.Center).
-		Width(width)
-	summary := summaryStyle.Render(fmt.Sprintf("─── %d pending │ %d in progress │ %d done ───", pending, inProgress, completed))
-	lines = append(lines, "", summary)
+	summaryStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280"))
+	summary := fmt.Sprintf("○ %d pending  ◐ %d active  ● %d done", pending, inProgress, completed)
+	lines = append(lines, "", pv.centerText(summaryStyle.Render(summary), width))
 
 	return strings.Join(lines, "\n")
 }
 
-func (pv *PopupViewer) renderCheckpointsContent(width, height int) string {
+// renderCheckpointsTerminal renders checkpoints in terminal style.
+func (pv *PopupViewer) renderCheckpointsTerminal(width, height int) string {
 	if len(pv.checkpoints) == 0 {
-		emptyStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#8892A2")).
-			Align(lipgloss.Center).
-			Width(width)
-		return emptyStyle.Render("\n\nNo checkpoints yet.\n\nCheckpoints are created automatically\nwhen the AI modifies files.\n\nUse /checkpoints create to create one manually.")
+		emptyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280"))
+		return pv.centerText(emptyStyle.Render("No checkpoints yet."), width) + "\n\n" +
+			pv.centerText(emptyStyle.Render("Checkpoints are created automatically"), width) + "\n" +
+			pv.centerText(emptyStyle.Render("when the AI modifies files."), width) + "\n\n" +
+			pv.centerText(emptyStyle.Render("Use /checkpoints create for manual saves."), width)
 	}
 
 	// Branch info
-	branchLine := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#8892A2")).
-		Align(lipgloss.Center).
-		Width(width).
-		Render(fmt.Sprintf("Branch: %s", pv.cpBranch))
+	branchStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#00D4FF"))
+	mutedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280"))
+	branchLine := mutedStyle.Render("branch: ") + branchStyle.Render(pv.cpBranch)
 
 	// Calculate visible items
-	contentHeight := height - 3 // Account for branch line and scroll indicators
+	listHeight := height - 3 // Leave room for branch line
 	startIdx := 0
-	if pv.cpSelectedIdx >= contentHeight {
-		startIdx = pv.cpSelectedIdx - contentHeight + 1
+	if pv.cpSelectedIdx >= listHeight {
+		startIdx = pv.cpSelectedIdx - listHeight + 1
 	}
-	endIdx := startIdx + contentHeight
+	endIdx := startIdx + listHeight
 	if endIdx > len(pv.checkpoints) {
 		endIdx = len(pv.checkpoints)
 	}
 
 	var lines []string
-	lines = append(lines, branchLine, "")
+	lines = append(lines, pv.centerText(branchLine, width), "")
 
 	// Scroll indicator at top
 	if startIdx > 0 {
-		scrollUp := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#4A5568")).
-			Render(fmt.Sprintf("↑ %d more above", startIdx))
-		lines = append(lines, scrollUp)
+		scrollStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#4A5568"))
+		lines = append(lines, scrollStyle.Render(fmt.Sprintf("  ↑ %d more", startIdx)))
 	}
 
 	for i := startIdx; i < endIdx; i++ {
 		node := pv.checkpoints[i]
-		line := pv.renderCheckpointNode(node, i == pv.cpSelectedIdx, width)
+		line := pv.renderCheckpointTerminal(node, i == pv.cpSelectedIdx, width)
 		lines = append(lines, line)
 	}
 
 	// Scroll indicator at bottom
 	if endIdx < len(pv.checkpoints) {
-		scrollDown := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#4A5568")).
-			Render(fmt.Sprintf("↓ %d more below", len(pv.checkpoints)-endIdx))
-		lines = append(lines, scrollDown)
+		scrollStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#4A5568"))
+		lines = append(lines, scrollStyle.Render(fmt.Sprintf("  ↓ %d more", len(pv.checkpoints)-endIdx)))
 	}
 
 	return strings.Join(lines, "\n")
 }
 
-func (pv *PopupViewer) renderCheckpointNode(node *agent.CheckpointNode, selected bool, width int) string {
-	// Type icon
-	icon := pv.getTypeIcon(node.Type)
+// renderCheckpointTerminal renders a single checkpoint in terminal style.
+func (pv *PopupViewer) renderCheckpointTerminal(node *agent.CheckpointNode, selected bool, width int) string {
+	// Type icon (ASCII-friendly)
+	icon := pv.getTerminalIcon(node.Type)
 
 	// Current marker
-	currentMarker := "  "
+	marker := "  "
 	if node.ID == pv.currentCpID {
-		currentMarker = "► "
+		marker = "► "
 	}
 
 	// Branch indicator
 	branchInfo := ""
 	if node.BranchName != "main" {
-		branchInfo = fmt.Sprintf(" [%s]", node.BranchName)
+		branchInfo = fmt.Sprintf(" @%s", node.BranchName)
 	}
 
-	// Format line
-	line := fmt.Sprintf("%s%s #%d %s%s", currentMarker, icon, node.ID, node.TimeLabel, branchInfo)
+	// Description (truncated)
+	desc := node.Description
+	maxDescLen := width - 20 - len(branchInfo)
+	if len(desc) > maxDescLen {
+		desc = desc[:maxDescLen-3] + "..."
+	}
 
-	// Truncate if needed
-	if len(line) > width-2 {
-		line = line[:width-5] + "..."
+	// Format line: ► [✎] #1 2m ago  description @branch
+	line := fmt.Sprintf("%s%s #%-2d %-6s %s%s", marker, icon, node.ID, node.TimeLabel, desc, branchInfo)
+
+	// Pad to width
+	for len(line) < width {
+		line += " "
 	}
 
 	// Style based on selection
-	style := lipgloss.NewStyle().Width(width)
 	if selected {
-		style = style.
+		style := lipgloss.NewStyle().
 			Background(lipgloss.Color("#00D4FF")).
 			Foreground(lipgloss.Color("#0A0E14")).
 			Bold(true)
+		return style.Render(line)
 	} else if node.ID == pv.currentCpID {
-		style = style.Foreground(lipgloss.Color("#00E676"))
+		style := lipgloss.NewStyle().Foreground(lipgloss.Color("#00E676"))
+		return style.Render(line)
 	}
 
-	return style.Render(line)
+	return lipgloss.NewStyle().Foreground(lipgloss.Color("#E8EDF4")).Render(line)
 }
 
-func (pv *PopupViewer) getTypeIcon(cpType agent.CheckpointType) string {
+// getTerminalIcon returns ASCII-friendly icons for checkpoint types.
+func (pv *PopupViewer) getTerminalIcon(cpType agent.CheckpointType) string {
 	switch cpType {
 	case agent.CheckpointFileEdit:
-		return "✏️"
+		return "[✎]"
 	case agent.CheckpointFileCreate:
-		return "📄"
+		return "[+]"
 	case agent.CheckpointFileDelete:
-		return "🗑️"
+		return "[-]"
 	case agent.CheckpointCommand:
-		return "⚡"
+		return "[>]"
 	case agent.CheckpointUserCreate, agent.CheckpointUserDelete, agent.CheckpointUserModify:
-		return "👤"
+		return "[U]"
 	case agent.CheckpointService:
-		return "⚙️"
+		return "[S]"
 	case agent.CheckpointFirewall:
-		return "🔥"
+		return "[F]"
 	case agent.CheckpointManual:
-		return "📌"
+		return "[M]"
 	case agent.CheckpointSession:
-		return "🚀"
+		return "[*]"
 	default:
-		return "📝"
+		return "[?]"
 	}
 }
 

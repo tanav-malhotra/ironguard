@@ -249,14 +249,17 @@ func (cv *CheckpointViewer) renderEmpty() string {
 
 // CenterOverlay centers the viewer in the terminal using lipgloss.Place.
 func CenterOverlay(overlay, background string, termWidth, termHeight int) string {
-	// Use lipgloss.Place to center the overlay on top of background
+	// Use lipgloss.Place to center the overlay
+	// We use a dark gray instead of pure black for the whitespace background
+	_ = background // Background parameter kept for API compatibility
 	return lipgloss.Place(
 		termWidth,
 		termHeight,
 		lipgloss.Center,
 		lipgloss.Center,
 		overlay,
-		lipgloss.WithWhitespaceBackground(lipgloss.Color("#000000")),
+		lipgloss.WithWhitespaceBackground(lipgloss.Color("#0A0E14")),
 	)
 }
+
 

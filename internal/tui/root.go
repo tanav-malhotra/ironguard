@@ -322,7 +322,7 @@ func (m model) generateWelcomeScreen() string {
 
   QUICK START
   ────────────────────────────────────────────────────────────────────────
-  STEP 1   /key <provider> <api-key>             Configure AI provider
+  STEP 1   /key <provider> <api-key>            Configure AI provider
   STEP 2   /start                               Begin autonomous hardening
 
   OPTIONAL (before /start)
@@ -341,20 +341,18 @@ func (m model) generateWelcomeScreen() string {
 
   CONTROLS
   ────────────────────────────────────────────────────────────────────────
-  /help             All commands                Tab           Autocomplete
-  /stop             Halt operation              Enter         Send message
-  /quit             Exit program                Ctrl+Enter    Interrupt AI
-  ↑/↓               Input history               PgUp/PgDn     Scroll chat
-  @file             Attach file                 Right-click   Open checkpoint viewer
-  Ctrl+L            Clear input                 Ctrl+Z        Undo clear
-  Ctrl+R            Refresh screen              /undo         Undo AI action
+  /help        All commands           Tab           Autocomplete
+  /stop        Halt operation         Enter         Send message
+  /quit        Exit program           Ctrl+Enter    Interrupt AI
+  ↑/↓          Input history          PgUp/PgDn     Scroll chat
+  @file        Attach file            Right-click   Open checkpoint viewer
+  Ctrl+L       Clear input            Ctrl+Z        Undo clear
+  Ctrl+R       Refresh screen         /undo         Undo AI action
 
   CHECKPOINT COMMANDS
   ────────────────────────────────────────────────────────────────────────
-  /checkpoints          Manage checkpoints (list, restore, delete, etc.)
-  /checkpoints create   Create manual checkpoint
-  /checkpoints restore  Restore to a checkpoint
-  /undo                 Undo the last action
+  /checkpoints <subcommand>                           Manage checkpoints
+  /undo                                               Undo the last action
 
   TIP: Use @filename to attach files, e.g. "analyze @report.pdf"`
 
@@ -1784,7 +1782,7 @@ func (m model) renderChat(width, height int) string {
 
 // getMaxScrollOffset calculates the maximum scroll offset based on content
 func (m model) getMaxScrollOffset() int {
-	// Count total lines in all messages, including spacing
+	// Count total lines EXACTLY as renderChat does
 	totalLines := 0
 	chatWidth := m.width - m.sidebarWidth - 7
 	if chatWidth < 20 {
@@ -1793,17 +1791,28 @@ func (m model) getMaxScrollOffset() int {
 
 	var prevRole MessageRole
 	for i, msg := range m.messages {
-		// Account for spacing between message types
+		// Account for spacing between message types (must match renderChat exactly)
 		if i > 0 {
-			if (prevRole == RoleUser && msg.Role == RoleAI) ||
-				(prevRole == RoleAI && msg.Role == RoleUser) ||
-				(prevRole == RoleTool && msg.Role == RoleAI) {
-				totalLines++ // Extra blank line
+			if prevRole != msg.Role {
+				totalLines++ // Empty line before role change
+				// Separator line for major transitions
+				if (prevRole == RoleUser && msg.Role == RoleAI) ||
+					(prevRole == RoleAI && msg.Role == RoleUser) ||
+					prevRole == RoleSystem {
+					totalLines++ // Separator line
+				}
+				totalLines++ // Empty line after separator
 			}
 		}
 
 		formatted := m.formatMessage(msg, chatWidth)
 		totalLines += strings.Count(formatted, "\n") + 1
+
+		// Separator after system messages
+		if msg.Role == RoleSystem {
+			totalLines++ // Separator line
+		}
+
 		prevRole = msg.Role
 	}
 

@@ -188,6 +188,9 @@ type AITodo struct {
 }
 
 func newModel(cfg config.Config) model {
+	// Seed randomness once for rotating placeholders
+	rand.Seed(time.Now().UnixNano())
+
 	ti := textinput.New()
 	ti.Placeholder = "Reporting for duty..."
 	ti.Focus()
@@ -388,9 +391,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return &m, nil
 		case tea.MouseButtonRight:
-			// Right-click opens checkpoint viewer
-			m.showCheckpointViewer = true
-			m.checkpointViewerIdx = 0
+			// Right-click toggles checkpoint viewer
+			if m.showCheckpointViewer {
+				m.showCheckpointViewer = false
+			} else {
+				m.showCheckpointViewer = true
+				m.checkpointViewerIdx = 0
+			}
 			return &m, nil
 		}
 		return &m, nil
@@ -918,24 +925,24 @@ func (m *model) handleArrowDown() (tea.Model, tea.Cmd) {
 func (m *model) handleCheckpointViewerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	cm := m.agent.GetCheckpointManager()
 	nodes := cm.ListCheckpoints()
-	
+
 	switch msg.String() {
 	case "esc", "q":
 		m.showCheckpointViewer = false
 		return m, nil
-		
+
 	case "up", "k":
 		if m.checkpointViewerIdx > 0 {
 			m.checkpointViewerIdx--
 		}
 		return m, nil
-		
+
 	case "down", "j":
 		if m.checkpointViewerIdx < len(nodes)-1 {
 			m.checkpointViewerIdx++
 		}
 		return m, nil
-		
+
 	case "enter":
 		// Restore to selected checkpoint
 		if m.checkpointViewerIdx >= 0 && m.checkpointViewerIdx < len(nodes) {
@@ -954,7 +961,7 @@ func (m *model) handleCheckpointViewerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.showCheckpointViewer = false
 		return m, nil
-		
+
 	case "d", "D":
 		// Delete selected checkpoint
 		if m.checkpointViewerIdx >= 0 && m.checkpointViewerIdx < len(nodes) {
@@ -973,14 +980,14 @@ func (m *model) handleCheckpointViewerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
-		
+
 	case "e", "E":
 		// Edit mode - for now just close and show a message
 		m.showCheckpointViewer = false
 		m.messages = append(m.messages, NewSystemMessage("Use /checkpoints edit <id> <description> to edit a checkpoint."))
 		return m, nil
 	}
-	
+
 	return m, nil
 }
 
@@ -1072,18 +1079,16 @@ func (m *model) updateAutocomplete() {
 			if len(files) > 0 {
 				m.autocompleteItems = make([]AutocompleteItem, len(files))
 				for i, f := range files {
-					// Show just the filename for display
-					name := f
+					// Keep full path for insertion; show basename in description
+					displayName := f
 					if idx := strings.LastIndex(f, string(os.PathSeparator)); idx >= 0 {
-						name = f[idx+1:]
+						displayName = f[idx+1:]
 					}
 					m.autocompleteItems[i] = AutocompleteItem{
 						Text:        f,
-						Description: "file",
+						Description: displayName,
 						IsArg:       true, // Treat as arg for insertion behavior
 					}
-					// Use short name for display
-					m.autocompleteItems[i].Text = name
 				}
 				m.showAutocomplete = true
 				m.autocompleteForArgs = true
@@ -2019,18 +2024,18 @@ func (m model) renderInputOnly(width int) string {
 		BorderForeground(m.theme.Primary).
 		Padding(0, 1).
 		Width(width)
-	
+
 	sb.WriteString(inputBox.Render(m.input.View()))
-	
+
 	// Status line below input - show current directory and score
 	cwd, _ := os.Getwd()
 	if len(cwd) > 40 {
 		cwd = "..." + cwd[len(cwd)-37:]
 	}
-	
+
 	var statusParts []string
 	statusParts = append(statusParts, m.styles.Muted.Render("📁 "+cwd))
-	
+
 	if m.currentScore > 0 {
 		scoreStr := fmt.Sprintf("🎯 %d/100", m.currentScore)
 		if m.currentScore >= 90 {
@@ -2041,11 +2046,11 @@ func (m model) renderInputOnly(width int) string {
 			statusParts = append(statusParts, m.styles.Error.Render(scoreStr))
 		}
 	}
-	
+
 	if m.agentBusy {
 		statusParts = append(statusParts, m.styles.Warning.Render("⚡ AI working..."))
 	}
-	
+
 	sb.WriteString("\n  " + strings.Join(statusParts, "  │  "))
 
 	return sb.String()

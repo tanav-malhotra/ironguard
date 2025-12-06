@@ -84,16 +84,16 @@ func (cv *CheckpointViewer) Render() string {
 		viewerHeight = 10
 	}
 
-	// Header
+	// Header - use theme-matching colors
 	headerStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#00FFFF")).
+		Foreground(lipgloss.Color("#00D4FF")). // Theme primary cyan
 		Align(lipgloss.Center).
 		Width(viewerWidth - 4)
 
 	header := headerStyle.Render("📍 CHECKPOINTS")
 	branchLine := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#888888")).
+		Foreground(lipgloss.Color("#8892A2")). // Theme text secondary
 		Align(lipgloss.Center).
 		Width(viewerWidth - 4).
 		Render(fmt.Sprintf("Branch: %s", cv.branch))
@@ -127,7 +127,7 @@ func (cv *CheckpointViewer) Render() string {
 	}
 	if scrollInfo != "" {
 		scrollInfo = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#666666")).
+			Foreground(lipgloss.Color("#4A5568")). // Theme muted
 			Render(scrollInfo)
 	}
 
@@ -135,11 +135,11 @@ func (cv *CheckpointViewer) Render() string {
 
 	// Footer with controls
 	footerStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#888888")).
+		Foreground(lipgloss.Color("#4A5568")). // Theme muted
 		Align(lipgloss.Center).
 		Width(viewerWidth - 4)
 
-	footer := footerStyle.Render("↑↓ Navigate  Enter Restore  D Delete  E Edit  Esc Close")
+	footer := footerStyle.Render("↑↓ - Navigate  Enter - Restore  D - Delete  E - Edit  Esc - Close")
 
 	// Combine everything
 	body := lipgloss.JoinVertical(lipgloss.Left,
@@ -153,10 +153,10 @@ func (cv *CheckpointViewer) Render() string {
 		footer,
 	)
 
-	// Box style
+	// Box style - use theme-matching border
 	boxStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#00FFFF")).
+		BorderForeground(lipgloss.Color("#1E2A3A")). // Theme subtle border
 		Padding(1, 2).
 		Width(viewerWidth).
 		Height(viewerHeight)
@@ -188,15 +188,15 @@ func (cv *CheckpointViewer) renderNode(node *agent.CheckpointNode, selected bool
 		line = line[:width-5] + "..."
 	}
 
-	// Style based on selection
+	// Style based on selection - use theme colors
 	style := lipgloss.NewStyle().Width(width)
 	if selected {
 		style = style.
-			Background(lipgloss.Color("#00FFFF")).
-			Foreground(lipgloss.Color("#000000")).
+			Background(lipgloss.Color("#00D4FF")). // Theme primary
+			Foreground(lipgloss.Color("#0A0E14")). // Theme background
 			Bold(true)
 	} else if node.ID == cv.currentID {
-		style = style.Foreground(lipgloss.Color("#00FF00"))
+		style = style.Foreground(lipgloss.Color("#00E676")) // Theme success green
 	}
 
 	return style.Render(line)
@@ -232,14 +232,14 @@ func (cv *CheckpointViewer) renderEmpty() string {
 	height := 10
 
 	content := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#888888")).
+		Foreground(lipgloss.Color("#8892A2")). // Theme text secondary
 		Align(lipgloss.Center).
 		Width(width - 4).
 		Render("No checkpoints yet.\n\nCheckpoints are created automatically\nwhen the AI modifies files.\n\nUse /checkpoints create to create one manually.")
 
 	boxStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#00FFFF")).
+		BorderForeground(lipgloss.Color("#1E2A3A")). // Theme subtle border
 		Padding(1, 2).
 		Width(width).
 		Height(height)
@@ -247,54 +247,16 @@ func (cv *CheckpointViewer) renderEmpty() string {
 	return boxStyle.Render(content)
 }
 
-// CenterOverlay centers the viewer in the terminal.
+// CenterOverlay centers the viewer in the terminal using lipgloss.Place.
 func CenterOverlay(overlay, background string, termWidth, termHeight int) string {
-	overlayLines := strings.Split(overlay, "\n")
-	overlayHeight := len(overlayLines)
-	overlayWidth := 0
-	for _, line := range overlayLines {
-		if len(line) > overlayWidth {
-			overlayWidth = len(line)
-		}
-	}
-
-	// Calculate centering offsets
-	topPad := (termHeight - overlayHeight) / 2
-	if topPad < 0 {
-		topPad = 0
-	}
-	leftPad := (termWidth - overlayWidth) / 2
-	if leftPad < 0 {
-		leftPad = 0
-	}
-
-	// Build centered overlay
-	var result strings.Builder
-	bgLines := strings.Split(background, "\n")
-
-	for i := 0; i < termHeight; i++ {
-		if i >= topPad && i < topPad+overlayHeight {
-			// Overlay line
-			olIdx := i - topPad
-			if olIdx < len(overlayLines) {
-				line := strings.Repeat(" ", leftPad) + overlayLines[olIdx]
-				// Pad to full width
-				if len(line) < termWidth {
-					line += strings.Repeat(" ", termWidth-len(line))
-				}
-				result.WriteString(line)
-			}
-		} else {
-			// Background line (dimmed)
-			if i < len(bgLines) {
-				result.WriteString(bgLines[i])
-			}
-		}
-		if i < termHeight-1 {
-			result.WriteString("\n")
-		}
-	}
-
-	return result.String()
+	// Use lipgloss.Place to center the overlay on top of background
+	return lipgloss.Place(
+		termWidth,
+		termHeight,
+		lipgloss.Center,
+		lipgloss.Center,
+		overlay,
+		lipgloss.WithWhitespaceBackground(lipgloss.Color("#000000")),
+	)
 }
 

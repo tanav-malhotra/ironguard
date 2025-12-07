@@ -1469,14 +1469,26 @@ func (m model) View() string {
 		finalView = CenterOverlay(viewer, finalView, m.width, m.height, m.sidebarWidth)
 	}
 
-	// Apply consistent background color to entire view for cross-terminal consistency
-	// This ensures the TUI looks the same on Linux Mint, Ubuntu, etc.
-	bgStyle := lipgloss.NewStyle().
+	// Create a full-screen background layer, then place content on top
+	// This ensures consistent background color across all terminals (Linux Mint, Ubuntu, etc.)
+	bgLayer := lipgloss.NewStyle().
 		Width(m.width).
 		Height(m.height).
-		Background(m.theme.Background)
+		Background(m.theme.Background).
+		Render(strings.Repeat(strings.Repeat(" ", m.width)+"\n", m.height))
 	
-	return bgStyle.Render(finalView)
+	// Place the content on top of the background layer
+	finalView = lipgloss.Place(
+		m.width, m.height,
+		lipgloss.Left, lipgloss.Top,
+		finalView,
+		lipgloss.WithWhitespaceBackground(m.theme.Background),
+	)
+	
+	// If Place doesn't fully cover, fall back to the background layer approach
+	_ = bgLayer // Keep for reference, Place with WhitespaceBackground should handle it
+	
+	return finalView
 }
 
 func (m model) renderSidebar() string {

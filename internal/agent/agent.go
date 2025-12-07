@@ -119,6 +119,9 @@ func New(cfg *config.Config) *Agent {
 	llmReg := llm.NewRegistry()
 	toolReg := tools.NewRegistry()
 	
+	// Set the LLM provider based on config (important for --claude, --openai, --gemini flags)
+	llmReg.SetCurrent(llm.Provider(cfg.Provider))
+	
 	a := &Agent{
 		cfg:          cfg,
 		llmRegistry:  llmReg,

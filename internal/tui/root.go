@@ -1469,26 +1469,39 @@ func (m model) View() string {
 		finalView = CenterOverlay(viewer, finalView, m.width, m.height, m.sidebarWidth)
 	}
 
-	// Create a full-screen background layer, then place content on top
-	// This ensures consistent background color across all terminals (Linux Mint, Ubuntu, etc.)
-	bgLayer := lipgloss.NewStyle().
-		Width(m.width).
-		Height(m.height).
-		Background(m.theme.Background).
-		Render(strings.Repeat(strings.Repeat(" ", m.width)+"\n", m.height))
-	
-	// Place the content on top of the background layer
-	finalView = lipgloss.Place(
-		m.width, m.height,
-		lipgloss.Left, lipgloss.Top,
-		finalView,
-		lipgloss.WithWhitespaceBackground(m.theme.Background),
-	)
-	
-	// If Place doesn't fully cover, fall back to the background layer approach
-	_ = bgLayer // Keep for reference, Place with WhitespaceBackground should handle it
+	// Apply consistent background color across all terminals (Linux Mint, Ubuntu, etc.)
+	// Pad each line to full width and fill vertical space with background color
+	finalView = m.applyFullBackground(finalView)
 	
 	return finalView
+}
+
+// applyFullBackground ensures every cell in the terminal has the background color applied.
+// This pads lines to full width and fills vertical space.
+func (m model) applyFullBackground(content string) string {
+	bg := m.theme.Background
+	bgStyle := lipgloss.NewStyle().Background(bg)
+	
+	lines := strings.Split(content, "\n")
+	result := make([]string, 0, m.height)
+	
+	// Process existing lines - pad each to full width
+	for _, line := range lines {
+		lineWidth := lipgloss.Width(line)
+		if lineWidth < m.width {
+			padding := m.width - lineWidth
+			line = line + bgStyle.Render(strings.Repeat(" ", padding))
+		}
+		result = append(result, line)
+	}
+	
+	// Fill remaining vertical space with empty background-colored lines
+	emptyLine := bgStyle.Render(strings.Repeat(" ", m.width))
+	for len(result) < m.height {
+		result = append(result, emptyLine)
+	}
+	
+	return strings.Join(result, "\n")
 }
 
 func (m model) renderSidebar() string {
@@ -1904,8 +1917,8 @@ func (m model) formatMessage(msg Message, width int) string {
 		// Build styled message
 		var lines []string
 
-		// Show "You" label right-aligned
-		label := m.styles.UserMessage.Render("You ▾")
+		// Show "You" label right-aligned (diamond for consistency with AI label)
+		label := m.styles.UserMessage.Render("You ◇")
 		labelWidth := lipgloss.Width(label)
 		labelPadding := width - labelWidth - 1
 		if labelPadding < 0 {

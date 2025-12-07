@@ -459,6 +459,7 @@ func cmdModel(m *model, args string) string {
 	// Determine which provider this model belongs to and auto-switch
 	var newProvider config.Provider
 	var providerName string
+	oldProvider := m.cfg.Provider
 	
 	// Check Claude models
 	for _, model := range llm.ModelPresets[llm.ProviderClaude] {
@@ -492,16 +493,18 @@ func cmdModel(m *model, args string) string {
 	}
 	
 	// If we identified a provider, switch to it
-	if newProvider != "" && newProvider != m.cfg.Provider {
+	providerSwitched := false
+	if newProvider != "" && newProvider != oldProvider {
 		m.cfg.Provider = newProvider
 		m.agent.SetProvider(string(newProvider))
+		providerSwitched = true
 	}
 	
 	m.cfg.Model = args
 	m.agent.SetModel(args)
 	
-	if providerName != "" && newProvider != m.cfg.Provider {
-		return fmt.Sprintf("Model set to: %s\n  (Auto-switched to %s)", args, providerName)
+	if providerSwitched {
+		return fmt.Sprintf("Model set to: %s\n  ⚡ Auto-switched provider to %s", args, providerName)
 	} else if providerName != "" {
 		return fmt.Sprintf("Model set to: %s (%s)", args, providerName)
 	}

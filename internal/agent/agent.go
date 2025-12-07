@@ -351,6 +351,11 @@ func (a *Agent) SetProvider(provider string) error {
 	return a.llmRegistry.SetCurrent(llm.Provider(provider))
 }
 
+// SetModel sets the model to use for LLM calls.
+func (a *Agent) SetModel(model string) {
+	a.cfg.Model = model
+}
+
 // Cancel cancels the current operation.
 func (a *Agent) Cancel() {
 	if a.cancel != nil {
@@ -1139,6 +1144,7 @@ func (a *Agent) callLLM(ctx context.Context) (*llm.ChatResponse, error) {
 		Tools:        llmTools,
 		MaxTokens:    4096,
 		SystemPrompt: a.buildSystemPrompt(),
+		Model:        a.cfg.Model, // Use the configured model
 	}
 
 	a.events <- Event{Type: EventStreamStart}

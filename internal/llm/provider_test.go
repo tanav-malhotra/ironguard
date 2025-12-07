@@ -26,7 +26,7 @@ func TestDefaultModel(t *testing.T) {
 	}{
 		{ProviderClaude, "claude-opus-4-5"},
 		{ProviderOpenAI, "gpt-5.1"}, // gpt-5.1 is first in ModelPresets, so it's the default
-		{ProviderGemini, "gemini-3-pro"},
+		{ProviderGemini, "gemini-3-pro-preview"},
 	}
 
 	for _, tt := range tests {

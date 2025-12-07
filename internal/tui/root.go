@@ -1469,7 +1469,14 @@ func (m model) View() string {
 		finalView = CenterOverlay(viewer, finalView, m.width, m.height, m.sidebarWidth)
 	}
 
-	return finalView
+	// Apply consistent background color to entire view for cross-terminal consistency
+	// This ensures the TUI looks the same on Linux Mint, Ubuntu, etc.
+	bgStyle := lipgloss.NewStyle().
+		Width(m.width).
+		Height(m.height).
+		Background(m.theme.Background)
+	
+	return bgStyle.Render(finalView)
 }
 
 func (m model) renderSidebar() string {
@@ -2311,14 +2318,22 @@ func truncate(s string, max int) string {
 	return s[:max-3] + "..."
 }
 
-// getModelOptionsForProvider returns model options for the current provider, filtered by prefix.
+// getModelOptionsForProvider returns model options for ALL providers, filtered by prefix.
+// This enables the unified /model command to show and autocomplete models from any provider.
 func (m *model) getModelOptionsForProvider(prefix string) []string {
-	models := llm.ModelPresets[llm.Provider(m.cfg.Provider)]
-	if prefix == "" {
-		return models
+	var allModels []string
+	
+	// Collect models from all providers
+	for _, provider := range []llm.Provider{llm.ProviderClaude, llm.ProviderOpenAI, llm.ProviderGemini} {
+		allModels = append(allModels, llm.ModelPresets[provider]...)
 	}
+	
+	if prefix == "" {
+		return allModels
+	}
+	
 	var matches []string
-	for _, model := range models {
+	for _, model := range allModels {
 		if strings.HasPrefix(model, prefix) {
 			matches = append(matches, model)
 		}

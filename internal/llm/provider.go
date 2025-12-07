@@ -133,7 +133,7 @@ var ModelPresets = map[Provider][]string{
 		"gpt-5.1-codex-max", // Maximum capability codex (test availability)
 	},
 	ProviderGemini: {
-		"gemini-3-pro", // Latest flagship
+		"gemini-3-pro-preview", // Latest flagship (preview)
 	},
 }
 

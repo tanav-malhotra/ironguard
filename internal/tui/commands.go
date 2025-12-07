@@ -46,15 +46,8 @@ func (r *CommandRegistry) registerDefaults() {
 			Handler:     cmdHelp,
 		},
 		{
-			Name:        "provider",
-			Description: "Switch AI provider",
-			Args:        "<claude|openai|gemini>",
-			ArgOptions:  []string{"claude", "openai", "gemini"},
-			Handler:     cmdProvider,
-		},
-		{
 			Name:        "model",
-			Description: "Set the model name",
+			Description: "Select AI model (auto-switches provider)",
 			Args:        "<model-name>",
 			Handler:     cmdModel,
 		},
@@ -420,52 +413,104 @@ func cmdHelp(m *model, _ string) string {
 	return help
 }
 
-func cmdProvider(m *model, args string) string {
-	switch args {
-	case "claude", "anthropic":
-		m.cfg.Provider = config.ProviderAnthropic
-		m.agent.SetProvider("claude")
-		return "Switched to Claude (Anthropic)"
-	case "openai", "gpt":
-		m.cfg.Provider = config.ProviderOpenAI
-		m.agent.SetProvider("openai")
-		return "Switched to OpenAI"
-	case "gemini", "google":
-		m.cfg.Provider = config.ProviderGemini
-		m.agent.SetProvider("gemini")
-		return "Switched to Gemini (Google)"
-	case "":
-		return "Current provider: " + string(m.cfg.Provider) + "\nUsage: /provider <claude|openai|gemini>"
-	default:
-		return "Unknown provider: " + args + "\nAvailable: claude, openai, gemini"
-	}
-}
-
 func cmdModel(m *model, args string) string {
 	if args == "" {
-		return "Current model: " + m.cfg.Model + "\nUsage: /model <model-name>\nUse /models to see available models"
+		// Show all available models from all providers
+		var sb strings.Builder
+		sb.WriteString("Current: " + m.cfg.Model + " (" + string(m.cfg.Provider) + ")\n\n")
+		sb.WriteString("Available models (Tab to autocomplete):\n\n")
+		
+		// Claude models
+		sb.WriteString("  CLAUDE (Anthropic):\n")
+		for _, model := range llm.ModelPresets[llm.ProviderClaude] {
+			marker := "    "
+			if model == m.cfg.Model {
+				marker = "  ► "
+			}
+			sb.WriteString(marker + model + "\n")
+		}
+		sb.WriteString("\n")
+		
+		// OpenAI models
+		sb.WriteString("  OPENAI:\n")
+		for _, model := range llm.ModelPresets[llm.ProviderOpenAI] {
+			marker := "    "
+			if model == m.cfg.Model {
+				marker = "  ► "
+			}
+			sb.WriteString(marker + model + "\n")
+		}
+		sb.WriteString("\n")
+		
+		// Gemini models
+		sb.WriteString("  GEMINI (Google):\n")
+		for _, model := range llm.ModelPresets[llm.ProviderGemini] {
+			marker := "    "
+			if model == m.cfg.Model {
+				marker = "  ► "
+			}
+			sb.WriteString(marker + model + "\n")
+		}
+		
+		sb.WriteString("\nUsage: /model <model-name>")
+		return sb.String()
 	}
+	
+	// Determine which provider this model belongs to and auto-switch
+	var newProvider config.Provider
+	var providerName string
+	
+	// Check Claude models
+	for _, model := range llm.ModelPresets[llm.ProviderClaude] {
+		if model == args || strings.HasPrefix(args, "claude") {
+			newProvider = config.ProviderAnthropic
+			providerName = "Claude (Anthropic)"
+			break
+		}
+	}
+	
+	// Check OpenAI models
+	if newProvider == "" {
+		for _, model := range llm.ModelPresets[llm.ProviderOpenAI] {
+			if model == args || strings.HasPrefix(args, "gpt") || strings.HasPrefix(args, "o1") || strings.HasPrefix(args, "o3") {
+				newProvider = config.ProviderOpenAI
+				providerName = "OpenAI"
+				break
+			}
+		}
+	}
+	
+	// Check Gemini models
+	if newProvider == "" {
+		for _, model := range llm.ModelPresets[llm.ProviderGemini] {
+			if model == args || strings.HasPrefix(args, "gemini") {
+				newProvider = config.ProviderGemini
+				providerName = "Gemini (Google)"
+				break
+			}
+		}
+	}
+	
+	// If we identified a provider, switch to it
+	if newProvider != "" && newProvider != m.cfg.Provider {
+		m.cfg.Provider = newProvider
+		m.agent.SetProvider(string(newProvider))
+	}
+	
 	m.cfg.Model = args
+	m.agent.SetModel(args)
+	
+	if providerName != "" && newProvider != m.cfg.Provider {
+		return fmt.Sprintf("Model set to: %s\n  (Auto-switched to %s)", args, providerName)
+	} else if providerName != "" {
+		return fmt.Sprintf("Model set to: %s (%s)", args, providerName)
+	}
 	return "Model set to: " + args
 }
 
 func cmdModels(m *model, _ string) string {
-	models := ""
-	switch m.cfg.Provider {
-	case config.ProviderAnthropic:
-		models = "Claude models:\n"
-		models += "  claude-opus-4-5 ⭐ (default - most powerful)\n"
-		models += "  claude-sonnet-4-5 (fast alternative)\n"
-	case config.ProviderOpenAI:
-		models = "OpenAI models:\n"
-		models += "  gpt-5.1 ⭐ (default - latest flagship)\n"
-		models += "  gpt-5.1-codex (coding-optimized variant)\n"
-		models += "  gpt-5.1-codex-max (maximum capability - test availability)\n"
-	case config.ProviderGemini:
-		models = "Gemini models:\n"
-		models += "  gemini-3-pro ⭐ (default)\n"
-	}
-	return models
+	// This is now an alias for /model with no arguments
+	return cmdModel(m, "")
 }
 
 func cmdConfirm(m *model, _ string) string {

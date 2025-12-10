@@ -369,7 +369,7 @@ When you change settings like `/confirm`, `/autopilot`, or `/screen control`, th
 | Provider | Models |
 |----------|--------|
 | Anthropic (default) | claude-opus-4-5, claude-sonnet-4-5 |
-| OpenAI | gpt-5.1, gpt-5.1-codex |
+| OpenAI | gpt-5.1, gpt-5.1-codex-max |
 | Google | gemini-3-pro |
 
 Set your provider with `/provider <name>` and model with `/model <name>`.

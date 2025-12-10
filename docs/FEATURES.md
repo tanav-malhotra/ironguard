@@ -867,7 +867,7 @@ MCP tools appear automatically and work like built-in tools.
 
 ### AI Providers
 - **Anthropic Claude** (default): claude-opus-4-5, claude-sonnet-4-5
-- **OpenAI**: gpt-5.1, gpt-5.1-codex, gpt-5.1-codex-max
+- **OpenAI**: gpt-5.1, gpt-5.1-codex-max
 - **Google Gemini**: gemini-3-pro
 
 ---

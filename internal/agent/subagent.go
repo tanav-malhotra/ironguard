@@ -142,7 +142,7 @@ func (m *SubAgentManager) SpawnSubAgent(ctx context.Context, task string, system
 		Task:         task,
 		SystemPrompt: systemPrompt,
 		Provider:     config.ProviderAnthropic,
-		Model:        "claude-sonnet-4-5", // Use faster model for subagents
+		Model:        "claude-opus-4-5", // Use most powerful model for subagents
 		Status:       SubAgentStatusPending,
 		StartedAt:    time.Now(),
 		toolRegistry: m.toolRegistry,

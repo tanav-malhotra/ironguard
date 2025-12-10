@@ -124,8 +124,7 @@ type Client interface {
 // Only the most powerful models - we need maximum capability to win CyberPatriot.
 var ModelPresets = map[Provider][]string{
 	ProviderClaude: {
-		"claude-opus-4-5",   // Most powerful - DEFAULT
-		"claude-sonnet-4-5", // Fast alternative
+		"claude-opus-4-5", // Most powerful - DEFAULT
 	},
 	ProviderOpenAI: {
 		"gpt-5.1",           // Latest flagship - DEFAULT

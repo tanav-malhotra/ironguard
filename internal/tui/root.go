@@ -224,7 +224,7 @@ func newModel(cfg config.Config) model {
 		messages:      []Message{},
 		input:         ti,
 		apiKeys:       make(map[string]string),
-		sidebarWidth:  32, // Wider for manual tasks
+		sidebarWidth:  40, // Wider for manual tasks
 		theme:         theme,
 		styles:        styles,
 		cmdRegistry:   NewCommandRegistry(),
@@ -346,7 +346,8 @@ func (m model) generateWelcomeScreen() string {
   ↑/↓          Input history           PgUp/PgDn     Scroll chat
   @file        Attach file             Right-click   Open ironguard viewer
   Ctrl+L       Clear input             Ctrl+Z        Undo
-  Ctrl+R       Refresh screen          /undo         Undo AI action
+  Ctrl+R       Refresh screen          Ctrl+S        Refresh score
+  /undo        Undo AI action
 
   CHECKPOINT COMMANDS
   ────────────────────────────────────────────────────────────────────────
@@ -748,6 +749,15 @@ func (m *model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyCtrlR:
 		// Quick refresh - re-query terminal size and redraw
 		return m, tea.Batch(m.refreshTerminalSize(), tea.ClearScreen)
+
+	case tea.KeyCtrlS:
+		// Quick score refresh
+		m.pendingAction = &PendingAction{
+			Type:        ActionCheckScore,
+			Description: "Check current score",
+		}
+		m.messages = append(m.messages, NewSystemMessage("🎯 Refreshing score..."))
+		return m, m.executeAction(m.pendingAction)
 
 	case tea.KeyTab:
 		if m.showAutocomplete && len(m.autocompleteItems) > 0 {
@@ -2348,9 +2358,17 @@ func truncate(s string, max int) string {
 func (m *model) getModelOptionsForProvider(prefix string) []string {
 	var allModels []string
 	
-	// Collect models from all providers
-	for _, provider := range []llm.Provider{llm.ProviderClaude, llm.ProviderOpenAI, llm.ProviderGemini} {
-		allModels = append(allModels, llm.ModelPresets[provider]...)
+	// If local provider is active, show local models
+	if m.cfg.Provider == config.ProviderLocal {
+		localModels := m.agent.GetLocalModels()
+		if len(localModels) > 0 {
+			allModels = localModels
+		}
+	} else {
+		// Collect models from all cloud providers
+		for _, provider := range []llm.Provider{llm.ProviderClaude, llm.ProviderOpenAI, llm.ProviderGemini} {
+			allModels = append(allModels, llm.ModelPresets[provider]...)
+		}
 	}
 	
 	if prefix == "" {

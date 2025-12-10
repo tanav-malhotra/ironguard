@@ -9,8 +9,9 @@ import (
 
 // Registry manages LLM client instances.
 type Registry struct {
-	clients map[Provider]Client
-	current Provider
+	clients      map[Provider]Client
+	current      Provider
+	localProvider *LocalProvider
 }
 
 // NewRegistry creates a new client registry with all providers initialized.
@@ -26,6 +27,12 @@ func NewRegistry() *Registry {
 	r.clients[ProviderGemini] = NewGeminiClient()
 
 	return r
+}
+
+// SetLocalProvider sets the local LLM provider.
+func (r *Registry) SetLocalProvider(p *LocalProvider) {
+	r.localProvider = p
+	r.clients[ProviderLocal] = p
 }
 
 // Get returns the client for a specific provider.
@@ -68,7 +75,16 @@ func (r *Registry) SetAPIKey(p Provider, key string) error {
 
 // Providers returns all available providers.
 func (r *Registry) Providers() []Provider {
-	return []Provider{ProviderClaude, ProviderOpenAI, ProviderGemini}
+	providers := []Provider{ProviderClaude, ProviderOpenAI, ProviderGemini}
+	if r.localProvider != nil && r.localProvider.HasAPIKey() {
+		providers = append(providers, ProviderLocal)
+	}
+	return providers
+}
+
+// GetLocalProvider returns the local provider if available.
+func (r *Registry) GetLocalProvider() *LocalProvider {
+	return r.localProvider
 }
 
 // HasAPIKey returns true if the current provider has an API key configured.

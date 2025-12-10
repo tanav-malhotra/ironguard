@@ -14,6 +14,7 @@ const (
 	ProviderAnthropic Provider = "claude"
 	ProviderOpenAI    Provider = "openai"
 	ProviderGemini    Provider = "gemini"
+	ProviderLocal     Provider = "local"
 )
 
 // Mode controls how aggressively the agent is allowed to act.
@@ -158,6 +159,8 @@ func ProviderFromString(s string) Provider {
 		return ProviderOpenAI
 	case "gemini", "google":
 		return ProviderGemini
+	case "local", "ollama", "lmstudio":
+		return ProviderLocal
 	default:
 		return ProviderAnthropic
 	}

@@ -157,6 +157,11 @@ func New(cfg *config.Config) *Agent {
 		a.handleSubAgentCompletion(id, task, status, result)
 	})
 	
+	// Set up token callback to track subagent costs
+	a.subAgentManager.SetTokenCallback(func(inputTokens, outputTokens int, model string) {
+		a.tokenUsage.AddSubagentUsage(inputTokens, outputTokens, model)
+	})
+	
 	// Register subagent manager with tools package
 	adapter := NewSubAgentManagerAdapter(a.subAgentManager)
 	tools.SetSubAgentManager(adapter)
@@ -361,6 +366,22 @@ func (a *Agent) SetProvider(provider string) error {
 // SetModel sets the model to use for LLM calls.
 func (a *Agent) SetModel(model string) {
 	a.cfg.Model = model
+	// Update token usage tracker with new model for cost calculation
+	a.tokenUsage.SetModel(model)
+}
+
+// SetLocalProvider sets the local LLM provider.
+func (a *Agent) SetLocalProvider(p *llm.LocalProvider) {
+	a.llmRegistry.SetLocalProvider(p)
+}
+
+// GetLocalModels returns the list of models from the local provider, if connected.
+func (a *Agent) GetLocalModels() []string {
+	localProvider := a.llmRegistry.GetLocalProvider()
+	if localProvider == nil {
+		return nil
+	}
+	return localProvider.Models()
 }
 
 // Cancel cancels the current operation.

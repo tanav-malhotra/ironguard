@@ -4,6 +4,37 @@ import (
 	"sync"
 )
 
+// ModelPricing contains pricing info for an LLM model (per 1M tokens).
+type ModelPricing struct {
+	InputPer1M  float64 // Cost per 1M input tokens
+	OutputPer1M float64 // Cost per 1M output tokens
+}
+
+// ModelPricingMap contains pricing for known models (USD per 1M tokens).
+// Prices are approximate and may vary. Updated Dec 2024.
+var ModelPricingMap = map[string]ModelPricing{
+	// Claude models
+	"claude-opus-4-5":   {InputPer1M: 15.00, OutputPer1M: 75.00},
+	"claude-sonnet-4-5": {InputPer1M: 3.00, OutputPer1M: 15.00},
+	// OpenAI models (hypothetical GPT-5.1 pricing, based on trends)
+	"gpt-5.1":           {InputPer1M: 10.00, OutputPer1M: 30.00},
+	"gpt-5.1-codex-max": {InputPer1M: 10.00, OutputPer1M: 30.00},
+	// Gemini models
+	"gemini-3-pro-preview": {InputPer1M: 7.00, OutputPer1M: 21.00},
+	"gemini-3-pro":         {InputPer1M: 7.00, OutputPer1M: 21.00},
+	// Local models (free)
+	"local": {InputPer1M: 0.00, OutputPer1M: 0.00},
+}
+
+// GetModelPricing returns pricing for a model, with fallback to defaults.
+func GetModelPricing(model string) ModelPricing {
+	if pricing, ok := ModelPricingMap[model]; ok {
+		return pricing
+	}
+	// Default fallback pricing
+	return ModelPricing{InputPer1M: 5.00, OutputPer1M: 15.00}
+}
+
 // TokenUsage tracks token usage for the session.
 type TokenUsage struct {
 	mu sync.RWMutex
@@ -15,6 +46,15 @@ type TokenUsage struct {
 	// Session totals
 	TotalInputTokens  int // Total input tokens used this session
 	TotalOutputTokens int // Total output tokens used this session
+	
+	// Subagent totals (tracked separately)
+	SubagentInputTokens  int // Total input tokens from subagents
+	SubagentOutputTokens int // Total output tokens from subagents
+	
+	// Cost tracking
+	CurrentModel     string  // Current model for pricing
+	TotalCostUSD     float64 // Total estimated cost in USD
+	SubagentCostUSD  float64 // Cost from subagents
 	
 	// Summarization stats
 	TokensSavedBySummary int // Tokens saved by summarization
@@ -28,6 +68,7 @@ type TokenUsage struct {
 func NewTokenUsage() *TokenUsage {
 	return &TokenUsage{
 		ContextLimit: 200000, // Default to 200K (Claude's limit)
+		CurrentModel: "claude-opus-4-5",
 	}
 }
 
@@ -38,20 +79,53 @@ func (t *TokenUsage) SetContextLimit(limit int) {
 	t.ContextLimit = limit
 }
 
-// AddInput records input tokens used.
+// SetModel sets the current model for pricing calculations.
+func (t *TokenUsage) SetModel(model string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.CurrentModel = model
+}
+
+// AddInput records input tokens used and updates cost.
 func (t *TokenUsage) AddInput(tokens int) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.InputTokens = tokens
 	t.TotalInputTokens += tokens
+	
+	// Calculate cost
+	pricing := GetModelPricing(t.CurrentModel)
+	cost := float64(tokens) / 1_000_000.0 * pricing.InputPer1M
+	t.TotalCostUSD += cost
 }
 
-// AddOutput records output tokens generated.
+// AddOutput records output tokens generated and updates cost.
 func (t *TokenUsage) AddOutput(tokens int) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.OutputTokens += tokens
 	t.TotalOutputTokens += tokens
+	
+	// Calculate cost
+	pricing := GetModelPricing(t.CurrentModel)
+	cost := float64(tokens) / 1_000_000.0 * pricing.OutputPer1M
+	t.TotalCostUSD += cost
+}
+
+// AddSubagentUsage records tokens used by a subagent.
+func (t *TokenUsage) AddSubagentUsage(inputTokens, outputTokens int, model string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.SubagentInputTokens += inputTokens
+	t.SubagentOutputTokens += outputTokens
+	
+	// Calculate subagent cost
+	pricing := GetModelPricing(model)
+	inputCost := float64(inputTokens) / 1_000_000.0 * pricing.InputPer1M
+	outputCost := float64(outputTokens) / 1_000_000.0 * pricing.OutputPer1M
+	subCost := inputCost + outputCost
+	t.SubagentCostUSD += subCost
+	t.TotalCostUSD += subCost
 }
 
 // RecordSummary records that a summarization occurred.
@@ -81,14 +155,21 @@ func (t *TokenUsage) GetStats() TokenStats {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	return TokenStats{
-		CurrentContext:       t.InputTokens,
-		ContextLimit:         t.ContextLimit,
-		ContextPercentage:    float64(t.InputTokens) / float64(t.ContextLimit) * 100,
-		TotalInputTokens:     t.TotalInputTokens,
-		TotalOutputTokens:    t.TotalOutputTokens,
-		TotalTokens:          t.TotalInputTokens + t.TotalOutputTokens,
-		TokensSavedBySummary: t.TokensSavedBySummary,
-		SummaryCount:         t.SummaryCount,
+		CurrentContext:        t.InputTokens,
+		ContextLimit:          t.ContextLimit,
+		ContextPercentage:     float64(t.InputTokens) / float64(t.ContextLimit) * 100,
+		TotalInputTokens:      t.TotalInputTokens,
+		TotalOutputTokens:     t.TotalOutputTokens,
+		TotalTokens:           t.TotalInputTokens + t.TotalOutputTokens,
+		SubagentInputTokens:   t.SubagentInputTokens,
+		SubagentOutputTokens:  t.SubagentOutputTokens,
+		SubagentTotalTokens:   t.SubagentInputTokens + t.SubagentOutputTokens,
+		TotalCostUSD:          t.TotalCostUSD,
+		SubagentCostUSD:       t.SubagentCostUSD,
+		MainAgentCostUSD:      t.TotalCostUSD - t.SubagentCostUSD,
+		CurrentModel:          t.CurrentModel,
+		TokensSavedBySummary:  t.TokensSavedBySummary,
+		SummaryCount:          t.SummaryCount,
 	}
 }
 
@@ -100,6 +181,10 @@ func (t *TokenUsage) Reset() {
 	t.OutputTokens = 0
 	t.TotalInputTokens = 0
 	t.TotalOutputTokens = 0
+	t.SubagentInputTokens = 0
+	t.SubagentOutputTokens = 0
+	t.TotalCostUSD = 0
+	t.SubagentCostUSD = 0
 	t.TokensSavedBySummary = 0
 	t.SummaryCount = 0
 }
@@ -109,9 +194,16 @@ type TokenStats struct {
 	CurrentContext       int     // Current context size in tokens
 	ContextLimit         int     // Maximum context window
 	ContextPercentage    float64 // Percentage of context used
-	TotalInputTokens     int     // Total input tokens this session
-	TotalOutputTokens    int     // Total output tokens this session
-	TotalTokens          int     // Total tokens (input + output)
+	TotalInputTokens     int     // Total input tokens this session (main agent)
+	TotalOutputTokens    int     // Total output tokens this session (main agent)
+	TotalTokens          int     // Total tokens (input + output) (main agent)
+	SubagentInputTokens  int     // Total input tokens from subagents
+	SubagentOutputTokens int     // Total output tokens from subagents
+	SubagentTotalTokens  int     // Total tokens from subagents
+	TotalCostUSD         float64 // Total estimated cost in USD (main + subagents)
+	SubagentCostUSD      float64 // Cost from subagents only
+	MainAgentCostUSD     float64 // Cost from main agent only
+	CurrentModel         string  // Current model name
 	TokensSavedBySummary int     // Tokens saved by summarization
 	SummaryCount         int     // Number of summarizations
 }

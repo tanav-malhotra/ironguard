@@ -12,6 +12,7 @@ const (
 	ProviderClaude Provider = "claude"
 	ProviderOpenAI Provider = "openai"
 	ProviderGemini Provider = "gemini"
+	ProviderLocal  Provider = "local"
 )
 
 // Message represents a chat message.

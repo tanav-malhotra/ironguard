@@ -338,6 +338,18 @@ func (r *CommandRegistry) registerDefaults() {
 			ArgOptions:  []string{"on", "off"},
 			Handler:     cmdSoundOfficial,
 		},
+		// Local LLM commands
+		{
+			Name:        "local",
+			Description: "Switch to local LLM (Ollama, LM Studio, etc.)",
+			Args:        "[server-url]",
+			Handler:     cmdLocal,
+		},
+		{
+			Name:        "local-scan",
+			Description: "Scan for local LLM servers",
+			Handler:     cmdLocalScan,
+		},
 	}
 }
 
@@ -409,6 +421,7 @@ func cmdHelp(m *model, _ string) string {
 	help += "  Ctrl+L       - Clear input line\n"
 	help += "  Ctrl+Z       - Undo clear (restore input)\n"
 	help += "  Ctrl+R       - Refresh screen (fixes resize)\n"
+	help += "  Ctrl+S       - Refresh score\n"
 	help += "  Right-click  - Open checkpoint viewer\n"
 	return help
 }
@@ -1280,30 +1293,67 @@ func cmdSummarize(m *model, args string) string {
 func cmdTokens(m *model, args string) string {
 	stats := m.agent.GetTokenStats()
 	
-	return fmt.Sprintf(`📊 Token Usage Statistics
+	// Format cost with appropriate precision
+	formatCost := func(cost float64) string {
+		if cost < 0.01 {
+			return fmt.Sprintf("$%.4f", cost)
+		}
+		return fmt.Sprintf("$%.2f", cost)
+	}
+	
+	result := fmt.Sprintf(`📊 Token Usage Statistics
 
+Current Model: %s
 Current Context:
   • Tokens: ~%d / %d (%.1f%% of limit)
 
-Session Totals:
+Main Agent:
   • Input tokens:  %d
   • Output tokens: %d
   • Total tokens:  %d
-
-Summarization:
-  • Times summarized: %d
-  • Tokens saved:     ~%d
-
-Note: Token counts are estimates (~3-4 chars per token).`,
+  • Cost:          %s`,
+		stats.CurrentModel,
 		stats.CurrentContext,
 		stats.ContextLimit,
 		stats.ContextPercentage,
 		stats.TotalInputTokens,
 		stats.TotalOutputTokens,
 		stats.TotalTokens,
+		formatCost(stats.MainAgentCostUSD),
+	)
+	
+	// Add subagent stats if any
+	if stats.SubagentTotalTokens > 0 {
+		result += fmt.Sprintf(`
+
+Subagents:
+  • Input tokens:  %d
+  • Output tokens: %d
+  • Total tokens:  %d
+  • Cost:          %s`,
+			stats.SubagentInputTokens,
+			stats.SubagentOutputTokens,
+			stats.SubagentTotalTokens,
+			formatCost(stats.SubagentCostUSD),
+		)
+	}
+	
+	result += fmt.Sprintf(`
+
+💰 TOTAL SESSION COST: %s
+
+Summarization:
+  • Times summarized: %d
+  • Tokens saved:     ~%d
+
+Note: Token counts are estimates (~3-4 chars per token).
+Cost estimates based on published API pricing.`,
+		formatCost(stats.TotalCostUSD),
 		stats.SummaryCount,
 		stats.TokensSavedBySummary,
 	)
+	
+	return result
 }
 
 // Todos command - shows AI's task list
@@ -1823,4 +1873,121 @@ func cmdSoundOfficial(m *model, args string) string {
 	default:
 		return "Usage: /sound-official [on|off]"
 	}
+}
+
+// Local LLM commands
+
+func cmdLocal(m *model, args string) string {
+	// Scan for local servers first if no URL provided
+	if args == "" {
+		servers := llm.DetectLocalServers()
+		if len(servers) == 0 {
+			return `🔍 No local LLM servers detected.
+
+Make sure one of these is running:
+  • Ollama (default port 11434)
+  • LM Studio (default port 1234)
+  • text-generation-webui (default port 5000)
+
+Or specify a URL: /local http://localhost:11434
+
+Tip: Use /local-scan to scan for servers`
+		}
+		
+		// Use the first detected server
+		server := servers[0]
+		localProvider := llm.NewLocalProvider()
+		if err := localProvider.Connect(server); err != nil {
+			return fmt.Sprintf("❌ Failed to connect: %s", err)
+		}
+		
+		// Register the local provider
+		m.agent.SetLocalProvider(localProvider)
+		
+		// Switch to local provider
+		m.cfg.Provider = config.ProviderLocal
+		m.agent.SetProvider("local")
+		
+		if len(server.Models) > 0 {
+			m.cfg.Model = server.Models[0]
+			m.agent.SetModel(server.Models[0])
+		}
+		
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("✅ Connected to %s at %s\n\n", server.Type, server.URL))
+		sb.WriteString("Available models:\n")
+		for _, model := range server.Models {
+			sb.WriteString(fmt.Sprintf("  • %s\n", model))
+		}
+		sb.WriteString(fmt.Sprintf("\nUsing: %s", m.cfg.Model))
+		sb.WriteString("\n\n💡 Use /model <name> to switch models")
+		sb.WriteString("\n⚠️ Note: Local models are FREE but may be slower")
+		return sb.String()
+	}
+	
+	// Connect to specified URL
+	localProvider := llm.NewLocalProvider()
+	if err := localProvider.ConnectToURL(args); err != nil {
+		return fmt.Sprintf("❌ Failed to connect to %s: %s", args, err)
+	}
+	
+	// Register the local provider
+	m.agent.SetLocalProvider(localProvider)
+	
+	// Switch to local provider
+	m.cfg.Provider = config.ProviderLocal
+	m.agent.SetProvider("local")
+	
+	models := localProvider.Models()
+	if len(models) > 0 {
+		m.cfg.Model = models[0]
+		m.agent.SetModel(models[0])
+	}
+	
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("✅ Connected to %s at %s\n\n", localProvider.GetServerType(), args))
+	sb.WriteString("Available models:\n")
+	for _, model := range models {
+		sb.WriteString(fmt.Sprintf("  • %s\n", model))
+	}
+	if len(models) > 0 {
+		sb.WriteString(fmt.Sprintf("\nUsing: %s", m.cfg.Model))
+	}
+	sb.WriteString("\n\n💡 Use /model <name> to switch models")
+	return sb.String()
+}
+
+func cmdLocalScan(m *model, _ string) string {
+	servers := llm.DetectLocalServers()
+	
+	if len(servers) == 0 {
+		return `🔍 No local LLM servers found.
+
+Checked:
+  • localhost:11434 (Ollama)
+  • localhost:1234 (LM Studio)
+  • localhost:5000 (text-generation-webui)
+  • localhost:8080, 3000 (generic OpenAI-compatible)
+  • 172.17.0.1 (Docker bridge)
+
+Make sure your local LLM server is running and accessible.
+If using WSL, ensure the server is accessible from inside WSL.`
+	}
+	
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("🔍 Found %d local LLM server(s):\n\n", len(servers)))
+	
+	for i, server := range servers {
+		sb.WriteString(fmt.Sprintf("%d. %s at %s\n", i+1, server.Type, server.URL))
+		sb.WriteString("   Models:\n")
+		for _, model := range server.Models {
+			sb.WriteString(fmt.Sprintf("     • %s\n", model))
+		}
+		sb.WriteString("\n")
+	}
+	
+	sb.WriteString("Use /local to connect to the first server")
+	sb.WriteString("\nOr /local <url> to connect to a specific server")
+	
+	return sb.String()
 }

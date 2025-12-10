@@ -234,7 +234,45 @@ Native support for common forensics file formats (no external dependencies!):
 - Supports PNG, JPG, GIF, WebP, BMP
 - Works with vision-capable AI models
 
-### 7. Persistent Memory 🧠
+### 7. Timing & Wait Tools ⏱️
+Control timing and async operations:
+
+**Blocking Wait:**
+- `wait(seconds, reason)` - Pause execution for X seconds
+- Use sparingly - the AI cannot do anything during a wait
+
+**Async Timers (Preferred):**
+- `set_timer(seconds, label)` - Set a timer and continue working
+- When the timer expires, AI receives a `[SYSTEM]` notification
+- `list_timers` - List active timers
+- `cancel_timer(timer_id)` - Cancel a timer
+
+**CyberPatriot Scoring Engine Strategy:**
+The scoring engine has a **1-2 minute delay** before points appear. Instead of waiting:
+
+```
+1. Make a fix (e.g., disable guest account)
+2. set_timer(seconds=90, label="check score after guest disable")
+3. Continue working on other tasks
+4. When timer notification arrives, check score
+5. Continue regardless - don't wait around
+```
+
+This allows the AI to maximize productivity instead of blocking on score checks.
+
+**Example Workflow:**
+```
+AI: "Disabled guest account."
+    [Calls: set_timer(90, "verify guest account disabled")]
+AI: "Timer set. Now checking unauthorized users..."
+    [Calls: list_users]
+    [...works on other things...]
+[SYSTEM] Timer expired: "verify guest account disabled"
+AI: "Checking if guest fix was scored..."
+    [Calls: check_score_improved]
+```
+
+### 8. Persistent Memory 🧠
 Remember information across sessions:
 
 **AI Tools:**
@@ -252,7 +290,7 @@ Remember information across sessions:
 
 **Storage:** `~/.ironguard/memory.json`
 
-### 8. Checkpoint System ↩️
+### 9. Checkpoint System ↩️
 IronGuard maintains a tree-structured checkpoint system for undo/restore capabilities:
 
 **Automatic Checkpoints:**
@@ -302,14 +340,14 @@ IronGuard maintains a tree-structured checkpoint system for undo/restore capabil
 - AI is notified when user restores or undoes
 - AI can create checkpoints before destructive actions
 
-### 9. Compact Mode 📝
+### 10. Compact Mode 📝
 Toggle brief AI responses:
 
 - `/compact on` - Brief, concise responses
 - `/compact off` - Detailed responses (default)
 - AI is notified via [SYSTEM] message
 
-### 10. Setting Change Notifications 📢
+### 11. Setting Change Notifications 📢
 AI is automatically notified when user changes settings:
 
 - `/confirm` → AI told to wait for approval
@@ -318,7 +356,7 @@ AI is automatically notified when user changes settings:
 - `/screen control` → AI told it has full access
 - `/subagents <n>` → AI told the new limit
 
-### 11. Smart Autocomplete ⌨️
+### 12. Smart Autocomplete ⌨️
 Intelligent command completion:
 
 - Type `/` to see all available commands
@@ -337,7 +375,7 @@ Works with:
 - `/summarize` - smart/fast
 - `/remember` - memory categories
 
-### 12. Sound Effects 🔊
+### 13. Sound Effects 🔊
 Satisfying audio feedback for scoring:
 
 - **Points gained**: Plays a "ding" sound for each vulnerability found/fixed
@@ -363,7 +401,7 @@ Satisfying audio feedback for scoring:
 - Sound playback is non-blocking (doesn't interrupt AI work)
 - Volume boosted 2.5x for audibility
 
-### 13. Keyboard Shortcuts ⌨️
+### 14. Keyboard Shortcuts ⌨️
 Quick access to common actions:
 
 | Key | Action |
@@ -401,7 +439,7 @@ Placeholder changes each time you send a message or clear input.
 **Note on Terminal Resize:**
 Windows Terminal doesn't always send resize events to TUI applications. After resizing your terminal window, press `Ctrl+R` to update the display. The `/refresh` command also works.
 
-### 14. Connectivity Check 🌐
+### 15. Connectivity Check 🌐
 Verify internet and API key before starting:
 
 **Automatic Check at Startup:**
@@ -677,6 +715,14 @@ API Key:  ✅ Valid
 |------|-------------|
 | `add_manual_task` | Add task to sidebar for user |
 | `list_manual_tasks` | List all manual tasks |
+
+### Timing & Wait
+| Tool | Description |
+|------|-------------|
+| `wait` | Block and wait for X seconds |
+| `set_timer` | Set async timer with notification (continue working) |
+| `list_timers` | List active timers |
+| `cancel_timer` | Cancel an active timer by ID |
 
 ---
 

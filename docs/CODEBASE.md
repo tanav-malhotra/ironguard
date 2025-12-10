@@ -65,7 +65,8 @@ ironguard/
 │   │   ├── memory.go       # Persistent memory across sessions
 │   │   ├── checkpoint.go   # Undo/restore system
 │   │   ├── context.go      # Context window management
-│   │   └── tokens.go       # Token usage tracking
+│   │   ├── tokens.go       # Token usage tracking
+│   │   └── timer_adapter.go # Async timer notifications
 │   │
 │   ├── audio/              # Sound effects system
 │   │   ├── sounds.go       # Audio playback (beep library)
@@ -100,6 +101,7 @@ ironguard/
 │   │   ├── ai_todos.go     # AI task tracking tools
 │   │   ├── manual_tasks.go # Human task assignment
 │   │   ├── subagent_tools.go # Spawn/manage subagents
+│   │   ├── timing.go       # Wait and async timer tools
 │   │   └── web.go          # Web search tool
 │   │
 │   └── tui/                # Terminal UI (Bubble Tea)
@@ -196,6 +198,7 @@ func (a *Agent) summarizeContextIfNeeded()    // Auto-compress history
 | `checkpoint.go` | Save/restore points for undo |
 | `context.go` | Context window size management |
 | `tokens.go` | Token counting and usage stats |
+| `timer_adapter.go` | Async timer notifications |
 
 ---
 
@@ -275,6 +278,10 @@ type ToolHandler func(ctx, args) (string, error)
 | `remember` | memory_tools.go | Store persistent memory |
 | `recall` | memory_tools.go | Retrieve memories |
 | `web_search` | web.go | Search the internet |
+| `wait` | timing.go | Block and wait for X seconds |
+| `set_timer` | timing.go | Set async timer with notification |
+| `list_timers` | timing.go | List active timers |
+| `cancel_timer` | timing.go | Cancel an active timer |
 
 **Shell Session** (`shell_session.go`):
 ```go

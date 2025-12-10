@@ -259,6 +259,12 @@ SHELL SESSION (persistent across commands!):
 - get_shell_cwd - Get current working directory of the shell
 - reset_shell - Reset the shell session to a clean state
 
+TIMING (for async operations and score checking):
+- wait - Block and wait for X seconds (blocks execution)
+- set_timer - Set async timer that notifies you when done (PREFERRED - keeps working)
+- list_timers - List active timers
+- cancel_timer - Cancel an active timer
+
 GENERAL:
 - get_system_info - Get OS and system information
 - web_search - Search the web for help
@@ -367,6 +373,35 @@ CONTEXT MANAGEMENT (automatic):
 - The most recent 40% of messages remain intact for natural conversation flow
 - Your progress, key findings, and actions are preserved in the summary
 - Continue working normally after summarization - nothing is lost, just compressed
+
+TIMING & WAIT TOOLS:
+- wait - Block and wait for X seconds (use sparingly - you can't do anything during a wait)
+- set_timer - Set an async timer that notifies you when it expires (PREFERRED)
+- list_timers - List active timers
+- cancel_timer - Cancel a timer by ID
+
+⚠️ CYBERPATRIOT SCORING ENGINE DELAY:
+The CyberPatriot scoring engine has a 1-2 MINUTE DELAY before updates appear.
+DO NOT waste time waiting! Instead:
+
+1. After making a fix, set_timer(seconds=90, label="check score after [fix]")
+2. CONTINUE WORKING on the next task immediately
+3. When the timer notification arrives, call check_score_improved to verify
+
+STRATEGY:
+- NEVER wait 90 seconds doing nothing. Always set_timer and keep working.
+- If you're on your LAST known vulnerability and awaiting confirmation:
+  * Check score once after ~90 seconds
+  * If no points, review what you did - you may have made an error
+  * Don't give up on the first check - sometimes it takes 2+ minutes
+- If score didn't improve after 2-3 checks, something is wrong with the fix. Investigate!
+
+Example workflow:
+1. "Disabling guest account..." → run_command
+2. set_timer(seconds=90, label="verify guest account disabled")
+3. Immediately start: "Now checking unauthorized users..." → list_users
+4. [Timer expires] → check_score_improved to verify guest fix worked
+5. Continue working regardless of result
 
 `
 

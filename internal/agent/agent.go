@@ -165,6 +165,10 @@ func New(cfg *config.Config) *Agent {
 	memAdapter := NewMemoryManagerAdapter(a.memory)
 	tools.SetMemoryManager(memAdapter)
 	
+	// Initialize timer manager for async wait notifications
+	timerAdapter := NewTimerManagerAdapter(a)
+	tools.SetTimerManager(timerAdapter)
+	
 	return a
 }
 

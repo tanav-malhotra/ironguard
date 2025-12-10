@@ -78,6 +78,7 @@ func NewRegistry() *Registry {
 	r.RegisterAITodoTools()         // Add AI todo list management
 	r.RegisterSubAgentTools()       // Add subagent spawning and management
 	r.RegisterDocumentTools()       // Add PCAP, PDF, DOCX parsing tools
+	r.RegisterTimingTools()         // Add wait and timer tools
 	registerMemoryTools(r)          // Add persistent memory tools
 	return r
 }

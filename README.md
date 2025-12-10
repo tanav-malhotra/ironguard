@@ -262,6 +262,27 @@ The AI can remember information across sessions:
 
 Memory is stored in `~/.ironguard/memory.json` and persists between sessions. Both you (`/remember`) and the AI (`remember` tool) can add to it.
 
+### Timing & Wait Tools
+
+Control execution timing and handle scoring engine delays:
+
+**Blocking Wait:**
+- `wait(seconds)` — Pause execution for X seconds (blocks the AI)
+
+**Async Timers (Recommended):**
+- `set_timer(seconds, label)` — Set a timer and continue working
+- When the timer expires, the AI receives a `[SYSTEM]` notification
+- `list_timers` / `cancel_timer` — Manage active timers
+
+**CyberPatriot Scoring Strategy:**
+The scoring engine has a **1-2 minute delay**. Instead of waiting around:
+1. Make a fix
+2. `set_timer(90, "check score after fix")`
+3. Continue working on other tasks
+4. Check score when the timer notification arrives
+
+This maximizes productivity by keeping the AI working while waiting for score updates.
+
 ### Checkpoint System
 
 IronGuard maintains a tree-structured checkpoint system that tracks all file modifications:

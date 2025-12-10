@@ -172,7 +172,7 @@ Automatic handling of long conversations:
 
 **Summarization Modes:**
 - **Smart** (default): Uses provider's largest-context model for intelligent summarization
-  - Claude: Uses Sonnet 4.5 (1M context) even when Opus is main model
+  - Claude: Uses Opus 4.5 (200K context)
   - Gemini: Uses Gemini 3 Pro (1M+ context)
   - OpenAI: Uses GPT-5.1 (272K context)
 - **Fast**: Programmatic extraction (saves tokens)
@@ -866,8 +866,8 @@ MCP tools appear automatically and work like built-in tools.
 - CentOS/RHEL (basic support)
 
 ### AI Providers
-- **Anthropic Claude** (default): claude-opus-4-5, claude-sonnet-4-5
-- **OpenAI**: gpt-5.1, gpt-5.1-codex, gpt-5.1-codex-max
+- **Anthropic Claude** (default): claude-opus-4-5
+- **OpenAI**: gpt-5.1, gpt-5.1-codex-max
 - **Google Gemini**: gemini-3-pro
 
 ---

@@ -220,8 +220,8 @@ type Client interface {
 ```
 
 **Implementations**:
-- `claude.go` - Anthropic Claude (Opus 4.5, Sonnet 4.5)
-- `openai.go` - OpenAI GPT (GPT-5.1, Codex)
+- `claude.go` - Anthropic Claude (Opus 4.5)
+- `openai.go` - OpenAI GPT (GPT-5.1, Codex-Max)
 - `gemini.go` - Google Gemini (Gemini 3 Pro)
 
 **Registry** (`registry.go`):

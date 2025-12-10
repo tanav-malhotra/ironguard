@@ -12,6 +12,7 @@ const (
 	ProviderClaude Provider = "claude"
 	ProviderOpenAI Provider = "openai"
 	ProviderGemini Provider = "gemini"
+	ProviderLocal  Provider = "local"
 )
 
 // Message represents a chat message.
@@ -124,13 +125,11 @@ type Client interface {
 // Only the most powerful models - we need maximum capability to win CyberPatriot.
 var ModelPresets = map[Provider][]string{
 	ProviderClaude: {
-		"claude-opus-4-5",   // Most powerful - DEFAULT
-		"claude-sonnet-4-5", // Fast alternative
+		"claude-opus-4-5", // Most powerful - DEFAULT
 	},
 	ProviderOpenAI: {
 		"gpt-5.1",           // Latest flagship - DEFAULT
-		"gpt-5.1-codex",     // Codex variant for coding tasks
-		"gpt-5.1-codex-max", // Maximum capability codex (test availability)
+		"gpt-5.1-codex-max", // Maximum capability codex (same price as regular codex)
 	},
 	ProviderGemini: {
 		"gemini-3-pro-preview", // Latest flagship (preview)

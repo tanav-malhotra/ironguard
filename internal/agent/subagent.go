@@ -71,6 +71,10 @@ type SubAgent struct {
 	// Tool execution history
 	ToolCalls    []ToolCallInfo
 	
+	// Token/cost tracking
+	InputTokens  int // Total input tokens used
+	OutputTokens int // Total output tokens used
+	
 	// Internal
 	client       llm.Client
 	toolRegistry *tools.Registry
@@ -83,6 +87,9 @@ type SubAgent struct {
 // SubAgentCompletionCallback is called when a subagent completes.
 type SubAgentCompletionCallback func(id string, task string, status SubAgentStatus, result string)
 
+// SubAgentTokenCallback is called to report token usage from subagents.
+type SubAgentTokenCallback func(inputTokens, outputTokens int, model string)
+
 // SubAgentManager manages child agents.
 type SubAgentManager struct {
 	agents             map[string]*SubAgent
@@ -92,6 +99,7 @@ type SubAgentManager struct {
 	maxAgents          int
 	events             chan SubAgentEvent // Global event channel for all subagent events
 	completionCallback SubAgentCompletionCallback
+	tokenCallback      SubAgentTokenCallback
 }
 
 // NewSubAgentManager creates a new subagent manager.
@@ -115,6 +123,13 @@ func (m *SubAgentManager) SetCompletionCallback(cb SubAgentCompletionCallback) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.completionCallback = cb
+}
+
+// SetTokenCallback sets the callback for reporting token usage from subagents.
+func (m *SubAgentManager) SetTokenCallback(cb SubAgentTokenCallback) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.tokenCallback = cb
 }
 
 // SpawnSubAgent creates a new subagent for a specific task.
@@ -142,7 +157,7 @@ func (m *SubAgentManager) SpawnSubAgent(ctx context.Context, task string, system
 		Task:         task,
 		SystemPrompt: systemPrompt,
 		Provider:     config.ProviderAnthropic,
-		Model:        "claude-sonnet-4-5", // Use faster model for subagents
+		Model:        "claude-opus-4-5", // Use most powerful model for subagents
 		Status:       SubAgentStatusPending,
 		StartedAt:    time.Now(),
 		toolRegistry: m.toolRegistry,
@@ -241,11 +256,16 @@ func (m *SubAgentManager) runSubAgent(ctx context.Context, agent *SubAgent) {
 			agent.Status = SubAgentStatusCancelled
 			agent.CompletedAt = time.Now()
 			task := agent.Task
+			inputToks := agent.InputTokens
+			outputToks := agent.OutputTokens
+			model := agent.Model
 			agent.mu.Unlock()
 			m.emitEvent(SubAgentEvent{
 				AgentID: agent.ID,
 				Type:    SubAgentEventCancelled,
 			})
+			// Report token usage
+			m.reportTokenUsage(inputToks, outputToks, model)
 			// Notify main agent
 			m.notifyCompletion(agent.ID, task, SubAgentStatusCancelled, "Cancelled")
 			return
@@ -299,16 +319,33 @@ func (m *SubAgentManager) runSubAgent(ctx context.Context, agent *SubAgent) {
 			agent.CompletedAt = time.Now()
 			task := agent.Task
 			errMsg := agent.Error
+			inputToks := agent.InputTokens
+			outputToks := agent.OutputTokens
+			model := agent.Model
 			agent.mu.Unlock()
 			m.emitEvent(SubAgentEvent{
 				AgentID: agent.ID,
 				Type:    SubAgentEventFailed,
 				Error:   err,
 			})
+			// Report token usage
+			m.reportTokenUsage(inputToks, outputToks, model)
 			// Notify main agent
 			m.notifyCompletion(agent.ID, task, SubAgentStatusFailed, errMsg)
 			return
 		}
+		
+		// Estimate tokens for this iteration (rough: ~4 chars per token)
+		inputEstimate := 0
+		for _, msg := range agent.messages {
+			inputEstimate += len(msg.Content) / 4
+		}
+		outputEstimate := len(contentBuilder.String()) / 4
+		
+		agent.mu.Lock()
+		agent.InputTokens += inputEstimate
+		agent.OutputTokens += outputEstimate
+		agent.mu.Unlock()
 		
 		// Add assistant response to history
 		assistantMsg := llm.Message{
@@ -326,12 +363,17 @@ func (m *SubAgentManager) runSubAgent(ctx context.Context, agent *SubAgent) {
 			agent.CompletedAt = time.Now()
 			task := agent.Task
 			result := agent.Result
+			inputToks := agent.InputTokens
+			outputToks := agent.OutputTokens
+			model := agent.Model
 			agent.mu.Unlock()
 			m.emitEvent(SubAgentEvent{
 				AgentID: agent.ID,
 				Type:    SubAgentEventCompleted,
 				Content: result,
 			})
+			// Report token usage
+			m.reportTokenUsage(inputToks, outputToks, model)
 			// Notify main agent
 			m.notifyCompletion(agent.ID, task, SubAgentStatusCompleted, result)
 			return
@@ -398,12 +440,17 @@ func (m *SubAgentManager) runSubAgent(ctx context.Context, agent *SubAgent) {
 	agent.CompletedAt = time.Now()
 	task := agent.Task
 	result := agent.Result
+	inputToks := agent.InputTokens
+	outputToks := agent.OutputTokens
+	model := agent.Model
 	agent.mu.Unlock()
 	m.emitEvent(SubAgentEvent{
 		AgentID: agent.ID,
 		Type:    SubAgentEventCompleted,
 		Content: result,
 	})
+	// Report token usage
+	m.reportTokenUsage(inputToks, outputToks, model)
 	// Notify main agent
 	m.notifyCompletion(agent.ID, task, SubAgentStatusCompleted, result)
 }
@@ -427,6 +474,17 @@ func (m *SubAgentManager) notifyCompletion(id, task string, status SubAgentStatu
 	
 	if cb != nil {
 		cb(id, task, status, result)
+	}
+}
+
+// reportTokenUsage reports subagent token usage to the main agent.
+func (m *SubAgentManager) reportTokenUsage(inputTokens, outputTokens int, model string) {
+	m.mu.RLock()
+	cb := m.tokenCallback
+	m.mu.RUnlock()
+	
+	if cb != nil {
+		cb(inputTokens, outputTokens, model)
 	}
 }
 

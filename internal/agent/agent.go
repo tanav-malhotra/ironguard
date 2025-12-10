@@ -157,6 +157,11 @@ func New(cfg *config.Config) *Agent {
 		a.handleSubAgentCompletion(id, task, status, result)
 	})
 	
+	// Set up token callback to track subagent costs
+	a.subAgentManager.SetTokenCallback(func(inputTokens, outputTokens int, model string) {
+		a.tokenUsage.AddSubagentUsage(inputTokens, outputTokens, model)
+	})
+	
 	// Register subagent manager with tools package
 	adapter := NewSubAgentManagerAdapter(a.subAgentManager)
 	tools.SetSubAgentManager(adapter)
@@ -361,6 +366,22 @@ func (a *Agent) SetProvider(provider string) error {
 // SetModel sets the model to use for LLM calls.
 func (a *Agent) SetModel(model string) {
 	a.cfg.Model = model
+	// Update token usage tracker with new model for cost calculation
+	a.tokenUsage.SetModel(model)
+}
+
+// SetLocalProvider sets the local LLM provider.
+func (a *Agent) SetLocalProvider(p *llm.LocalProvider) {
+	a.llmRegistry.SetLocalProvider(p)
+}
+
+// GetLocalModels returns the list of models from the local provider, if connected.
+func (a *Agent) GetLocalModels() []string {
+	localProvider := a.llmRegistry.GetLocalProvider()
+	if localProvider == nil {
+		return nil
+	}
+	return localProvider.Models()
 }
 
 // Cancel cancels the current operation.
@@ -641,10 +662,8 @@ func getContextLimit(provider config.Provider) int {
 // These are the models with the LARGEST context windows for each provider.
 // Used specifically for summarization to ensure all context fits.
 const (
-	// Claude: Use sonnet-4-5 for summarization (1M context with extended pricing)
-	// even though opus-4-5 is the main model (only 200K context)
-	// TODO: Switch to opus-4-5 when Anthropic increases its context to 1M
-	claudeSummarizationModel = "claude-sonnet-4-5"
+	// Claude: Use opus-4-5 for summarization (200K context)
+	claudeSummarizationModel = "claude-opus-4-5"
 	
 	// Gemini: gemini-3-pro has 1M+ context
 	geminiSummarizationModel = "gemini-3-pro"
@@ -845,9 +864,7 @@ func (a *Agent) createSmartSummary(ctx context.Context, messages []llm.Message) 
 	//
 	// Summarization models per provider (largest context, high reasoning):
 	// - Gemini:    gemini-3-pro (1M+ tokens)
-	// - Claude:    claude-sonnet-4-5 (1M tokens with extended pricing)
-	//              Note: opus-4-5 is the main model but only has 200K context
-	//              TODO: Switch to opus-4-5 when Anthropic increases its context to 1M
+	// - Claude:    claude-opus-4-5 (200K tokens)
 	// - OpenAI:    gpt-5.1 (272K tokens)
 	currentProvider := llm.Provider(a.cfg.Provider)
 	summarizeClient, err := a.llmRegistry.Get(currentProvider)

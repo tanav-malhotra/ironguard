@@ -218,7 +218,7 @@ Long sessions are handled automatically. When the conversation approaches 90% of
 
 **Summarization Modes:**
 - **Smart** (default): Uses the provider's largest-context model for intelligent summarization
-  - Claude: Uses Sonnet 4.5 (1M context) even when Opus is the main model
+  - Claude: Uses Opus 4.5 (200K context)
   - Gemini: Uses Gemini 3 Pro (1M+ context)
   - OpenAI: Uses GPT-5.1 (272K context)
 - **Fast**: Programmatic extraction (saves tokens, slightly less intelligent)
@@ -368,8 +368,8 @@ When you change settings like `/confirm`, `/autopilot`, or `/screen control`, th
 ### AI Providers
 | Provider | Models |
 |----------|--------|
-| Anthropic (default) | claude-opus-4-5, claude-sonnet-4-5 |
-| OpenAI | gpt-5.1, gpt-5.1-codex |
+| Anthropic (default) | claude-opus-4-5 |
+| OpenAI | gpt-5.1, gpt-5.1-codex-max |
 | Google | gemini-3-pro |
 
 Set your provider with `/provider <name>` and model with `/model <name>`.

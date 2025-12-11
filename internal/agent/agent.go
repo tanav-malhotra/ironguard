@@ -642,16 +642,20 @@ const (
 	summarizationThreshold = 0.90
 )
 
-// getContextLimit returns the context limit for the current provider.
+// getContextLimit returns the context limit for the current provider and model.
 // This is based on the MAIN model being used (e.g., opus-4-5 for Claude).
 // For summarization, we may use a different model with larger context.
-func getContextLimit(provider config.Provider) int {
+func getContextLimit(provider config.Provider, model string) int {
 	switch provider {
 	case config.ProviderGemini:
 		return 1000000 // gemini-3-pro: 1M tokens
 	case config.ProviderAnthropic:
 		return 200000 // claude-opus-4-5: 200K tokens (main model)
 	case config.ProviderOpenAI:
+		// gpt-5.2 has larger context than gpt-5.1
+		if strings.Contains(model, "5.2") {
+			return 400000 // gpt-5.2: 400K tokens
+		}
 		return 272000 // gpt-5.1: 272K tokens
 	default:
 		return 150000 // Conservative default
@@ -668,8 +672,8 @@ const (
 	// Gemini: gemini-3-pro has 1M+ context
 	geminiSummarizationModel = "gemini-3-pro"
 	
-	// OpenAI: gpt-5.1 has 272K context
-	openaiSummarizationModel = "gpt-5.1"
+	// OpenAI: gpt-5.2 has 400K context (largest)
+	openaiSummarizationModel = "gpt-5.2"
 )
 
 // getSummarizationModel returns the model to use for summarization for the given provider.
@@ -706,7 +710,7 @@ func (a *Agent) summarizeContextIfNeeded(ctx context.Context) error {
 	estimatedTokens := a.estimateTokens()
 	
 	// Get context limit for current provider
-	contextLimit := getContextLimit(a.cfg.Provider)
+	contextLimit := getContextLimit(a.cfg.Provider, a.cfg.Model)
 	triggerThreshold := int(float64(contextLimit) * summarizationThreshold)
 	
 	// Update token tracking
@@ -881,7 +885,7 @@ func (a *Agent) createSmartSummary(ctx context.Context, messages []llm.Message) 
 		},
 		Model:          summarizeModel, // Use the large-context model for summarization
 		MaxTokens:      4000,
-		ReasoningLevel: llm.ReasoningHigh, // Always use high reasoning for accurate summarization
+		ReasoningLevel: llm.ReasoningHigh, // Use high reasoning for accurate summarization (xhigh only works with gpt-5.2/codex-max)
 		SystemPrompt: `You are summarizing a CyberPatriot cybersecurity competition session.
 Create a comprehensive but concise summary that allows the AI to continue working without losing context.
 

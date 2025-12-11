@@ -58,7 +58,8 @@ type ReasoningLevel string
 const (
 	ReasoningLow    ReasoningLevel = "low"
 	ReasoningMedium ReasoningLevel = "medium"
-	ReasoningHigh   ReasoningLevel = "high" // Default for competition - maximum accuracy
+	ReasoningHigh   ReasoningLevel = "high"  // Default for competition - maximum accuracy
+	ReasoningXHigh  ReasoningLevel = "xhigh" // Extra high - ONLY supported by gpt-5.2 and gpt-5.1-codex-max
 )
 
 // ChatRequest represents a request to the LLM.
@@ -129,6 +130,7 @@ var ModelPresets = map[Provider][]string{
 	},
 	ProviderOpenAI: {
 		"gpt-5.1",           // Latest flagship - DEFAULT
+		"gpt-5.2",           // Newest model
 		"gpt-5.1-codex-max", // Maximum capability codex (same price as regular codex)
 	},
 	ProviderGemini: {

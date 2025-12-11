@@ -881,7 +881,7 @@ func (a *Agent) createSmartSummary(ctx context.Context, messages []llm.Message) 
 		},
 		Model:          summarizeModel, // Use the large-context model for summarization
 		MaxTokens:      4000,
-		ReasoningLevel: llm.ReasoningHigh, // Always use high reasoning for accurate summarization
+		ReasoningLevel: llm.ReasoningHigh, // Use high reasoning for accurate summarization (xhigh only works with gpt-5.2/codex-max)
 		SystemPrompt: `You are summarizing a CyberPatriot cybersecurity competition session.
 Create a comprehensive but concise summary that allows the AI to continue working without losing context.
 

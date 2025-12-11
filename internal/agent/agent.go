@@ -645,18 +645,15 @@ const (
 // getContextLimit returns the context limit for the current provider and model.
 // This is based on the MAIN model being used (e.g., opus-4-5 for Claude).
 // For summarization, we may use a different model with larger context.
+// Note: Using conservative limits to save on token costs.
 func getContextLimit(provider config.Provider, model string) int {
 	switch provider {
 	case config.ProviderGemini:
-		return 1000000 // gemini-3-pro: 1M tokens
+		return 200000 // Using 200K to save costs (actual limit is 1M+)
 	case config.ProviderAnthropic:
-		return 200000 // claude-opus-4-5: 200K tokens (main model)
+		return 200000 // claude-opus-4-5: 200K tokens
 	case config.ProviderOpenAI:
-		// gpt-5.2 has larger context than gpt-5.1
-		if strings.Contains(model, "5.2") {
-			return 400000 // gpt-5.2: 400K tokens
-		}
-		return 272000 // gpt-5.1: 272K tokens
+		return 272000 // gpt-5.1/5.2: 272K tokens (conservative)
 	default:
 		return 150000 // Conservative default
 	}

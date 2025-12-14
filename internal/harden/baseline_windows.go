@@ -43,17 +43,17 @@ func runPlatformBaseline(ctx context.Context, cfg BaselineConfig, result *Baseli
 	fmt.Println("\n━━━ Configuring Audit Policies ━━━")
 	configureAuditPolicies(ctx, h, result)
 	
-	// 6. Disable Unnecessary Services
+	// 6. Disable Unnecessary Services (respecting required services)
 	fmt.Println("\n━━━ Disabling Unnecessary Services ━━━")
-	disableUnnecessaryServices(ctx, h, result)
+	disableUnnecessaryServices(ctx, h, cfg, result)
 	
 	// 7. Windows Defender
 	fmt.Println("\n━━━ Configuring Windows Defender ━━━")
 	configureWindowsDefender(ctx, h, result)
 	
-	// 8. Registry Hardening
+	// 8. Registry Hardening (respecting required services like RDP)
 	fmt.Println("\n━━━ Applying Registry Hardening ━━━")
-	applyRegistryHardening(ctx, h, result)
+	applyRegistryHardening(ctx, h, cfg, result)
 	
 	// 9. Server-specific hardening
 	if isServer {
@@ -61,9 +61,14 @@ func runPlatformBaseline(ctx context.Context, cfg BaselineConfig, result *Baseli
 		applyServerHardening(ctx, h, result)
 	}
 	
-	// 10. SMB Hardening
-	fmt.Println("\n━━━ Hardening SMB ━━━")
-	hardenSMB(ctx, h, result)
+	// 10. SMB Hardening (skip if SMB is required)
+	if !isServiceRequired(cfg.RequiredServices, "smb") {
+		fmt.Println("\n━━━ Hardening SMB ━━━")
+		hardenSMB(ctx, h, result)
+	} else {
+		addSkipped(result, "SMB", "SMB hardening", "SMB marked as required")
+		fmt.Println("\n━━━ Skipping SMB Hardening (required) ━━━")
+	}
 	
 	result.PrintResults()
 	return result, nil
@@ -227,23 +232,84 @@ auditpol /set /category:"Detailed Tracking" /success:enable /failure:enable
 	}
 }
 
-func disableUnnecessaryServices(ctx context.Context, h *Hardener, result *BaselineResult) {
-	// Services that are commonly unnecessary and potential security risks
-	services := []string{
-		"RemoteRegistry",  // Remote registry access
-		"TapiSrv",         // Telephony
-		"RpcLocator",      // RPC Locator
-		"SNMPTRAP",        // SNMP Trap
-		"Fax",             // Fax service
-		"XblAuthManager",  // Xbox services
-		"XblGameSave",
-		"XboxNetApiSvc",
-		"WMPNetworkSvc",   // Windows Media sharing
-		"icssvc",          // Windows Mobile Hotspot
+func disableUnnecessaryServices(ctx context.Context, h *Hardener, cfg BaselineConfig, result *BaselineResult) {
+	// Map of service names to required service IDs they belong to
+	serviceMapping := map[string]string{
+		"RemoteRegistry": "",              // Always disable
+		"TapiSrv":        "telnet",        // Telephony
+		"RpcLocator":     "",              // Always disable
+		"SNMPTRAP":       "snmp",          // SNMP
+		"SNMP":           "snmp",          // SNMP
+		"Fax":            "",              // Always disable (rarely needed)
+		"XblAuthManager": "",              // Xbox services
+		"XblGameSave":    "",              // Xbox services
+		"XboxNetApiSvc":  "",              // Xbox services
+		"WMPNetworkSvc":  "",              // Windows Media sharing
+		"icssvc":         "",              // Windows Mobile Hotspot
+		"TermService":    "rdp",           // Remote Desktop
+		"SessionEnv":     "rdp",           // Remote Desktop
+		"UmRdpService":   "rdp",           // Remote Desktop
+		"W3SVC":          "iis",           // IIS Web Server
+		"IISADMIN":       "iis",           // IIS Admin
+		"ftpsvc":         "ftp",           // FTP Service
+		"MSFTPSVC":       "ftp",           // FTP Service
+		"LanmanServer":   "smb",           // File sharing (SMB)
+		"sshd":           "ssh",           // OpenSSH Server
+		"MSSQLSERVER":    "sql",           // SQL Server
+		"MySQL":          "mysql",         // MySQL
+		"MySQL80":        "mysql",         // MySQL 8.0
+		"Spooler":        "print",         // Print Spooler
+		"DNS":            "dns",           // DNS Server
+		"DHCPServer":     "dhcp",          // DHCP Server
+		"TelnetServer":   "telnet",        // Telnet
+		"WinRM":          "winrm",         // WinRM
+		"vmms":           "hyperv",        // Hyper-V
 	}
 
-	for _, svc := range services {
-		script := fmt.Sprintf(`
+	// Always disable these (no required service option)
+	alwaysDisable := []string{
+		"RemoteRegistry",
+		"RpcLocator",
+		"Fax",
+		"XblAuthManager",
+		"XblGameSave",
+		"XboxNetApiSvc",
+		"WMPNetworkSvc",
+		"icssvc",
+	}
+
+	// Disable always-disable services
+	for _, svc := range alwaysDisable {
+		disableWindowsService(ctx, h, result, svc)
+	}
+
+	// Conditionally disable services based on required list
+	conditionalServices := []struct {
+		service  string
+		requires string
+		desc     string
+	}{
+		{"SNMPTRAP", "snmp", "SNMP Trap"},
+		{"SNMP", "snmp", "SNMP Service"},
+		{"TelnetServer", "telnet", "Telnet Server"},
+		{"TapiSrv", "telnet", "Telephony"},
+	}
+
+	for _, cs := range conditionalServices {
+		if !isServiceRequired(cfg.RequiredServices, cs.requires) {
+			disableWindowsService(ctx, h, result, cs.service)
+		} else {
+			addSkipped(result, "Services", fmt.Sprintf("Disable %s", cs.desc), fmt.Sprintf("%s is required", cs.requires))
+		}
+	}
+
+	// Note: We don't auto-disable RDP, SMB, FTP, IIS, SQL, etc. - those are handled
+	// by the service selection. The user explicitly chose what's required.
+	_ = serviceMapping // For documentation purposes
+}
+
+func disableWindowsService(ctx context.Context, h *Hardener, result *BaselineResult, svc string) {
+	script := fmt.Sprintf(`
 $svc = Get-Service -Name "%s" -ErrorAction SilentlyContinue
 if ($svc) {
     Stop-Service -Name "%s" -Force -ErrorAction SilentlyContinue
@@ -253,21 +319,20 @@ if ($svc) {
     "NotFound"
 }
 `, svc, svc, svc)
-		
-		output, err := h.runPowerShellSingle(ctx, script)
-		output = strings.TrimSpace(output)
-		
-		if output == "NotFound" {
-			// Don't report services that don't exist
-			continue
-		}
-		
-		if err != nil {
-			addResult(result, "Services", fmt.Sprintf("Disable %s", svc), false, "", err.Error())
-		} else {
-			addResult(result, "Services", fmt.Sprintf("Disabled %s", svc), true, "", "")
-			fmt.Printf("  ✓ Disabled %s\n", svc)
-		}
+
+	output, err := h.runPowerShellSingle(ctx, script)
+	output = strings.TrimSpace(output)
+
+	if output == "NotFound" {
+		// Don't report services that don't exist
+		return
+	}
+
+	if err != nil {
+		addResult(result, "Services", fmt.Sprintf("Disable %s", svc), false, "", err.Error())
+	} else {
+		addResult(result, "Services", fmt.Sprintf("Disabled %s", svc), true, "", "")
+		fmt.Printf("  ✓ Disabled %s\n", svc)
 	}
 }
 
@@ -295,8 +360,9 @@ Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System" -Name 
 	}
 }
 
-func applyRegistryHardening(ctx context.Context, h *Hardener, result *BaselineResult) {
-	policies := []struct {
+func applyRegistryHardening(ctx context.Context, h *Hardener, cfg BaselineConfig, result *BaselineResult) {
+	// Always apply these policies
+	alwaysPolicies := []struct {
 		name   string
 		script string
 	}{
@@ -313,14 +379,6 @@ func applyRegistryHardening(ctx context.Context, h *Hardener, result *BaselineRe
 			`Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management" -Name "ClearPageFileAtShutdown" -Value 1 -Type DWord -Force`,
 		},
 		{
-			"Disable Remote Desktop (if not needed)",
-			`Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections" -Value 1 -Type DWord -Force`,
-		},
-		{
-			"Enable NLA for Remote Desktop",
-			`Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "UserAuthentication" -Value 1 -Type DWord -Force`,
-		},
-		{
 			"Disable Windows Script Host",
 			`Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows Script Host\Settings" -Name "Enabled" -Value 0 -Type DWord -Force -ErrorAction SilentlyContinue`,
 		},
@@ -334,7 +392,7 @@ func applyRegistryHardening(ctx context.Context, h *Hardener, result *BaselineRe
 		},
 	}
 
-	for _, policy := range policies {
+	for _, policy := range alwaysPolicies {
 		_, err := h.runPowerShellSingle(ctx, policy.script)
 		if err != nil {
 			addResult(result, "Registry", policy.name, false, "", err.Error())
@@ -342,6 +400,27 @@ func applyRegistryHardening(ctx context.Context, h *Hardener, result *BaselineRe
 			addResult(result, "Registry", policy.name, true, "", "")
 			fmt.Printf("  ✓ %s\n", policy.name)
 		}
+	}
+
+	// RDP-specific settings - only apply if RDP is NOT required
+	if !isServiceRequired(cfg.RequiredServices, "rdp") {
+		_, err := h.runPowerShellSingle(ctx, `Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections" -Value 1 -Type DWord -Force`)
+		if err != nil {
+			addResult(result, "Registry", "Disable Remote Desktop", false, "", err.Error())
+		} else {
+			addResult(result, "Registry", "Disabled Remote Desktop (not required)", true, "", "")
+			fmt.Printf("  ✓ Disabled Remote Desktop\n")
+		}
+	} else {
+		// RDP is required - enable NLA for security
+		_, err := h.runPowerShellSingle(ctx, `Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "UserAuthentication" -Value 1 -Type DWord -Force`)
+		if err != nil {
+			addResult(result, "Registry", "Enable NLA for Remote Desktop", false, "", err.Error())
+		} else {
+			addResult(result, "Registry", "Enabled NLA for Remote Desktop (required service)", true, "", "")
+			fmt.Printf("  ✓ Enabled NLA for Remote Desktop\n")
+		}
+		addSkipped(result, "Registry", "Disable Remote Desktop", "RDP marked as required")
 	}
 }
 

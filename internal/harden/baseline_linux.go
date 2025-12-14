@@ -45,33 +45,32 @@ func runPlatformBaseline(ctx context.Context, cfg BaselineConfig, result *Baseli
 	
 	// 5. Security Tools
 	fmt.Println("\n━━━ Installing Security Tools ━━━")
-	
+
 	if cfg.InstallAuditd {
 		installAuditd(ctx, h, result)
 	} else {
 		addSkipped(result, "Security Tools", "Install auditd", "user chose to skip")
 	}
-	
+
 	if cfg.InstallApparmor {
 		installApparmor(ctx, h, result)
 	} else {
 		addSkipped(result, "Security Tools", "Install AppArmor", "user chose to skip")
 	}
-	
-	if cfg.InstallFail2ban {
+
+	if cfg.InstallFail2ban && !isServiceRequired(cfg.RequiredServices, "ssh") {
+		// Only install fail2ban if SSH is not a required service that might have specific config
 		installFail2ban(ctx, h, result)
+	} else if isServiceRequired(cfg.RequiredServices, "ssh") {
+		addSkipped(result, "Security Tools", "Install fail2ban", "SSH is required - configure manually if needed")
 	} else {
 		addSkipped(result, "Security Tools", "Install fail2ban", "user chose to skip")
 	}
-	
-	// 6. SSH Hardening
-	if cfg.HardenSSH {
-		fmt.Println("\n━━━ Hardening SSH ━━━")
-		hardenSSH(ctx, h, result)
-	} else {
-		addSkipped(result, "SSH", "Harden SSH configuration", "user chose to skip")
-	}
-	
+
+	// 6. Service-specific hardening (only if NOT required)
+	fmt.Println("\n━━━ Service Hardening ━━━")
+	hardenLinuxServices(ctx, h, cfg, result)
+
 	// 7. Disable Guest Account
 	fmt.Println("\n━━━ Disabling Guest Account ━━━")
 	disableLinuxGuest(ctx, h, result)
@@ -391,48 +390,6 @@ EOF
 	}
 }
 
-func hardenSSH(ctx context.Context, h *Hardener, result *BaselineResult) {
-	// Check if SSH is installed
-	_, err := exec.LookPath("sshd")
-	if err != nil {
-		addSkipped(result, "SSH", "Harden SSH", "SSH not installed")
-		fmt.Printf("  ⊘ SSH not installed, skipping\n")
-		return
-	}
-	
-	script := `
-		# Backup original config
-		cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak 2>/dev/null
-		
-		# Apply secure settings
-		sed -i 's/^#*PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
-		sed -i 's/^#*PermitEmptyPasswords.*/PermitEmptyPasswords no/' /etc/ssh/sshd_config
-		sed -i 's/^#*X11Forwarding.*/X11Forwarding no/' /etc/ssh/sshd_config
-		sed -i 's/^#*MaxAuthTries.*/MaxAuthTries 3/' /etc/ssh/sshd_config
-		sed -i 's/^#*Protocol.*/Protocol 2/' /etc/ssh/sshd_config
-		sed -i 's/^#*LoginGraceTime.*/LoginGraceTime 60/' /etc/ssh/sshd_config
-		sed -i 's/^#*ClientAliveInterval.*/ClientAliveInterval 300/' /etc/ssh/sshd_config
-		sed -i 's/^#*ClientAliveCountMax.*/ClientAliveCountMax 2/' /etc/ssh/sshd_config
-		
-		# Add settings if not present
-		grep -q "^PermitRootLogin" /etc/ssh/sshd_config || echo "PermitRootLogin no" >> /etc/ssh/sshd_config
-		grep -q "^PermitEmptyPasswords" /etc/ssh/sshd_config || echo "PermitEmptyPasswords no" >> /etc/ssh/sshd_config
-		grep -q "^X11Forwarding" /etc/ssh/sshd_config || echo "X11Forwarding no" >> /etc/ssh/sshd_config
-		grep -q "^MaxAuthTries" /etc/ssh/sshd_config || echo "MaxAuthTries 3" >> /etc/ssh/sshd_config
-		
-		# Restart SSH
-		systemctl restart sshd 2>/dev/null || systemctl restart ssh 2>/dev/null || service ssh restart 2>/dev/null
-	`
-	
-	_, err = h.runBashSingle(ctx, script)
-	if err != nil {
-		addResult(result, "SSH", "Harden SSH configuration", false, "", err.Error())
-	} else {
-		addResult(result, "SSH", "Hardened: PermitRootLogin=no, EmptyPasswords=no, MaxAuthTries=3, X11=no", true, "", "")
-		fmt.Printf("  ✓ SSH hardened (root login disabled, etc.)\n")
-	}
-}
-
 func disableLinuxGuest(ctx context.Context, h *Hardener, result *BaselineResult) {
 	script := `
 		# Disable guest account in LightDM
@@ -500,6 +457,118 @@ func disableCtrlAltDel(ctx context.Context, h *Hardener, result *BaselineResult)
 	} else {
 		addResult(result, "System", "Disabled Ctrl+Alt+Del reboot", true, "", "")
 		fmt.Printf("  ✓ Ctrl+Alt+Del disabled\n")
+	}
+}
+
+// hardenLinuxServices hardens services that are NOT required.
+func hardenLinuxServices(ctx context.Context, h *Hardener, cfg BaselineConfig, result *BaselineResult) {
+	// SSH hardening (if not required)
+	if !isServiceRequired(cfg.RequiredServices, "ssh") {
+		hardenOrDisableSSH(ctx, h, result)
+	} else {
+		addSkipped(result, "Services", "SSH hardening", "marked as required")
+		fmt.Printf("  ⊘ SSH skipped (required)\n")
+	}
+
+	// SMB/Samba (if not required)
+	if !isServiceRequired(cfg.RequiredServices, "samba") {
+		disableServiceIfExists(ctx, h, result, "smbd", "Samba SMB")
+		disableServiceIfExists(ctx, h, result, "nmbd", "Samba NetBIOS")
+	} else {
+		addSkipped(result, "Services", "Samba hardening", "marked as required")
+	}
+
+	// FTP (if not required)
+	if !isServiceRequired(cfg.RequiredServices, "ftp") {
+		disableServiceIfExists(ctx, h, result, "vsftpd", "FTP Server")
+		disableServiceIfExists(ctx, h, result, "proftpd", "ProFTPD")
+	} else {
+		addSkipped(result, "Services", "FTP hardening", "marked as required")
+	}
+
+	// NFS (if not required)
+	if !isServiceRequired(cfg.RequiredServices, "nfs") {
+		disableServiceIfExists(ctx, h, result, "nfs-server", "NFS Server")
+		disableServiceIfExists(ctx, h, result, "rpcbind", "RPC Bind")
+	} else {
+		addSkipped(result, "Services", "NFS hardening", "marked as required")
+	}
+
+	// VNC (if not required)
+	if !isServiceRequired(cfg.RequiredServices, "vnc") {
+		disableServiceIfExists(ctx, h, result, "vncserver", "VNC Server")
+		disableServiceIfExists(ctx, h, result, "x11vnc", "X11 VNC")
+	} else {
+		addSkipped(result, "Services", "VNC hardening", "marked as required")
+	}
+
+	// Telnet (almost never required, but check anyway)
+	disableServiceIfExists(ctx, h, result, "telnetd", "Telnet Server")
+	disableServiceIfExists(ctx, h, result, "xinetd", "xinetd")
+	
+	// Avahi (mDNS - usually not needed)
+	disableServiceIfExists(ctx, h, result, "avahi-daemon", "Avahi mDNS")
+	
+	// CUPS (if not required)
+	if !isServiceRequired(cfg.RequiredServices, "cups") {
+		disableServiceIfExists(ctx, h, result, "cups", "CUPS Printing")
+	}
+}
+
+// hardenOrDisableSSH hardens SSH if installed, disables if not required.
+func hardenOrDisableSSH(ctx context.Context, h *Hardener, result *BaselineResult) {
+	// Check if SSH is installed
+	_, err := exec.LookPath("sshd")
+	if err != nil {
+		addSkipped(result, "Services", "SSH", "not installed")
+		return
+	}
+
+	// SSH is installed but not required - harden it restrictively
+	script := `
+		cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak 2>/dev/null
+		
+		sed -i 's/^#*PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
+		sed -i 's/^#*PermitEmptyPasswords.*/PermitEmptyPasswords no/' /etc/ssh/sshd_config
+		sed -i 's/^#*X11Forwarding.*/X11Forwarding no/' /etc/ssh/sshd_config
+		sed -i 's/^#*MaxAuthTries.*/MaxAuthTries 3/' /etc/ssh/sshd_config
+		sed -i 's/^#*Protocol.*/Protocol 2/' /etc/ssh/sshd_config
+		sed -i 's/^#*LoginGraceTime.*/LoginGraceTime 60/' /etc/ssh/sshd_config
+		sed -i 's/^#*AllowTcpForwarding.*/AllowTcpForwarding no/' /etc/ssh/sshd_config
+		sed -i 's/^#*AllowAgentForwarding.*/AllowAgentForwarding no/' /etc/ssh/sshd_config
+		
+		grep -q "^PermitRootLogin" /etc/ssh/sshd_config || echo "PermitRootLogin no" >> /etc/ssh/sshd_config
+		grep -q "^PermitEmptyPasswords" /etc/ssh/sshd_config || echo "PermitEmptyPasswords no" >> /etc/ssh/sshd_config
+		
+		systemctl restart sshd 2>/dev/null || systemctl restart ssh 2>/dev/null
+	`
+
+	_, err = h.runBashSingle(ctx, script)
+	if err != nil {
+		addResult(result, "Services", "Harden SSH (not required, securing)", false, "", err.Error())
+	} else {
+		addResult(result, "Services", "SSH hardened (PermitRootLogin=no, X11=no, etc.)", true, "", "")
+		fmt.Printf("  ✓ SSH hardened\n")
+	}
+}
+
+// disableServiceIfExists disables a service if it exists.
+func disableServiceIfExists(ctx context.Context, h *Hardener, result *BaselineResult, service, description string) {
+	// Check if service exists
+	_, err := h.runBashSingle(ctx, fmt.Sprintf("systemctl list-unit-files | grep -q '^%s'", service))
+	if err != nil {
+		// Service doesn't exist
+		return
+	}
+
+	// Service exists - disable it
+	script := fmt.Sprintf("systemctl stop %s 2>/dev/null; systemctl disable %s 2>/dev/null", service, service)
+	_, err = h.runBashSingle(ctx, script)
+	if err != nil {
+		addResult(result, "Services", fmt.Sprintf("Disable %s", description), false, "", err.Error())
+	} else {
+		addResult(result, "Services", fmt.Sprintf("Disabled %s", description), true, "", "")
+		fmt.Printf("  ✓ Disabled %s\n", description)
 	}
 }
 

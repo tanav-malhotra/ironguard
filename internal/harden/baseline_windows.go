@@ -78,6 +78,14 @@ func runPlatformBaseline(ctx context.Context, cfg BaselineConfig, result *Baseli
 	fmt.Println("\n━━━ Ensuring Critical Services ━━━")
 	ensureCriticalServices(ctx, h, result)
 
+	// 13. System Updates (if requested)
+	if cfg.RunUpdates {
+		fmt.Println("\n━━━ Running System Updates (this may take a LONG time...) ━━━")
+		runWindowsUpdates(ctx, h, result)
+	} else {
+		addSkipped(result, "Updates", "Windows Update", "user chose to skip (run manually via Windows Update)")
+	}
+
 	result.PrintResults()
 	return result, nil
 }
@@ -230,13 +238,21 @@ auditpol /set /category:"Policy Change" /success:enable /failure:enable
 auditpol /set /category:"Privilege Use" /success:enable /failure:enable
 auditpol /set /category:"System" /success:enable /failure:enable
 auditpol /set /category:"Detailed Tracking" /success:enable /failure:enable
+
+# Specific subcategory auditing (commonly scored in CyberPatriot)
+auditpol /set /subcategory:"File Share" /success:enable /failure:enable
+auditpol /set /subcategory:"File System" /success:enable /failure:enable
+auditpol /set /subcategory:"Registry" /success:enable /failure:enable
+auditpol /set /subcategory:"Process Creation" /success:enable /failure:enable
+auditpol /set /subcategory:"Logon" /success:enable /failure:enable
+auditpol /set /subcategory:"Special Logon" /success:enable /failure:enable
 `
 	_, err := h.runPowerShellSingle(ctx, script)
 	if err != nil {
 		addResult(result, "Audit Policy", "Configure audit policies", false, "", err.Error())
 	} else {
-		addResult(result, "Audit Policy", "Enabled auditing for all categories (success/failure)", true, "", "")
-		fmt.Printf("  ✓ Audit policies configured\n")
+		addResult(result, "Audit Policy", "Enabled auditing for all categories including File Share (success/failure)", true, "", "")
+		fmt.Printf("  ✓ Audit policies configured (including File Share)\n")
 	}
 }
 
@@ -548,6 +564,33 @@ func applyAdditionalSecuritySettings(ctx context.Context, h *Hardener, cfg Basel
 			"Disable anonymous enumeration of shares",
 			`Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" -Name "RestrictAnonymous" -Value 1 -Type DWord -Force`,
 		},
+		// Microsoft network server: Digitally sign communications (always)
+		{
+			"Microsoft network server: Digitally sign communications (always)",
+			`Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\LanManServer\Parameters" -Name "RequireSecuritySignature" -Value 1 -Type DWord -Force`,
+		},
+		// Microsoft network client: Digitally sign communications (always)
+		{
+			"Microsoft network client: Digitally sign communications (always)",
+			`Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters" -Name "RequireSecuritySignature" -Value 1 -Type DWord -Force`,
+		},
+		// Network access: Do not allow anonymous enumeration of SAM accounts and shares
+		{
+			"Network access: Restrict anonymous enumeration of SAM accounts and shares",
+			`Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" -Name "RestrictAnonymousSAM" -Value 1 -Type DWord -Force
+			 Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" -Name "RestrictAnonymous" -Value 1 -Type DWord -Force`,
+		},
+		// Network access: Do not allow storage of passwords for network authentication
+		{
+			"Do not allow storage of passwords for network authentication",
+			`Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" -Name "DisableDomainCreds" -Value 1 -Type DWord -Force -ErrorAction SilentlyContinue`,
+		},
+		// Prevent Everyone from accessing computer from network (default is to allow)
+		{
+			"Restrict 'Access this computer from the network' right",
+			`# This requires secpol/secedit - we log intent but this needs manual verification
+			 Write-Output "Note: 'Everyone' should be removed from 'Access this computer from network' in secpol.msc"`,
+		},
 	}
 
 	for _, policy := range policies {
@@ -618,6 +661,67 @@ if ($svc) {
 			addResult(result, "Critical Services", fmt.Sprintf("Enabled %s service (automatic start)", svc.displayName), true, "", "")
 			fmt.Printf("  ✓ %s service enabled\n", svc.displayName)
 		}
+	}
+}
+
+// runWindowsUpdates configures automatic updates and optionally runs updates.
+func runWindowsUpdates(ctx context.Context, h *Hardener, result *BaselineResult) {
+	// First, configure automatic updates via registry
+	configScript := `
+# Enable automatic updates via registry
+Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update" -Name "AUOptions" -Value 4 -Type DWord -Force -ErrorAction SilentlyContinue
+# 4 = Auto download and schedule install
+
+# Set Windows Update to automatic
+Set-Service -Name "wuauserv" -StartupType Automatic -ErrorAction SilentlyContinue
+Start-Service -Name "wuauserv" -ErrorAction SilentlyContinue
+`
+	_, err := h.runPowerShellSingle(ctx, configScript)
+	if err != nil {
+		addResult(result, "Updates", "Configure automatic updates", false, "", err.Error())
+	} else {
+		addResult(result, "Updates", "Windows Update service enabled and configured for automatic updates", true, "", "")
+		fmt.Printf("  ✓ Automatic updates configured\n")
+	}
+
+	// Running full Windows Update can take 30+ minutes and may fail in VM
+	// Instead, we just check for updates and report
+	fmt.Println("  ⚠ Full Windows Update can take 30+ minutes.")
+	fmt.Println("  Checking for available updates (not installing)...")
+
+	checkScript := `
+$UpdateSession = New-Object -ComObject Microsoft.Update.Session
+$UpdateSearcher = $UpdateSession.CreateUpdateSearcher()
+try {
+    $SearchResult = $UpdateSearcher.Search("IsInstalled=0")
+    $Updates = $SearchResult.Updates
+    if ($Updates.Count -gt 0) {
+        Write-Output "UPDATES_AVAILABLE: $($Updates.Count) updates pending"
+        foreach ($Update in $Updates | Select-Object -First 5) {
+            Write-Output "  - $($Update.Title)"
+        }
+        if ($Updates.Count -gt 5) {
+            Write-Output "  ... and $($Updates.Count - 5) more"
+        }
+    } else {
+        Write-Output "UPDATES_CURRENT: System is up to date"
+    }
+} catch {
+    Write-Output "UPDATE_CHECK_FAILED: $($_.Exception.Message)"
+}
+`
+	output, err := h.runPowerShellSingle(ctx, checkScript)
+	if err != nil {
+		addResult(result, "Updates", "Check for Windows updates", false, "", err.Error())
+	} else if strings.Contains(output, "UPDATES_CURRENT") {
+		addResult(result, "Updates", "Windows is up to date", true, "", "")
+		fmt.Printf("  ✓ System is up to date\n")
+	} else if strings.Contains(output, "UPDATES_AVAILABLE") {
+		addResult(result, "Updates", "Updates available - run Windows Update manually", false, "", output)
+		fmt.Printf("  ⚠ Updates available - run Windows Update manually\n")
+		fmt.Println(output)
+	} else {
+		addResult(result, "Updates", "Could not check update status", false, "", output)
 	}
 }
 

@@ -290,31 +290,41 @@ The AI has full control over baseline hardening through dedicated tools:
 **Windows Sections:**
 | Section ID | What It Does |
 |------------|--------------|
-| `password_policy` | Password length, age, complexity, lockout |
-| `local_security` | UAC, Ctrl+Alt+Del, anonymous enumeration |
-| `firewall` | Enable Windows Firewall, default deny inbound |
+| `password_policy` | Password length, age, complexity, lockout, history |
+| `local_security` | UAC, Ctrl+Alt+Del, blank passwords, anonymous enumeration, NTLMv2 |
+| `firewall` | Enable Windows Firewall, default deny inbound, logging |
 | `guest_account` | Disable Guest account |
-| `audit_policy` | Enable comprehensive audit logging |
-| `services` | Disable RemoteRegistry, Xbox, Fax, etc. |
-| `defender` | Enable real-time protection, SmartScreen |
-| `registry` | AutoPlay disabled, WDigest disabled, SEHOP |
-| `smb` | Disable SMBv1, enable signing/encryption |
-| `additional_security` | FIPS, print drivers, shell protocol, WinRM |
-| `critical_services` | Enable Event Log, Defender, Security Center |
+| `audit_policy` | Enable comprehensive audit logging including File Share |
+| `services` | Disable RemoteRegistry, Xbox, Fax, SNMP, Telnet, etc. |
+| `defender` | Enable real-time protection, behavior monitoring, SmartScreen, PUA |
+| `registry` | AutoPlay/AutoRun disabled, WDigest disabled, SEHOP, clear pagefile |
+| `smb` | Disable SMBv1, require signing/encryption |
+| `additional_security` | FIPS, print drivers, shell protocol, WinRM, null session, SMB signing |
+| `critical_services` | Enable Event Log, Defender, Security Center, Windows Update |
+| `updates` | Configure automatic updates, check for pending updates |
 
 **Linux Sections:**
 | Section ID | What It Does |
 |------------|--------------|
-| `password_policy` | PAM pwquality, login.defs settings |
-| `kernel` | sysctl hardening (IP forwarding, ASLR, etc.) |
+| `password_policy` | PAM pwquality, login.defs, nullok removal, lockout |
+| `kernel` | sysctl hardening (SYN cookies, ASLR, perf_event_paranoid, martian logging) |
 | `firewall` | UFW/firewalld enable, default deny |
-| `auditd` | Install auditd, add monitoring rules |
+| `auditd` | Install auditd, add identity/sudoers monitoring rules |
 | `apparmor` | Install and enforce AppArmor profiles |
 | `fail2ban` | Install and configure fail2ban |
-| `services` | Disable Apache, MySQL, Samba, etc. (if not required) |
-| `guest` | Disable guest in LightDM/GDM |
-| `permissions` | Secure /etc/passwd, /etc/shadow, etc. |
+| `clamav` | Install ClamAV antivirus (optional) |
+| `services` | Disable Apache, MySQL, Samba, 25+ services (if not required) |
+| `guest` | Disable guest in LightDM/GDM, lock guest account |
+| `permissions` | Secure /etc/passwd, /etc/shadow, /etc/cron.* |
 | `ctrl_alt_del` | Mask ctrl-alt-del.target |
+| `sudo` | Remove NOPASSWD/!authenticate, harden sudoers (env_reset, logging) |
+| `root_account` | Lock root if blank, disable GDM/LightDM root login |
+| `suid_audit` | Remove dangerous SUID bits (date, editors, scripting langs) |
+| `cron_audit` | Check for suspicious cron jobs and startup scripts |
+| `screen_lock` | 5-min timeout, auto-lock (GNOME/Cinnamon/MATE/XFCE/KDE) |
+| `display_manager` | GDM/LightDM/SDDM: disable TCP, guest, autologin |
+| `process_limits` | Set nproc=2500, nofile=65535 in limits.conf |
+| `updates` | Configure automatic updates, optionally run apt upgrade |
 
 **Forensic Question Safety:**
 Some sections can affect evidence needed for forensic questions:
@@ -324,8 +334,16 @@ Some sections can affect evidence needed for forensic questions:
 The AI is trained to answer forensic questions FIRST, then run baseline sections.
 
 **User Commands:**
-- `/baseline` - Run interactive baseline (prompts for required services)
-- `/baseline auto` - Run with secure defaults (no prompts)
+- `/baseline` - Run interactive baseline (prompts for services, IPv6, updates, tools)
+- `/baseline auto` - Run with secure defaults (no prompts, no updates)
+
+**Interactive Mode Prompts:**
+- Password policy values (max age, min age, warn age, length)
+- IPv6 disable (default: no - some systems need it)
+- Firewall enable (default: yes)
+- System updates (default: no - can take 10-30+ minutes!)
+- Required services selection (numbered list)
+- Security tools (Linux only): auditd, AppArmor, fail2ban, ClamAV
 
 **CLI Flags:**
 ```bash
@@ -718,6 +736,24 @@ API Key:  ✅ Valid
 | `set_password_policy` | Configure password policy |
 | `disable_guest` | Disable the guest account |
 | `find_prohibited_files` | Search for media files |
+
+### Software Management
+| Tool | Description |
+|------|-------------|
+| `list_installed_software` | List all installed packages (optional filter) |
+| `remove_software` | Remove/uninstall a package |
+| `search_prohibited_software` | Search for prohibited software by category |
+
+**Categories:** `games`, `hacking`, `p2p`, `remote`, `media`, `all`
+
+**Common prohibited software:**
+- Games: aisleriot, gnome-mines, solitaire, minesweeper, etc.
+- Hacking: nmap, wireshark, john, hydra, metasploit, etc.
+- P2P/Torrent: transmission, deluge, qbittorrent, amule, etc.
+- Remote access: tigervnc, teamviewer, anydesk, etc.
+- Media servers: plex, emby, jellyfin, kodi, etc.
+
+**Prohibited file types:** mp3, mp4, wav, ogg, flac, mkv, avi, torrent, etc.
 
 ### File Operations
 | Tool | Description |

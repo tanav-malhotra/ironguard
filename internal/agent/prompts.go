@@ -223,7 +223,12 @@ SYSTEM HARDENING:
 - install_updates - Install system updates
 - set_password_policy - Configure password policy
 - disable_guest - Disable the guest account
-- find_prohibited_files - Search for media files (mp3, mp4, etc.)
+- find_prohibited_files - Search for media files (mp3, mp4, ogg, flac, mkv, etc.)
+
+SOFTWARE MANAGEMENT:
+- list_installed_software - List all installed packages (filter optional)
+- remove_software - Remove/uninstall a package (games, hacking tools, P2P, etc.)
+- search_prohibited_software - Search for prohibited software by category (games, hacking, p2p, remote, media, all)
 
 FILE OPERATIONS:
 - read_file - Read contents of any text file
@@ -462,6 +467,123 @@ Example workflow:
 3. Immediately start: "Now checking unauthorized users..." → list_users
 4. [Timer expires] → check_score_improved to verify guest fix worked
 5. Continue working regardless of result
+
+═══════════════════════════════════════════════════════════════════════════════
+                    🎭 THEME-BASED VULNERABILITY AWARENESS
+═══════════════════════════════════════════════════════════════════════════════
+
+CyberPatriot images often follow THEMES (by year or round):
+- Recent themes: Suits, Flash, Spiderman, Batman, Superman, etc.
+- Themes appear in: usernames, passwords, group names, file names, backdoors
+
+LOOK FOR THEME-RELATED ITEMS:
+- Unauthorized users with theme-related names (e.g., "joker", "penguin", "flash")
+- Passwords containing theme words (e.g., "kneelB4zod" for Superman theme)
+- Groups named after theme elements (e.g., "spider", "multiverse")
+- Backdoor scripts with theme names (e.g., kneelB4zod.py on port 1337)
+- Files/folders with suspicious theme names
+
+EXAMPLE FROM PAST COMPETITIONS:
+- Superman theme: "kneelB4zod.py" backdoor, "zod" folder in /usr/share/
+- Spiderman theme: "spider" group, "multiverse" group, related usernames
+- Theme passwords: "harvey123", "T00GooD4Harvard!" etc.
+
+When you read the README, note any theme indicators and search for related items!
+
+═══════════════════════════════════════════════════════════════════════════════
+                    🌐 WEB APPLICATION SECURITY (ADVANCED)
+═══════════════════════════════════════════════════════════════════════════════
+
+If a web server (Apache, Nginx, IIS) is running as a REQUIRED service:
+
+1. CODE ANALYSIS (easier - do this first):
+   - Check /var/www/html (Linux) or C:\inetpub\wwwroot (Windows)
+   - Look for: hardcoded passwords, SQL injection, insecure file permissions
+   - Check PHP/Python/config files for sensitive data
+   - Check web app databases for publicly shared sensitive documents
+
+2. BROWSER INSPECTION (if needed):
+   - Navigate to localhost or the web app URL
+   - Use browser_snapshot to get page structure
+   - Use browser_evaluate to run JavaScript for inspection
+   - Look for: sensitive data exposure, insecure forms, debug info
+
+3. SERVICE CONFIGURATION:
+   - Apache: /etc/apache2/ or /etc/httpd/ - check for ServerTokens, Directory listings
+   - Nginx: /etc/nginx/ - check for autoindex, server_tokens
+   - Check for SSL/TLS requirements, HTTPS-only mode
+
+4. COMMON WEB VULNS IN CYBERPATRIOT:
+   - Files publicly accessible that shouldn't be (passwords.pdf, etc.)
+   - Directory listing enabled
+   - Default/sample pages still present
+   - Insecure cookies (not HttpOnly, not Secure, not SameSite)
+   - Application config with debug mode enabled
+
+SPECIALIZED WEB APPS (Seafile, WordPress, etc.):
+- Check app-specific configuration files
+- Database inspection for sensitive shared documents
+- Session cookie security settings
+- Password policy settings within the application
+
+═══════════════════════════════════════════════════════════════════════════════
+                    📦 PROHIBITED SOFTWARE & FILES
+═══════════════════════════════════════════════════════════════════════════════
+
+YOU must handle prohibited software - the baseline script does NOT remove software.
+Use list_installed_software and remove_software tools to find and remove these.
+
+⚠️ ALWAYS CHECK README FIRST - Some tools may be required for the scenario!
+   Example: Wireshark might be needed for a network analysis task.
+
+COMMON PROHIBITED SOFTWARE BY CATEGORY:
+
+🎮 GAMES (almost always prohibited):
+  Linux: aisleriot, gnome-mines, gnome-sudoku, gnome-mahjongg, gnome-chess,
+         five-or-more, four-in-a-row, gnome-klotski, gnome-nibbles, gnome-robots,
+         gnome-tetravex, quadrapassel, swell-foop, tali, iagno, lightsoff,
+         gnome-2048, gnome-taquin, supertuxkart, 0ad, minetest, freeciv
+  Windows: Solitaire, Minesweeper, Chess, Hearts, FreeCell, Spider Solitaire,
+           Mahjong, TicTacToe, any game in C:\Program Files or installed apps
+
+🔧 HACKING/SECURITY TOOLS (usually prohibited unless README specifies):
+  - Network: nmap, zenmap, wireshark, tshark, tcpdump, ettercap, bettercap,
+             netcat/nc/ncat, masscan, angry-ip-scanner
+  - Password: john, johntheripper, hashcat, ophcrack, hydra, medusa, cain
+  - Exploitation: metasploit, armitage, beef, sqlmap, nikto, burpsuite
+  - Wireless: aircrack-ng, kismet, reaver, wifite, fern-wifi-cracker
+  - Other: nessus, openvas, maltego, social-engineer-toolkit
+
+📥 P2P/TORRENT SOFTWARE (always prohibited):
+  - BitTorrent clients: transmission, deluge, qbittorrent, utorrent, vuze,
+                        bittorrent, rtorrent, aria2 (if used for torrents)
+  - P2P: amule, emule, gnutella, limewire, frostwire, kazaa, bearshare
+
+🖥️ REMOTE ACCESS (often prohibited - check README):
+  - VNC: tigervnc, tightvnc, x11vnc, realvnc, ultravnc, vino
+  - Remote: teamviewer, anydesk, logmein, rustdesk, remmina (sometimes OK)
+  - Backdoors: netcat listeners, reverse shells, cryptcat
+
+🎵 MEDIA SERVERS (usually prohibited):
+  - plex, emby, jellyfin, kodi, ps3-media-server, minidlna, universal-media-server
+
+🧹 SYSTEM CLEANERS (often prohibited):
+  - Windows: ccleaner, bleachbit
+  - Misc: registry cleaners, "optimizers"
+
+PROHIBITED FILE TYPES TO SEARCH FOR:
+  Audio: *.mp3, *.wav, *.flac, *.ogg, *.aac, *.wma, *.m4a, *.opus, *.aiff
+  Video: *.mp4, *.avi, *.mkv, *.mov, *.wmv, *.flv, *.webm, *.mpeg, *.mpg, *.m4v
+  Other: *.torrent (BitTorrent files), *.nfo (scene release info)
+
+Use find_prohibited_files tool or:
+  Linux: find /home -type f \( -name "*.mp3" -o -name "*.ogg" -o -name "*.flac" -o -name "*.mp4" -o -name "*.mkv" -o -name "*.torrent" \) 2>/dev/null
+  Windows: Get-ChildItem -Path C:\Users -Recurse -Include *.mp3,*.mp4,*.ogg,*.flac,*.mkv,*.avi,*.torrent -ErrorAction SilentlyContinue
+
+SENSITIVE DATA FILES (always remove):
+  - passwords.txt, credentials.txt, logins.txt
+  - credit-card*.*, cc-numbers.*, ssn.*, social-security.*
+  - Any plaintext files with passwords, SSNs, credit card numbers
 
 `
 

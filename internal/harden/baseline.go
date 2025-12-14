@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"runtime"
 	"strings"
 )
@@ -25,9 +26,23 @@ type BaselineConfig struct {
 	InstallAuditd   bool // Default: true
 	InstallApparmor bool // Default: true
 	InstallFail2ban bool // Default: true
+	InstallClamAV   bool // Default: true - antivirus scanner
+
+	// Updates (ASK USER - can take a long time!)
+	RunUpdates bool // Default: false - ask user, updates can take 10-30 min
 
 	// Required Services - these will NOT be disabled/hardened restrictively
 	RequiredServices []string // e.g., ["ssh", "apache", "mysql"]
+
+	// Display Manager (Linux only) - which to keep, others get removed
+	// Values: "gdm3", "lightdm", "sddm", "" (auto-detect/keep all)
+	SelectedDisplayManager string
+
+	// User Password Management (Linux only)
+	SetUserPasswords   bool   // Set all user passwords to a standard password
+	StandardPassword   string // Default: "CyberPatr!0t"
+	LockUserAccounts   bool   // Lock accounts after setting password
+	ExpireUserPasswords bool  // Force password change on next login
 
 	// Interactive mode
 	Interactive bool // If false, use all defaults
@@ -139,6 +154,8 @@ func DefaultBaselineConfig() BaselineConfig {
 		InstallAuditd:    true,
 		InstallApparmor:  true,
 		InstallFail2ban:  true,
+		InstallClamAV:    true,
+		RunUpdates:       false, // Updates take too long - ask user
 		RequiredServices: []string{}, // None by default - user selects
 		Interactive:      true,
 	}
@@ -189,6 +206,12 @@ func RunBaselineInteractive(ctx context.Context) (*BaselineResult, error) {
 	cfg.EnableFirewall = askYesNo(reader, "Enable firewall?", true)
 	fmt.Println()
 
+	// Updates (ask user - can take a LONG time)
+	fmt.Println("━━━ SYSTEM UPDATES ━━━")
+	fmt.Println("⚠️  Updates can take 10-30+ minutes and may require restarts!")
+	cfg.RunUpdates = askYesNo(reader, "Run system updates? (say N if time-constrained)", false)
+	fmt.Println()
+
 	// Required Services Selection
 	fmt.Println("━━━ REQUIRED SERVICES ━━━")
 	fmt.Println("Select services that ARE REQUIRED by the README.")
@@ -222,6 +245,29 @@ func RunBaselineInteractive(ctx context.Context) (*BaselineResult, error) {
 		cfg.InstallAuditd = askYesNo(reader, "Install/configure auditd (system auditing)?", true)
 		cfg.InstallApparmor = askYesNo(reader, "Install/configure AppArmor (mandatory access control)?", true)
 		cfg.InstallFail2ban = askYesNo(reader, "Install/configure fail2ban (brute force protection)?", true)
+		cfg.InstallClamAV = askYesNo(reader, "Install ClamAV antivirus? (runs virus scan in background)", true)
+		fmt.Println()
+
+		// Display Manager selection
+		fmt.Println("━━━ DISPLAY MANAGER ━━━")
+		cfg.SelectedDisplayManager = askDisplayManager(reader)
+		fmt.Println()
+
+		// User Password Management
+		fmt.Println("━━━ USER PASSWORDS ━━━")
+		cfg.SetUserPasswords = askYesNo(reader, "Set ALL user passwords to a standard password?", true)
+		if cfg.SetUserPasswords {
+			fmt.Print("Password to set (default: CyberPatr!0t): ")
+			pwInput, _ := reader.ReadString('\n')
+			pwInput = strings.TrimSpace(pwInput)
+			if pwInput == "" {
+				cfg.StandardPassword = "CyberPatr!0t"
+			} else {
+				cfg.StandardPassword = pwInput
+			}
+			cfg.LockUserAccounts = askYesNo(reader, "Lock user accounts? (prevents login until admin unlocks)", false)
+			cfg.ExpireUserPasswords = askYesNo(reader, "Expire passwords? (force change on next login)", true)
+		}
 		fmt.Println()
 	}
 
@@ -231,6 +277,7 @@ func RunBaselineInteractive(ctx context.Context) (*BaselineResult, error) {
 		cfg.MaxPasswordAge, cfg.MinPasswordAge, cfg.PasswordWarnAge, cfg.MinPasswordLen)
 	fmt.Printf("  • IPv6: %s\n", boolToAction(cfg.DisableIPv6, "DISABLE", "keep enabled"))
 	fmt.Printf("  • Firewall: %s\n", boolToAction(cfg.EnableFirewall, "ENABLE", "skip"))
+	fmt.Printf("  • System updates: %s\n", boolToAction(cfg.RunUpdates, "RUN (may take time!)", "skip"))
 	if len(cfg.RequiredServices) > 0 {
 		fmt.Printf("  • Required services (won't touch): %v\n", cfg.RequiredServices)
 	}
@@ -238,6 +285,19 @@ func RunBaselineInteractive(ctx context.Context) (*BaselineResult, error) {
 		fmt.Printf("  • auditd: %s\n", boolToAction(cfg.InstallAuditd, "install/configure", "skip"))
 		fmt.Printf("  • AppArmor: %s\n", boolToAction(cfg.InstallApparmor, "install/configure", "skip"))
 		fmt.Printf("  • fail2ban: %s\n", boolToAction(cfg.InstallFail2ban, "install/configure", "skip"))
+		fmt.Printf("  • ClamAV: %s\n", boolToAction(cfg.InstallClamAV, "install/configure", "skip"))
+		if cfg.SelectedDisplayManager != "" {
+			fmt.Printf("  • Display Manager: KEEP %s, REMOVE others\n", cfg.SelectedDisplayManager)
+		}
+		if cfg.SetUserPasswords {
+			fmt.Printf("  • User passwords: SET ALL to '%s'\n", cfg.StandardPassword)
+			if cfg.LockUserAccounts {
+				fmt.Printf("    → Lock accounts: YES\n")
+			}
+			if cfg.ExpireUserPasswords {
+				fmt.Printf("    → Expire passwords: YES (force change on next login)\n")
+			}
+		}
 	}
 	fmt.Println()
 
@@ -315,6 +375,133 @@ func askServiceSelection(reader *bufio.Reader, services []ServiceOption) []strin
 	}
 
 	return selected
+}
+
+// askDisplayManager prompts user to select which display manager to keep.
+// Detects installed DMs and shows current as default.
+func askDisplayManager(reader *bufio.Reader) string {
+	// Detect installed display managers
+	type dmInfo struct {
+		name      string
+		installed bool
+		active    bool
+	}
+
+	dms := []dmInfo{
+		{name: "gdm3", installed: false, active: false},
+		{name: "lightdm", installed: false, active: false},
+		{name: "sddm", installed: false, active: false},
+	}
+
+	// Check which are installed and which is active
+	// This runs on Linux during the prompt phase
+	checkScript := `
+# Check installed DMs
+for dm in gdm3 lightdm sddm; do
+    if dpkg -l "$dm" 2>/dev/null | grep -q "^ii" || rpm -q "$dm" 2>/dev/null | grep -qv "not installed"; then
+        echo "INSTALLED:$dm"
+    fi
+done
+
+# Check active DM
+if systemctl is-active gdm3 &>/dev/null || systemctl is-active gdm &>/dev/null; then
+    echo "ACTIVE:gdm3"
+elif systemctl is-active lightdm &>/dev/null; then
+    echo "ACTIVE:lightdm"
+elif systemctl is-active sddm &>/dev/null; then
+    echo "ACTIVE:sddm"
+fi
+
+# Fallback: check default display-manager
+if [ -f /etc/X11/default-display-manager ]; then
+    cat /etc/X11/default-display-manager
+fi
+`
+	cmd := exec.Command("bash", "-c", checkScript)
+	output, _ := cmd.CombinedOutput()
+	outputStr := string(output)
+
+	var installedCount int
+	var activeDM string
+
+	for i := range dms {
+		if strings.Contains(outputStr, "INSTALLED:"+dms[i].name) {
+			dms[i].installed = true
+			installedCount++
+		}
+		if strings.Contains(outputStr, "ACTIVE:"+dms[i].name) {
+			dms[i].active = true
+			activeDM = dms[i].name
+		}
+	}
+
+	// Fallback detection from default-display-manager
+	if activeDM == "" {
+		if strings.Contains(outputStr, "gdm") {
+			activeDM = "gdm3"
+		} else if strings.Contains(outputStr, "lightdm") {
+			activeDM = "lightdm"
+		} else if strings.Contains(outputStr, "sddm") {
+			activeDM = "sddm"
+		}
+	}
+
+	// If only one or zero DMs installed, nothing to choose
+	if installedCount <= 1 {
+		if installedCount == 1 {
+			for _, dm := range dms {
+				if dm.installed {
+					fmt.Printf("Only %s is installed - keeping it.\n", dm.name)
+					return dm.name
+				}
+			}
+		}
+		fmt.Println("No display managers detected - skipping.")
+		return ""
+	}
+
+	// Show options
+	fmt.Println("Multiple display managers detected. Select which to KEEP (others will be removed):")
+	fmt.Println()
+
+	defaultChoice := "1"
+	optionNum := 1
+	optionMap := make(map[string]string)
+
+	for _, dm := range dms {
+		if dm.installed {
+			marker := ""
+			if dm.active || dm.name == activeDM {
+				marker = " (current)"
+				defaultChoice = fmt.Sprintf("%d", optionNum)
+			}
+			fmt.Printf("  [%d] %s%s\n", optionNum, dm.name, marker)
+			optionMap[fmt.Sprintf("%d", optionNum)] = dm.name
+			optionNum++
+		}
+	}
+	fmt.Println()
+
+	fmt.Printf("Select [1-%d] (default: %s): ", optionNum-1, defaultChoice)
+	input, _ := reader.ReadString('\n')
+	input = strings.TrimSpace(input)
+
+	if input == "" {
+		input = defaultChoice
+	}
+
+	if selected, ok := optionMap[input]; ok {
+		fmt.Printf("Selected: %s (will remove others)\n", selected)
+		return selected
+	}
+
+	// Invalid input - use default
+	if selected, ok := optionMap[defaultChoice]; ok {
+		fmt.Printf("Invalid input - using default: %s\n", selected)
+		return selected
+	}
+
+	return ""
 }
 
 // FormatResultsForAI returns a summary suitable for AI context.

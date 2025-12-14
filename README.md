@@ -178,13 +178,25 @@ ironguard --baseline       # Run interactive baseline before TUI
 ironguard --baseline-auto  # Run with defaults before TUI
 ```
 
-The baseline script applies standard security configurations that are ALWAYS done:
-- Password policies (max/min age, complexity, length, history)
-- Firewall configuration (enable, default deny inbound)
-- Audit policies (comprehensive logging)
-- Guest account disabled
+The baseline script applies standard security configurations. Interactive mode asks about:
+- **Password policies** (max/min age, complexity, length, history)
+- **IPv6** (ask - some systems need it)
+- **Firewall** (enable, default deny inbound)
+- **System updates** (ask - can take 10-30+ minutes!)
+- **Required services** (select which services the README requires)
+
+**Linux-specific options:**
+- auditd, AppArmor, fail2ban, ClamAV (all configurable)
+- Kernel hardening (ASLR, SYN cookies, martian logging, perf_event)
+- Sudo hardening (env_reset, coredump disabled, logging)
+- Guest/root account security
+- SUID audit and cron job scanning
+
+**Windows-specific:**
+- Audit policies (comprehensive logging, File Share auditing)
+- SMB hardening (disable v1, require signing)
+- Registry hardening (AutoPlay, UAC, WDigest, etc.)
 - Critical services enabled (Event Log, Defender, etc.)
-- Registry hardening (AutoPlay disabled, UAC enabled, etc.)
 
 **Service Selection:** When running interactively, you select which services are REQUIRED by the README (e.g., SSH, Apache, MySQL). These services will NOT be disabled or hardened restrictively.
 
@@ -276,6 +288,27 @@ IronGuard includes native parsers for common forensics file formats—no externa
 | **Images** | `read_image` | Read images for vision model analysis |
 
 These tools are compiled into the binary—they work even if Wireshark, pdftotext, or Microsoft Office aren't installed.
+
+### Software Management
+
+The AI can find and remove prohibited software:
+
+| Tool | Description |
+|------|-------------|
+| `list_installed_software` | List all installed packages/programs (with optional filter) |
+| `remove_software` | Uninstall a package (games, hacking tools, P2P clients, etc.) |
+| `search_prohibited_software` | Search for prohibited software by category |
+
+**Categories:** `games`, `hacking`, `p2p`, `remote`, `media`, `all`
+
+The AI knows common prohibited software patterns:
+- **Games**: aisleriot, gnome-mines, solitaire, minesweeper, etc.
+- **Hacking tools**: nmap, wireshark, john, hydra, metasploit, etc.
+- **P2P/Torrent**: transmission, deluge, qbittorrent, amule, etc.
+- **Remote access**: tigervnc, teamviewer, anydesk, etc.
+- **Media servers**: plex, emby, jellyfin, kodi, etc.
+
+**Prohibited file types**: mp3, mp4, wav, ogg, flac, mkv, avi, torrent, and more.
 
 ### Persistent Memory
 

@@ -102,6 +102,7 @@ ironguard/
 │   │   ├── manual_tasks.go # Human task assignment
 │   │   ├── subagent_tools.go # Spawn/manage subagents
 │   │   ├── timing.go       # Wait and async timer tools
+│   │   ├── software.go     # Software listing and removal tools
 │   │   └── web.go          # Web search tool
 │   │
 │   └── tui/                # Terminal UI (Bubble Tea)
@@ -282,6 +283,9 @@ type ToolHandler func(ctx, args) (string, error)
 | `set_timer` | timing.go | Set async timer with notification |
 | `list_timers` | timing.go | List active timers |
 | `cancel_timer` | timing.go | Cancel an active timer |
+| `list_installed_software` | software.go | List all installed packages |
+| `remove_software` | software.go | Remove/uninstall a package |
+| `search_prohibited_software` | software.go | Search for prohibited software by category |
 
 **Shell Session** (`shell_session.go`):
 ```go

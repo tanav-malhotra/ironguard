@@ -80,6 +80,7 @@ func NewRegistry() *Registry {
 	r.RegisterDocumentTools()       // Add PCAP, PDF, DOCX parsing tools
 	r.RegisterTimingTools()         // Add wait and timer tools
 	r.RegisterBaselineTools()       // Add baseline hardening tools for AI control
+	r.RegisterSoftwareTools()       // Add software listing and removal tools
 	registerMemoryTools(r)          // Add persistent memory tools
 	return r
 }

@@ -470,6 +470,45 @@ func hardenLinuxServices(ctx context.Context, h *Hardener, cfg BaselineConfig, r
 		fmt.Printf("  ⊘ SSH skipped (required)\n")
 	}
 
+	// Apache/httpd (if not required) - handles both Debian and RHEL naming
+	if !isServiceRequired(cfg.RequiredServices, "apache") {
+		// Try both service names - apache2 (Debian/Ubuntu) and httpd (RHEL/CentOS)
+		disableServiceIfExists(ctx, h, result, "apache2", "Apache2 Web Server")
+		disableServiceIfExists(ctx, h, result, "httpd", "Apache httpd Web Server")
+	} else {
+		addSkipped(result, "Services", "Apache/httpd", "marked as required")
+		fmt.Printf("  ⊘ Apache skipped (required)\n")
+	}
+
+	// Nginx (if not required)
+	if !isServiceRequired(cfg.RequiredServices, "nginx") {
+		disableServiceIfExists(ctx, h, result, "nginx", "Nginx Web Server")
+	} else {
+		addSkipped(result, "Services", "Nginx", "marked as required")
+	}
+
+	// MySQL (if not required)
+	if !isServiceRequired(cfg.RequiredServices, "mysql") {
+		disableServiceIfExists(ctx, h, result, "mysql", "MySQL Server")
+		disableServiceIfExists(ctx, h, result, "mysqld", "MySQL Server (mysqld)")
+	} else {
+		addSkipped(result, "Services", "MySQL", "marked as required")
+	}
+
+	// MariaDB (if not required)
+	if !isServiceRequired(cfg.RequiredServices, "mariadb") {
+		disableServiceIfExists(ctx, h, result, "mariadb", "MariaDB Server")
+	} else {
+		addSkipped(result, "Services", "MariaDB", "marked as required")
+	}
+
+	// PostgreSQL (if not required)
+	if !isServiceRequired(cfg.RequiredServices, "postgresql") {
+		disableServiceIfExists(ctx, h, result, "postgresql", "PostgreSQL Server")
+	} else {
+		addSkipped(result, "Services", "PostgreSQL", "marked as required")
+	}
+
 	// SMB/Samba (if not required)
 	if !isServiceRequired(cfg.RequiredServices, "samba") {
 		disableServiceIfExists(ctx, h, result, "smbd", "Samba SMB")
@@ -480,8 +519,9 @@ func hardenLinuxServices(ctx context.Context, h *Hardener, cfg BaselineConfig, r
 
 	// FTP (if not required)
 	if !isServiceRequired(cfg.RequiredServices, "ftp") {
-		disableServiceIfExists(ctx, h, result, "vsftpd", "FTP Server")
-		disableServiceIfExists(ctx, h, result, "proftpd", "ProFTPD")
+		disableServiceIfExists(ctx, h, result, "vsftpd", "FTP Server (vsftpd)")
+		disableServiceIfExists(ctx, h, result, "proftpd", "FTP Server (ProFTPD)")
+		disableServiceIfExists(ctx, h, result, "pure-ftpd", "FTP Server (Pure-FTPd)")
 	} else {
 		addSkipped(result, "Services", "FTP hardening", "marked as required")
 	}
@@ -489,30 +529,122 @@ func hardenLinuxServices(ctx context.Context, h *Hardener, cfg BaselineConfig, r
 	// NFS (if not required)
 	if !isServiceRequired(cfg.RequiredServices, "nfs") {
 		disableServiceIfExists(ctx, h, result, "nfs-server", "NFS Server")
+		disableServiceIfExists(ctx, h, result, "nfs-kernel-server", "NFS Kernel Server")
 		disableServiceIfExists(ctx, h, result, "rpcbind", "RPC Bind")
 	} else {
 		addSkipped(result, "Services", "NFS hardening", "marked as required")
+	}
+
+	// DNS/BIND (if not required)
+	if !isServiceRequired(cfg.RequiredServices, "dns") {
+		disableServiceIfExists(ctx, h, result, "named", "BIND DNS (named)")
+		disableServiceIfExists(ctx, h, result, "bind9", "BIND9 DNS")
+	} else {
+		addSkipped(result, "Services", "DNS/BIND", "marked as required")
+	}
+
+	// Mail servers (if not required)
+	if !isServiceRequired(cfg.RequiredServices, "mail") {
+		disableServiceIfExists(ctx, h, result, "postfix", "Postfix Mail")
+		disableServiceIfExists(ctx, h, result, "dovecot", "Dovecot IMAP/POP3")
+		disableServiceIfExists(ctx, h, result, "sendmail", "Sendmail")
+		disableServiceIfExists(ctx, h, result, "exim4", "Exim Mail")
+	} else {
+		addSkipped(result, "Services", "Mail servers", "marked as required")
+	}
+
+	// Docker (if not required)
+	if !isServiceRequired(cfg.RequiredServices, "docker") {
+		disableServiceIfExists(ctx, h, result, "docker", "Docker")
+		disableServiceIfExists(ctx, h, result, "containerd", "containerd")
+	} else {
+		addSkipped(result, "Services", "Docker", "marked as required")
+	}
+
+	// MongoDB (if not required)
+	if !isServiceRequired(cfg.RequiredServices, "mongodb") {
+		disableServiceIfExists(ctx, h, result, "mongod", "MongoDB")
+	} else {
+		addSkipped(result, "Services", "MongoDB", "marked as required")
+	}
+
+	// Redis (if not required)
+	if !isServiceRequired(cfg.RequiredServices, "redis") {
+		disableServiceIfExists(ctx, h, result, "redis-server", "Redis Server")
+		disableServiceIfExists(ctx, h, result, "redis", "Redis")
+	} else {
+		addSkipped(result, "Services", "Redis", "marked as required")
 	}
 
 	// VNC (if not required)
 	if !isServiceRequired(cfg.RequiredServices, "vnc") {
 		disableServiceIfExists(ctx, h, result, "vncserver", "VNC Server")
 		disableServiceIfExists(ctx, h, result, "x11vnc", "X11 VNC")
+		disableServiceIfExists(ctx, h, result, "tigervnc", "TigerVNC")
 	} else {
 		addSkipped(result, "Services", "VNC hardening", "marked as required")
 	}
 
-	// Telnet (almost never required, but check anyway)
-	disableServiceIfExists(ctx, h, result, "telnetd", "Telnet Server")
-	disableServiceIfExists(ctx, h, result, "xinetd", "xinetd")
-	
-	// Avahi (mDNS - usually not needed)
-	disableServiceIfExists(ctx, h, result, "avahi-daemon", "Avahi mDNS")
-	
+	// XRDP (if not required)
+	if !isServiceRequired(cfg.RequiredServices, "xrdp") {
+		disableServiceIfExists(ctx, h, result, "xrdp", "XRDP Remote Desktop")
+	} else {
+		addSkipped(result, "Services", "XRDP", "marked as required")
+	}
+
+	// Tomcat (if not required)
+	if !isServiceRequired(cfg.RequiredServices, "tomcat") {
+		disableServiceIfExists(ctx, h, result, "tomcat", "Apache Tomcat")
+		disableServiceIfExists(ctx, h, result, "tomcat9", "Tomcat 9")
+		disableServiceIfExists(ctx, h, result, "tomcat8", "Tomcat 8")
+	} else {
+		addSkipped(result, "Services", "Tomcat", "marked as required")
+	}
+
+	// Squid proxy (if not required)
+	if !isServiceRequired(cfg.RequiredServices, "squid") {
+		disableServiceIfExists(ctx, h, result, "squid", "Squid Proxy")
+	} else {
+		addSkipped(result, "Services", "Squid", "marked as required")
+	}
+
+	// OpenVPN (if not required)
+	if !isServiceRequired(cfg.RequiredServices, "openvpn") {
+		disableServiceIfExists(ctx, h, result, "openvpn", "OpenVPN")
+	} else {
+		addSkipped(result, "Services", "OpenVPN", "marked as required")
+	}
+
+	// LDAP (if not required)
+	if !isServiceRequired(cfg.RequiredServices, "ldap") {
+		disableServiceIfExists(ctx, h, result, "slapd", "OpenLDAP Server")
+	} else {
+		addSkipped(result, "Services", "LDAP", "marked as required")
+	}
+
+	// Telnet (almost never required in CyberPatriot)
+	if !isServiceRequired(cfg.RequiredServices, "telnet") {
+		disableServiceIfExists(ctx, h, result, "telnetd", "Telnet Server")
+		disableServiceIfExists(ctx, h, result, "inetd", "inetd")
+		disableServiceIfExists(ctx, h, result, "xinetd", "xinetd")
+	}
+
 	// CUPS (if not required)
 	if !isServiceRequired(cfg.RequiredServices, "cups") {
 		disableServiceIfExists(ctx, h, result, "cups", "CUPS Printing")
+		disableServiceIfExists(ctx, h, result, "cups-browsed", "CUPS Browsed")
+	} else {
+		addSkipped(result, "Services", "CUPS", "marked as required")
 	}
+
+	// Always disable these (security risks, rarely needed)
+	disableServiceIfExists(ctx, h, result, "avahi-daemon", "Avahi mDNS")
+	disableServiceIfExists(ctx, h, result, "rsh-server", "RSH Server")
+	disableServiceIfExists(ctx, h, result, "rlogin", "rlogin")
+	disableServiceIfExists(ctx, h, result, "rexec", "rexec")
+	disableServiceIfExists(ctx, h, result, "talk", "talk")
+	disableServiceIfExists(ctx, h, result, "ntalk", "ntalk")
+	disableServiceIfExists(ctx, h, result, "tftp", "TFTP Server")
 }
 
 // hardenOrDisableSSH hardens SSH if installed, disables if not required.

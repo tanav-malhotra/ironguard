@@ -478,10 +478,16 @@ func (h *Hardener) runPowerShell(ctx context.Context, script string) ([]string, 
 	return result, nil
 }
 
-func (h *Hardener) runPowerShellSingle(ctx context.Context, script string) (string, error) {
+// RunPowerShellSingle executes a PowerShell script and returns output.
+func (h *Hardener) RunPowerShellSingle(ctx context.Context, script string) (string, error) {
 	cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", script)
 	output, err := cmd.CombinedOutput()
 	return string(output), err
+}
+
+// Alias for internal use
+func (h *Hardener) runPowerShellSingle(ctx context.Context, script string) (string, error) {
+	return h.RunPowerShellSingle(ctx, script)
 }
 
 func (h *Hardener) runBash(ctx context.Context, script string) ([]string, error) {
@@ -500,9 +506,15 @@ func (h *Hardener) runBash(ctx context.Context, script string) ([]string, error)
 	return result, nil
 }
 
-func (h *Hardener) runBashSingle(ctx context.Context, script string) (string, error) {
+// RunBashSingle executes a bash script and returns output.
+func (h *Hardener) RunBashSingle(ctx context.Context, script string) (string, error) {
 	cmd := exec.CommandContext(ctx, "bash", "-c", script)
 	output, err := cmd.CombinedOutput()
 	return string(output), err
+}
+
+// Alias for internal use
+func (h *Hardener) runBashSingle(ctx context.Context, script string) (string, error) {
+	return h.RunBashSingle(ctx, script)
 }
 

@@ -272,7 +272,77 @@ AI: "Checking if guest fix was scored..."
     [Calls: check_score_improved]
 ```
 
-### 8. Persistent Memory 🧠
+### 8. Baseline Hardening Tools 🛡️
+The AI has full control over baseline hardening through dedicated tools:
+
+**AI Tools:**
+- `list_baseline_sections` - See all sections with detailed descriptions of what each does
+- `run_baseline_section(section, required_services, ...)` - Run a specific section
+- `run_baseline_safe(required_services)` - Run only forensic-safe sections
+- `run_baseline_full(required_services, disable_ipv6)` - Run all sections
+
+**Key Features:**
+- AI decides WHEN to run each section (can wait for forensics first)
+- AI specifies which services are REQUIRED (won't be disabled)
+- AI knows EXACTLY what each section does before running it
+- AI can run sections individually to troubleshoot issues
+
+**Windows Sections:**
+| Section ID | What It Does |
+|------------|--------------|
+| `password_policy` | Password length, age, complexity, lockout |
+| `local_security` | UAC, Ctrl+Alt+Del, anonymous enumeration |
+| `firewall` | Enable Windows Firewall, default deny inbound |
+| `guest_account` | Disable Guest account |
+| `audit_policy` | Enable comprehensive audit logging |
+| `services` | Disable RemoteRegistry, Xbox, Fax, etc. |
+| `defender` | Enable real-time protection, SmartScreen |
+| `registry` | AutoPlay disabled, WDigest disabled, SEHOP |
+| `smb` | Disable SMBv1, enable signing/encryption |
+| `additional_security` | FIPS, print drivers, shell protocol, WinRM |
+| `critical_services` | Enable Event Log, Defender, Security Center |
+
+**Linux Sections:**
+| Section ID | What It Does |
+|------------|--------------|
+| `password_policy` | PAM pwquality, login.defs settings |
+| `kernel` | sysctl hardening (IP forwarding, ASLR, etc.) |
+| `firewall` | UFW/firewalld enable, default deny |
+| `auditd` | Install auditd, add monitoring rules |
+| `apparmor` | Install and enforce AppArmor profiles |
+| `fail2ban` | Install and configure fail2ban |
+| `services` | Disable Apache, MySQL, Samba, etc. (if not required) |
+| `guest` | Disable guest in LightDM/GDM |
+| `permissions` | Secure /etc/passwd, /etc/shadow, etc. |
+| `ctrl_alt_del` | Mask ctrl-alt-del.target |
+
+**Forensic Question Safety:**
+Some sections can affect evidence needed for forensic questions:
+- **Safe sections:** password_policy, firewall, audit_policy, defender, registry
+- **May affect evidence:** services, auditd (starts logging), permissions
+
+The AI is trained to answer forensic questions FIRST, then run baseline sections.
+
+**User Commands:**
+- `/baseline` - Run interactive baseline (prompts for required services)
+- `/baseline auto` - Run with secure defaults (no prompts)
+
+**CLI Flags:**
+```bash
+ironguard --baseline       # Interactive baseline before TUI
+ironguard --baseline-auto  # Defaults baseline before TUI
+```
+
+**Example AI Workflow:**
+```
+1. AI reads README → identifies required services: ["ssh", "apache", "mysql"]
+2. AI answers forensic questions (spawns subagents)
+3. AI runs: run_baseline_safe(required_services=["ssh", "apache", "mysql"])
+4. After forensics complete, AI runs remaining sections
+5. AI continues with user management, prohibited files, etc.
+```
+
+### 9. Persistent Memory 🧠
 Remember information across sessions:
 
 **AI Tools:**
@@ -290,7 +360,7 @@ Remember information across sessions:
 
 **Storage:** `~/.ironguard/memory.json`
 
-### 9. Checkpoint System ↩️
+### 10. Checkpoint System ↩️
 IronGuard maintains a tree-structured checkpoint system for undo/restore capabilities:
 
 **Automatic Checkpoints:**
@@ -340,14 +410,14 @@ IronGuard maintains a tree-structured checkpoint system for undo/restore capabil
 - AI is notified when user restores or undoes
 - AI can create checkpoints before destructive actions
 
-### 10. Compact Mode 📝
+### 11. Compact Mode 📝
 Toggle brief AI responses:
 
 - `/compact on` - Brief, concise responses
 - `/compact off` - Detailed responses (default)
 - AI is notified via [SYSTEM] message
 
-### 11. Setting Change Notifications 📢
+### 12. Setting Change Notifications 📢
 AI is automatically notified when user changes settings:
 
 - `/confirm` → AI told to wait for approval
@@ -356,7 +426,7 @@ AI is automatically notified when user changes settings:
 - `/screen control` → AI told it has full access
 - `/subagents <n>` → AI told the new limit
 
-### 12. Smart Autocomplete ⌨️
+### 13. Smart Autocomplete ⌨️
 Intelligent command completion:
 
 - Type `/` to see all available commands
@@ -375,7 +445,7 @@ Works with:
 - `/summarize` - smart/fast
 - `/remember` - memory categories
 
-### 13. Sound Effects 🔊
+### 14. Sound Effects 🔊
 Satisfying audio feedback for scoring:
 
 - **Points gained**: Plays a "ding" sound for each vulnerability found/fixed
@@ -401,7 +471,7 @@ Satisfying audio feedback for scoring:
 - Sound playback is non-blocking (doesn't interrupt AI work)
 - Volume boosted 2.5x for audibility
 
-### 14. Keyboard Shortcuts ⌨️
+### 15. Keyboard Shortcuts ⌨️
 Quick access to common actions:
 
 | Key | Action |
@@ -439,7 +509,7 @@ Placeholder changes each time you send a message or clear input.
 **Note on Terminal Resize:**
 Windows Terminal doesn't always send resize events to TUI applications. After resizing your terminal window, press `Ctrl+R` to update the display. The `/refresh` command also works.
 
-### 15. Connectivity Check 🌐
+### 16. Connectivity Check 🌐
 Verify internet and API key before starting:
 
 **Automatic Check at Startup:**

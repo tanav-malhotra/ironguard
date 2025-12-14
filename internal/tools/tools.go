@@ -79,6 +79,7 @@ func NewRegistry() *Registry {
 	r.RegisterSubAgentTools()       // Add subagent spawning and management
 	r.RegisterDocumentTools()       // Add PCAP, PDF, DOCX parsing tools
 	r.RegisterTimingTools()         // Add wait and timer tools
+	r.RegisterBaselineTools()       // Add baseline hardening tools for AI control
 	registerMemoryTools(r)          // Add persistent memory tools
 	return r
 }

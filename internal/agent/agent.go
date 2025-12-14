@@ -173,7 +173,11 @@ func New(cfg *config.Config) *Agent {
 	// Initialize timer manager for async wait notifications
 	timerAdapter := NewTimerManagerAdapter(a)
 	tools.SetTimerManager(timerAdapter)
-	
+
+	// Initialize baseline executor for AI-controlled hardening
+	baselineAdapter := NewBaselineExecutorAdapter(a)
+	tools.SetBaselineExecutor(baselineAdapter)
+
 	// Load baseline results if they exist (from previous --baseline run)
 	a.loadBaselineResults()
 	

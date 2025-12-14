@@ -165,6 +165,31 @@ Configure the maximum number of concurrent sub-agents with `/subagents <max>` (d
 | `/forget` | Clear all memories |
 | `/tokens` | Show token usage statistics |
 
+### Baseline Hardening
+
+| Command | Description |
+|---------|-------------|
+| `/baseline` | Run interactive baseline hardening (prompts for options) |
+| `/baseline auto` | Run baseline with secure defaults (no prompts) |
+
+**CLI Flags:**
+```bash
+ironguard --baseline       # Run interactive baseline before TUI
+ironguard --baseline-auto  # Run with defaults before TUI
+```
+
+The baseline script applies standard security configurations that are ALWAYS done:
+- Password policies (max/min age, complexity, length, history)
+- Firewall configuration (enable, default deny inbound)
+- Audit policies (comprehensive logging)
+- Guest account disabled
+- Critical services enabled (Event Log, Defender, etc.)
+- Registry hardening (AutoPlay disabled, UAC enabled, etc.)
+
+**Service Selection:** When running interactively, you select which services are REQUIRED by the README (e.g., SSH, Apache, MySQL). These services will NOT be disabled or hardened restrictively.
+
+**AI Integration:** If baseline runs before `/harden`, the AI is notified of what was already done and won't repeat those actions.
+
 ### Manual Interaction
 
 | Command | Description |

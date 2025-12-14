@@ -989,9 +989,6 @@ func resolveDesktopFile(path string) string {
 // fetchURLToTempFile fetches content from a URL and saves to a temp file.
 // Used for scoring reports served by a local web server.
 func fetchURLToTempFile(url string) string {
-	// Use curl or wget to fetch (more reliable than Go's http in some environments)
-	var cmd *exec.Cmd
-	
 	// Create temp file
 	tmpFile, err := os.CreateTemp("", "ironguard-*.html")
 	if err != nil {
@@ -1001,27 +998,81 @@ func fetchURLToTempFile(url string) string {
 	tmpFile.Close()
 	
 	// Try curl first (most common)
-	cmd = exec.Command("curl", "-s", "-L", "-o", tmpPath, "--connect-timeout", "5", url)
-	if err := cmd.Run(); err == nil {
-		// Verify file has content
-		info, err := os.Stat(tmpPath)
-		if err == nil && info.Size() > 0 {
-			return tmpPath
-		}
+	if tryFetchWithTool("curl", []string{"-s", "-L", "-o", tmpPath, "--connect-timeout", "5", url}, tmpPath) {
+		return tmpPath
 	}
 	
 	// Fallback to wget
-	cmd = exec.Command("wget", "-q", "-O", tmpPath, "--timeout=5", url)
-	if err := cmd.Run(); err == nil {
-		info, err := os.Stat(tmpPath)
-		if err == nil && info.Size() > 0 {
-			return tmpPath
-		}
+	if tryFetchWithTool("wget", []string{"-q", "-O", tmpPath, "--timeout=5", url}, tmpPath) {
+		return tmpPath
 	}
 	
 	// Clean up if failed
 	os.Remove(tmpPath)
 	return ""
+}
+
+// tryFetchWithTool attempts to fetch a URL using the specified tool.
+// If tool not found, tries to install it and retry.
+func tryFetchWithTool(tool string, args []string, outputPath string) bool {
+	// First attempt
+	cmd := exec.Command(tool, args...)
+	if err := cmd.Run(); err == nil {
+		if info, err := os.Stat(outputPath); err == nil && info.Size() > 0 {
+			return true
+		}
+	}
+	
+	// Check if tool exists
+	if _, err := exec.LookPath(tool); err != nil {
+		// Tool not found - try to install
+		if installTool(tool) {
+			// Retry after install
+			cmd = exec.Command(tool, args...)
+			if err := cmd.Run(); err == nil {
+				if info, err := os.Stat(outputPath); err == nil && info.Size() > 0 {
+					return true
+				}
+			}
+		}
+	}
+	
+	return false
+}
+
+// installTool attempts to install a tool using the system package manager.
+func installTool(tool string) bool {
+	if runtime.GOOS == "windows" {
+		// On Windows, we can't easily auto-install - rely on PowerShell alternatives
+		return false
+	}
+	
+	// Linux - try common package managers
+	packageManagers := []struct {
+		check   string
+		install []string
+	}{
+		{"apt-get", []string{"apt-get", "install", "-y", "-qq", tool}},
+		{"dnf", []string{"dnf", "install", "-y", "-q", tool}},
+		{"yum", []string{"yum", "install", "-y", "-q", tool}},
+		{"pacman", []string{"pacman", "-S", "--noconfirm", "--quiet", tool}},
+		{"zypper", []string{"zypper", "--quiet", "--non-interactive", "install", tool}},
+	}
+	
+	for _, pm := range packageManagers {
+		if _, err := exec.LookPath(pm.check); err == nil {
+			cmd := exec.Command(pm.install[0], pm.install[1:]...)
+			if err := cmd.Run(); err == nil {
+				// Verify tool is now available
+				if _, err := exec.LookPath(tool); err == nil {
+					return true
+				}
+			}
+			break // Only try one package manager
+		}
+	}
+	
+	return false
 }
 
 // findFileWithDesktopFallback looks for a file, checking for .desktop variations on Linux.

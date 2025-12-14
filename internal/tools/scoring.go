@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -170,53 +171,67 @@ func findScoreReport() (string, error) {
 
 	if runtime.GOOS == "windows" {
 		// Common Windows locations for CyberPatriot scoring report
-		// Check exact official names first, then fallback to globs for practice images
+		// The scoring report is often a shortcut (.lnk) that loads from a local server
+		// The actual HTML is typically stored in the CCS installation directory
 		desktopPath := filepath.Join(os.Getenv("USERPROFILE"), "Desktop")
+		
+		// Priority 1: Check CCS installation directories (where actual HTML files live)
 		searchPaths = []string{
-			// Exact official name with extension
-			filepath.Join(desktopPath, "CyberPatriot Scoring Report.html"),
-			filepath.Join(desktopPath, "CyberPatriot Scoring Report.htm"),
-			// Without extension (edge case)
-			filepath.Join(desktopPath, "CyberPatriot Scoring Report"),
-			// Standard CyberPatriot install locations
-			`C:\CyberPatriot\Scoring Report.html`,
+			// Standard CyberPatriot/CCS install locations
 			`C:\CyberPatriot\ScoringReport.html`,
-			// Generic names
-			filepath.Join(desktopPath, "Scoring Report.html"),
-			filepath.Join(desktopPath, "ScoringReport.html"),
-			// Public desktop
-			filepath.Join(os.Getenv("PUBLIC"), "Desktop", "CyberPatriot Scoring Report.html"),
-			filepath.Join(os.Getenv("PUBLIC"), "Desktop", "Scoring Report.html"),
+			`C:\CyberPatriot\Scoring Report.html`,
+			`C:\CCS\ScoringReport.html`,
+			`C:\CSS\ScoringReport.html`,
 		}
-
-		// Glob fallback for variations and third-party practice images
-		matches, _ := filepath.Glob(filepath.Join(desktopPath, "*[Ss]cor*[Rr]eport*"))
-		searchPaths = append(searchPaths, matches...)
-
-		// Check Program Files
+		
+		// Check Program Files CyberPatriot locations
 		programFiles := []string{os.Getenv("ProgramFiles"), os.Getenv("ProgramFiles(x86)")}
 		for _, pf := range programFiles {
 			if pf != "" {
 				searchPaths = append(searchPaths,
-					filepath.Join(pf, "CyberPatriot", "Scoring Report.html"),
 					filepath.Join(pf, "CyberPatriot", "ScoringReport.html"),
+					filepath.Join(pf, "CyberPatriot", "Scoring Report.html"),
+					filepath.Join(pf, "CCS", "ScoringReport.html"),
 				)
 			}
 		}
+		
+		// Priority 2: Direct HTML files on desktop
+		searchPaths = append(searchPaths,
+			filepath.Join(desktopPath, "CyberPatriot Scoring Report.html"),
+			filepath.Join(desktopPath, "CyberPatriot Scoring Report.htm"),
+			filepath.Join(desktopPath, "Scoring Report.html"),
+			filepath.Join(desktopPath, "ScoringReport.html"),
+		)
+		
+		// Priority 3: Public desktop
+		searchPaths = append(searchPaths,
+			filepath.Join(os.Getenv("PUBLIC"), "Desktop", "CyberPatriot Scoring Report.html"),
+			filepath.Join(os.Getenv("PUBLIC"), "Desktop", "Scoring Report.html"),
+		)
+
+		// Priority 4: Glob fallback for variations (.lnk files will be resolved)
+		matches, _ := filepath.Glob(filepath.Join(desktopPath, "*[Ss]cor*[Rr]eport*"))
+		searchPaths = append(searchPaths, matches...)
 	} else {
 		// Linux locations
 		// Check exact official names first, then fallback to globs for practice images
+		// On Linux, .desktop files are used that link to actual HTML files
 		home := os.Getenv("HOME")
 		desktopPath := filepath.Join(home, "Desktop")
 		searchPaths = []string{
+			// .desktop files (Linux) - these link to actual HTML files
+			filepath.Join(desktopPath, "ScoringReport.desktop"),
+			filepath.Join(desktopPath, "Scoring Report.desktop"),
+			filepath.Join(desktopPath, "CyberPatriot Scoring Report.desktop"),
 			// Exact official name with extension
 			filepath.Join(desktopPath, "CyberPatriot Scoring Report.html"),
 			filepath.Join(desktopPath, "CyberPatriot Scoring Report.htm"),
 			// Without extension (edge case)
 			filepath.Join(desktopPath, "CyberPatriot Scoring Report"),
 			// Standard CyberPatriot install locations
-			"/opt/CyberPatriot/Scoring Report.html",
 			"/opt/CyberPatriot/ScoringReport.html",
+			"/opt/CyberPatriot/Scoring Report.html",
 			// Generic names
 			filepath.Join(desktopPath, "Scoring Report.html"),
 			filepath.Join(desktopPath, "ScoringReport.html"),
@@ -229,13 +244,97 @@ func findScoreReport() (string, error) {
 	}
 
 	for _, path := range searchPaths {
+		// Check if path exists
 		if _, err := os.Stat(path); err == nil {
+			lowerPath := strings.ToLower(path)
+			
+			// If it's a .desktop file (Linux), resolve to actual target
+			if strings.HasSuffix(lowerPath, ".desktop") {
+				resolvedPath := resolveDesktopFile(path)
+				if _, err := os.Stat(resolvedPath); err == nil {
+					return resolvedPath, nil
+				}
+				continue // .desktop file couldn't be resolved
+			}
+			
+			// If it's a .lnk shortcut (Windows), resolve to actual target
+			if strings.HasSuffix(lowerPath, ".lnk") {
+				resolvedPath := resolveWindowsShortcut(path)
+				if resolvedPath != "" {
+					if _, err := os.Stat(resolvedPath); err == nil {
+						return resolvedPath, nil
+					}
+				}
+				continue // Shortcut couldn't be resolved
+			}
+			
 			return path, nil
 		}
 	}
 
 	return "", fmt.Errorf("scoring report not found - looked in common CyberPatriot locations")
 }
+
+// resolveWindowsShortcut uses PowerShell to resolve a .lnk shortcut to its target.
+func resolveWindowsShortcut(path string) string {
+	if runtime.GOOS != "windows" {
+		return ""
+	}
+	
+	// Use PowerShell to read the shortcut target
+	// Note: This might return a URL if it's a web shortcut, which we'd need to fetch
+	psScript := fmt.Sprintf(`
+$shell = New-Object -ComObject WScript.Shell
+$shortcut = $shell.CreateShortcut('%s')
+$shortcut.TargetPath
+`, strings.ReplaceAll(path, "'", "''"))
+	
+	cmd := exec.Command("powershell", "-Command", psScript)
+	output, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	
+	target := strings.TrimSpace(string(output))
+	if target == "" {
+		return ""
+	}
+	
+	// If target is a URL (http/https), we can't read it as a local file
+	// In this case, the scoring report is served by a local web server
+	// We'd need to fetch it via HTTP
+	if strings.HasPrefix(strings.ToLower(target), "http://") || strings.HasPrefix(strings.ToLower(target), "https://") {
+		// Try to fetch from the URL (likely localhost)
+		return tryFetchURLToTemp(target)
+	}
+	
+	return target
+}
+
+// tryFetchURLToTemp tries to fetch a URL and save to a temp file, returning the path.
+// This handles the case where the scoring report is served by a local web server.
+func tryFetchURLToTemp(url string) string {
+	// Use PowerShell to fetch the URL content
+	psScript := fmt.Sprintf(`
+try {
+    $content = Invoke-WebRequest -Uri '%s' -UseBasicParsing -TimeoutSec 5
+    $tempFile = [System.IO.Path]::GetTempFileName() + '.html'
+    [System.IO.File]::WriteAllText($tempFile, $content.Content)
+    $tempFile
+} catch {
+    ''
+}
+`, strings.ReplaceAll(url, "'", "''"))
+	
+	cmd := exec.Command("powershell", "-Command", psScript)
+	output, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	
+	return strings.TrimSpace(string(output))
+}
+
 
 func parseScoreReport(content string) (*ScoreReport, error) {
 	report := &ScoreReport{

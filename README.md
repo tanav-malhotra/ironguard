@@ -202,6 +202,43 @@ The baseline script applies standard security configurations. Interactive mode a
 
 **AI Integration:** If baseline runs before `/harden`, the AI is notified of what was already done and won't repeat those actions.
 
+### Scoring Engine Cracker (v0.7.0)
+
+IronGuard can intercept the CyberPatriot scoring engine in real-time to discover exactly what vulnerabilities are being checked.
+
+| Command | Description |
+|---------|-------------|
+| `/crack` | Start real-time scoring engine interception |
+
+**CLI Flag:**
+```bash
+sudo ironguard --crack   # Run cracker in standalone mode (Linux)
+ironguard.exe --crack    # Run as Administrator (Windows)
+```
+
+**How it works:**
+- Finds the CCSClient scoring engine process
+- **Linux:** Uses `strace` to intercept file access (requires root)
+- **Windows:** Monitors registry/file access via PowerShell (requires Admin)
+- Analyzes what files, registry keys, and processes are being checked
+- Reports findings in real-time with fix suggestions
+- Injects findings directly to the AI agent when run via `/crack`
+
+**Example output:**
+```
+[CRACKER] FILE: /etc/ufw/ufw.conf
+   Current: ENABLED=no
+   Expected: ENABLED=yes
+   Hint: Enable UFW: sudo ufw enable
+
+[CRACKER] KERNEL: /proc/sys/kernel/randomize_va_space
+   Current: 0
+   Expected: 2
+   Hint: Enable ASLR: echo 2 > /proc/sys/kernel/randomize_va_space
+```
+
+**Important:** The cracker provides a real-time "answer key" by watching what the scoring engine checks. This is reset each round—it discovers vulnerabilities dynamically, not from a pre-built list.
+
 ### Manual Interaction
 
 | Command | Description |

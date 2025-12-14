@@ -701,16 +701,21 @@ func toolReadReadme(ctx context.Context, args json.RawMessage) (string, error) {
 	// CyberPatriot README - check exact names first, then fallback to globs
 	// Official naming includes "CyberPatriot README.html" but we also check without
 	// extension for edge cases (practice images, custom setups)
+	// On Linux, .desktop files are used that link to the actual HTML files
 	patterns := []string{
 		// Exact official name with extension (actual filename on disk)
 		filepath.Join(desktop, "CyberPatriot README.html"),
 		filepath.Join(desktop, "CyberPatriot README.htm"),
+		// .desktop files (Linux) - these link to actual HTML files
+		filepath.Join(desktop, "README.desktop"),
+		filepath.Join(desktop, "CyberPatriot README.desktop"),
 		// Without extension (edge case: practice images, text files)
 		filepath.Join(desktop, "CyberPatriot README"),
 		filepath.Join(desktop, "README"),
 		// Glob fallbacks for variations and third-party practice images
 		filepath.Join(desktop, "*README*.html"),
 		filepath.Join(desktop, "*README*.htm"),
+		filepath.Join(desktop, "*README*.desktop"),
 		filepath.Join(desktop, "*[Rr]eadme*"),
 	}
 
@@ -720,11 +725,14 @@ func toolReadReadme(ctx context.Context, args json.RawMessage) (string, error) {
 			continue
 		}
 		for _, match := range matches {
-			content, err := os.ReadFile(match)
+			// Resolve .desktop files to their actual target
+			actualPath := resolveDesktopFile(match)
+			
+			content, err := os.ReadFile(actualPath)
 			if err == nil {
 				// Strip HTML tags for easier reading
 				text := stripHTML(string(content))
-				return fmt.Sprintf("=== %s ===\n%s", filepath.Base(match), text), nil
+				return fmt.Sprintf("=== %s ===\n%s", filepath.Base(actualPath), text), nil
 			}
 		}
 	}
@@ -912,6 +920,90 @@ func getDesktopPath() string {
 		return desktop
 	}
 	return filepath.Join(home, "desktop")
+}
+
+// resolveDesktopFile reads a .desktop file and returns the path it points to.
+// On Linux, CyberPatriot uses .desktop files that link to actual HTML files.
+// Returns the original path if it's not a .desktop file or if parsing fails.
+func resolveDesktopFile(path string) string {
+	// Only handle .desktop files
+	if !strings.HasSuffix(strings.ToLower(path), ".desktop") {
+		return path
+	}
+
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return path
+	}
+
+	// Parse .desktop file format - look for URL= or Exec= line
+	lines := strings.Split(string(content), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		
+		// URL= points to the actual file (common for Link type)
+		if strings.HasPrefix(line, "URL=") {
+			url := strings.TrimPrefix(line, "URL=")
+			// Handle file:// URLs
+			if strings.HasPrefix(url, "file://") {
+				return strings.TrimPrefix(url, "file://")
+			}
+			// Handle absolute paths
+			if strings.HasPrefix(url, "/") {
+				return url
+			}
+		}
+		
+		// Exec= might contain the path (for Application type that opens a file)
+		if strings.HasPrefix(line, "Exec=") {
+			exec := strings.TrimPrefix(line, "Exec=")
+			// Look for a file path in the exec command
+			// Common patterns: xdg-open /path/to/file or firefox /path/to/file
+			parts := strings.Fields(exec)
+			for _, part := range parts {
+				if strings.HasPrefix(part, "/") && (strings.HasSuffix(part, ".html") || strings.HasSuffix(part, ".htm") || strings.HasSuffix(part, ".txt")) {
+					return part
+				}
+			}
+		}
+	}
+
+	return path
+}
+
+// findFileWithDesktopFallback looks for a file, checking for .desktop variations on Linux.
+// It returns the path to the actual content file.
+func findFileWithDesktopFallback(basePath string) (string, error) {
+	// First, try the exact path
+	if _, err := os.Stat(basePath); err == nil {
+		return basePath, nil
+	}
+
+	// On Linux, check for .desktop file
+	if runtime.GOOS != "windows" {
+		desktopPath := basePath + ".desktop"
+		if _, err := os.Stat(desktopPath); err == nil {
+			resolvedPath := resolveDesktopFile(desktopPath)
+			if _, err := os.Stat(resolvedPath); err == nil {
+				return resolvedPath, nil
+			}
+		}
+		
+		// Also check if the file without extension exists as a .desktop file
+		ext := filepath.Ext(basePath)
+		if ext != "" {
+			baseWithoutExt := strings.TrimSuffix(basePath, ext)
+			desktopPath = baseWithoutExt + ".desktop"
+			if _, err := os.Stat(desktopPath); err == nil {
+				resolvedPath := resolveDesktopFile(desktopPath)
+				if _, err := os.Stat(resolvedPath); err == nil {
+					return resolvedPath, nil
+				}
+			}
+		}
+	}
+
+	return "", fmt.Errorf("file not found: %s", basePath)
 }
 
 // stripHTML removes HTML tags and decodes common entities for easier reading.

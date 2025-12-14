@@ -44,6 +44,9 @@ type BaselineConfig struct {
 	LockUserAccounts   bool   // Lock accounts after setting password
 	ExpireUserPasswords bool  // Force password change on next login
 
+	// APT Sources (Linux only)
+	Allow3rdPartyRepos bool // Allow 3rd party repos - default: false (ask user, README may require)
+
 	// Interactive mode
 	Interactive bool // If false, use all defaults
 }
@@ -208,8 +211,15 @@ func RunBaselineInteractive(ctx context.Context) (*BaselineResult, error) {
 
 	// Updates (ask user - can take a LONG time)
 	fmt.Println("━━━ SYSTEM UPDATES ━━━")
-	fmt.Println("⚠️  Updates can take 10-30+ minutes and may require restarts!")
-	cfg.RunUpdates = askYesNo(reader, "Run system updates? (say N if time-constrained)", false)
+	fmt.Println("⚠️  Updates can take 10-30+ minutes!")
+	if runtime.GOOS == "windows" {
+		fmt.Println("    Windows will need a manual restart after updates.")
+	}
+	cfg.RunUpdates = askYesNo(reader, "Run system updates?", true)
+	if cfg.RunUpdates && runtime.GOOS != "windows" {
+		fmt.Println("  APT sources will be verified and fixed before updates.")
+		cfg.Allow3rdPartyRepos = askYesNo(reader, "  Allow 3rd party repos? (N disables PPAs, say Y if README requires)", false)
+	}
 	fmt.Println()
 
 	// Required Services Selection

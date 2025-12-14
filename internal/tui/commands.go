@@ -110,6 +110,11 @@ func (r *CommandRegistry) registerDefaults() {
 			Handler:     cmdBaseline,
 		},
 		{
+			Name:        "crack",
+			Description: "Start scoring engine cracker (real-time answer key extraction)",
+			Handler:     cmdCrack,
+		},
+		{
 			Name:        "start",
 			Description: "Start the hardening assistant (alias for /harden)",
 			Args:        "<windows|windows-server|linux|cisco|auto>",
@@ -883,6 +888,41 @@ func saveBaselineResultsForAI(result *harden.BaselineResult) {
 	os.WriteFile(resultsFile, []byte(content), 0644)
 }
 
+func cmdCrack(m *model, args string) string {
+	// Check if running as admin
+	if !m.cfg.RunningAsAdmin && !m.cfg.AdminCheckSkipped {
+		return `⚠️ SCORING ENGINE CRACKER REQUIRES ADMIN/ROOT
+
+Please restart IronGuard with administrator/root privileges:
+  - Windows: Right-click → Run as administrator
+  - Linux: sudo ./ironguard
+
+Or use the command-line flag directly:
+  sudo ironguard --crack`
+	}
+
+	m.pendingAction = &PendingAction{
+		Type:        ActionCracker,
+		Description: "Start scoring engine cracker",
+	}
+	
+	return `🔓 SCORING ENGINE CRACKER
+═══════════════════════════════════════════════════════════════════
+
+Starting real-time interception of the CyberPatriot scoring engine...
+
+The cracker will:
+  ✓ Find the scoring engine process (CCSClient)
+  ✓ Attach to intercept file/registry reads
+  ✓ Identify what vulnerabilities are being checked
+  ✓ Show you the EXACT fixes needed for points
+
+Findings will appear in the sidebar panel.
+The AI will automatically receive these findings to take action.
+
+Press Ctrl+C to stop the cracker.`
+}
+
 func cmdKey(m *model, args string) string {
 	fields := strings.Fields(args)
 	if len(fields) < 2 {
@@ -1129,7 +1169,8 @@ const (
 	ActionMCPRemove
 	ActionSubAgentLimitChanged
 	ActionSettingChanged
-	ActionRefresh // Redraw screen (fixes UI glitches)
+	ActionRefresh  // Redraw screen (fixes UI glitches)
+	ActionCracker  // Start scoring engine cracker
 )
 
 // PendingAction represents an action waiting to be executed.

@@ -5,10 +5,13 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
 	"runtime"
+	"syscall"
 	"time"
 
 	"github.com/tanav-malhotra/ironguard/internal/config"
+	"github.com/tanav-malhotra/ironguard/internal/cracker"
 	"github.com/tanav-malhotra/ironguard/internal/harden"
 	"github.com/tanav-malhotra/ironguard/internal/tui"
 )
@@ -27,6 +30,9 @@ func main() {
 	// Baseline hardening flag
 	runBaseline := flag.Bool("baseline", false, "run baseline hardening script (outside TUI, interactive prompts)")
 	baselineAuto := flag.Bool("baseline-auto", false, "run baseline hardening with all defaults (no prompts)")
+	
+	// Scoring engine cracker flag
+	runCracker := flag.Bool("crack", false, "run scoring engine cracker (intercepts scoring checks in real-time)")
 	
 	// Provider selection flags
 	useClaude := flag.Bool("claude", false, "start with Claude (Anthropic) as the AI provider")
@@ -48,6 +54,12 @@ func main() {
 	// Handle baseline hardening (runs outside TUI)
 	if *runBaseline || *baselineAuto {
 		runBaselineHardening(*baselineAuto)
+		return
+	}
+	
+	// Handle scoring engine cracker
+	if *runCracker {
+		runScoringEngineCracker()
 		return
 	}
 
@@ -159,6 +171,37 @@ func saveBaselineResults(result *harden.BaselineResult) {
 	content := result.FormatResultsForAI()
 	
 	os.WriteFile(resultsFile, []byte(content), 0644)
+}
+
+// runScoringEngineCracker runs the scoring engine cracker in standalone mode.
+func runScoringEngineCracker() {
+	// Check for root privileges (required for strace/ETW)
+	if !isAdmin() {
+		fmt.Println("ERROR: Scoring engine cracker requires administrator/root privileges.")
+		if runtime.GOOS == "windows" {
+			fmt.Println("Please run as Administrator (right-click -> Run as administrator)")
+		} else {
+			fmt.Println("Please run with sudo: sudo ./ironguard --crack")
+		}
+		os.Exit(1)
+	}
+
+	// Set up signal handling for graceful shutdown
+	ctx, cancel := context.WithCancel(context.Background())
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	
+	go func() {
+		<-sigChan
+		fmt.Println("\n[*] Shutting down cracker...")
+		cancel()
+	}()
+
+	// Run the cracker
+	if err := cracker.RunStandalone(ctx); err != nil {
+		fmt.Printf("Error: %v\n", err)
+		os.Exit(1)
+	}
 }
 
 

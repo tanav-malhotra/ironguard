@@ -75,8 +75,19 @@ ironguard/
 │   ├── config/             # Configuration types
 │   │   └── config.go       # Provider, Mode, ScreenMode enums
 │   │
-│   ├── harden/             # OS hardening logic (placeholder)
-│   │   └── harden.go       # Future: hardening recipes
+│   ├── cracker/            # Scoring engine interception
+│   │   ├── cracker.go      # Main Cracker struct, RunStandalone()
+│   │   ├── discovery.go    # Find scoring engine process (PID)
+│   │   ├── interceptor_linux.go   # Linux strace-based interception
+│   │   ├── interceptor_windows.go # Windows PowerShell monitoring
+│   │   ├── interceptor_stub.go    # Stub for cross-compilation
+│   │   └── output.go       # Format findings for console/AI
+│   │
+│   ├── harden/             # OS hardening and baseline scripts
+│   │   ├── baseline.go     # Interactive baseline configuration
+│   │   ├── baseline_linux.go  # Linux hardening implementation
+│   │   ├── baseline_windows.go # Windows hardening implementation
+│   │   └── harden.go       # Shell execution helpers
 │   │
 │   ├── llm/                # LLM provider implementations
 │   │   ├── provider.go     # Client interface definition

@@ -1386,6 +1386,21 @@ func (m *model) executeAction(action *PendingAction) tea.Cmd {
 			// Queue this message - it will be processed after AI finishes current step
 			m.agent.QueueSystemMessage(systemMsg)
 			result = fmt.Sprintf("✅ Subagent limit set to %s (AI will be notified after current step)", newMax)
+		case ActionCracker:
+			// Start the scoring engine cracker
+			crackerAdapter := m.agent.GetCrackerAdapter()
+			if crackerAdapter == nil {
+				result = "Cracker not initialized"
+			} else if crackerAdapter.IsRunning() {
+				result = "Cracker is already running. Use /stop to stop it first."
+			} else {
+				go func() {
+					if startErr := crackerAdapter.Start(ctx); startErr != nil {
+						m.agent.QueueSystemMessage(fmt.Sprintf("[CRACKER ERROR] %v", startErr))
+					}
+				}()
+				result = "🔓 Scoring engine cracker started. Findings will appear as they're discovered."
+			}
 		case ActionSettingChanged:
 			// Send a system message to the AI about setting changes (queued, non-interrupting)
 			var systemMsg string

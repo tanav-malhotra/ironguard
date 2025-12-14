@@ -112,6 +112,9 @@ type Agent struct {
 	
 	// Persistent memory
 	memory *Memory
+	
+	// Scoring engine cracker
+	crackerAdapter *CrackerAdapter
 }
 
 // New creates a new agent.
@@ -180,6 +183,9 @@ func New(cfg *config.Config) *Agent {
 
 	// Load baseline results if they exist (from previous --baseline run)
 	a.loadBaselineResults()
+	
+	// Initialize scoring engine cracker adapter
+	a.crackerAdapter = NewCrackerAdapter(a)
 	
 	return a
 }
@@ -1417,6 +1423,20 @@ func (a *Agent) parseAndSendScoreUpdate(output string) {
 // Checkpoints returns the checkpoint manager for TUI access.
 func (a *Agent) Checkpoints() *CheckpointManager {
 	return a.checkpoints
+}
+
+// GetCrackerAdapter returns the scoring engine cracker adapter.
+func (a *Agent) GetCrackerAdapter() *CrackerAdapter {
+	return a.crackerAdapter
+}
+
+// SendEvent sends an event to the TUI.
+func (a *Agent) SendEvent(event Event) {
+	select {
+	case a.events <- event:
+	default:
+		// Channel full, drop event
+	}
 }
 
 // loadBaselineResults loads baseline hardening results if they exist.

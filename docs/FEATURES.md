@@ -563,6 +563,83 @@ API Key:  ✅ Valid
 
 ---
 
+### 17. Scoring Engine Cracker 🔓
+
+Real-time interception of the CyberPatriot scoring engine to discover exactly what vulnerabilities are being checked.
+
+**Commands:**
+| Command | Description |
+|---------|-------------|
+| `/crack` | Start real-time scoring engine interception in TUI |
+| `ironguard --crack` | Run cracker in standalone CLI mode |
+
+**How It Works:**
+
+1. **Process Discovery**
+   - Finds the CCSClient scoring engine process
+   - Searches for processes matching: `ccs*`, `css*`, `scoring*`, `cyberpatriot*`
+
+2. **Interception Layer**
+   - **Linux:** Uses `strace` to trace file access syscalls (`open`, `openat`, `read`, `stat`, `access`)
+   - **Windows:** Monitors registry access, file reads, and security policies via PowerShell
+
+3. **Analysis & Heuristics**
+   - Identifies what files, registry keys, and processes are being checked
+   - Compares current values to expected secure values
+   - Generates fix suggestions
+
+**Finding Types:**
+| Type | Description | Examples |
+|------|-------------|----------|
+| `FILE` | Configuration files | `/etc/ufw/ufw.conf`, `/etc/pam.d/common-auth` |
+| `REGISTRY` | Windows registry keys | Password policy, UAC settings, audit policy |
+| `PROCESS` | Running processes | Suspicious backdoors, unauthorized services |
+| `KERNEL` | Kernel parameters | ASLR, SYN cookies, IP forwarding |
+| `FORENSICS` | Forensics questions | Unanswered forensics files |
+
+**Example Output:**
+```
+╔══════════════════════════════════════════════════════════════════╗
+║           IRONGUARD SCORING ENGINE CRACKER                       ║
+║                Real-time Answer Key Extractor                    ║
+╚══════════════════════════════════════════════════════════════════╝
+
+[*] Found scoring engine: CCSClient (PID 1252)
+[*] Intercepting... Press Ctrl+C to stop
+
+═══════════════════════════════════════════════════════════════════
+                         LIVE FINDINGS
+═══════════════════════════════════════════════════════════════════
+
+✗ [FILE] /etc/ufw/ufw.conf
+   Current: ENABLED=no
+   Expected: ENABLED=yes
+   Hint: Enable UFW: sudo ufw enable
+
+✗ [KERN] /proc/sys/kernel/randomize_va_space
+   Current: 0
+   Expected: 2
+   Hint: Enable ASLR: echo 2 > /proc/sys/kernel/randomize_va_space
+
+✓ [FORENSICS] /home/user/Desktop/Forensics Question 1.txt
+   Current: ANSWERED
+   Hint: Forensics question appears to be answered
+
+⚠ [PROC] /usr/share/zod/kneelB4zod.py
+   Current: RUNNING
+   Expected: STOPPED/REMOVED
+   Hint: Known CyberPatriot backdoor (Superman theme)
+```
+
+**AI Integration:**
+When run via `/crack`, findings are automatically injected as system messages to the AI agent, enabling it to fix issues as they're discovered.
+
+**Requirements:**
+- **Linux:** Root privileges (for strace)
+- **Windows:** Administrator privileges (for process monitoring)
+
+---
+
 ## TUI Layout
 
 ```

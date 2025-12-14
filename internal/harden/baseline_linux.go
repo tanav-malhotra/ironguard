@@ -132,7 +132,7 @@ func runPlatformBaseline(ctx context.Context, cfg BaselineConfig, result *Baseli
 	// 20. System Updates (if requested)
 	if cfg.RunUpdates {
 		fmt.Println("\n━━━ Running System Updates (this may take a while...) ━━━")
-		runLinuxUpdates(ctx, h, result)
+		runLinuxUpdates(ctx, h, result, cfg.Allow3rdPartyRepos)
 	} else {
 		addSkipped(result, "Updates", "System updates", "user chose to skip (run manually: sudo apt update && sudo apt upgrade -y)")
 	}
@@ -1048,8 +1048,123 @@ echo "TOTAL_SUSPICIOUS=$SUSPICIOUS"
 	}
 }
 
+// verifyAndFixAptSources ensures apt sources are correctly configured before updates.
+func verifyAndFixAptSources(ctx context.Context, h *Hardener, result *BaselineResult, allow3rdParty bool) {
+	fmt.Println("  Verifying apt sources...")
+
+	// Script to check and fix apt sources
+	script := `
+#!/bin/bash
+CHANGES=0
+SOURCES_FILE="/etc/apt/sources.list"
+SOURCES_DIR="/etc/apt/sources.list.d"
+
+# Backup original sources
+if [ -f "$SOURCES_FILE" ]; then
+    cp -n "$SOURCES_FILE" "${SOURCES_FILE}.ironguard.bak" 2>/dev/null
+fi
+
+# Get the OS codename
+if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    CODENAME="${VERSION_CODENAME:-$UBUNTU_CODENAME}"
+fi
+
+# Check for disabled repos (commented lines with main, restricted, universe, multiverse)
+if [ -f "$SOURCES_FILE" ]; then
+    # Uncomment main repos that are commented
+    if grep -qE '^#.*\s(main|restricted|universe|multiverse)' "$SOURCES_FILE"; then
+        sed -i 's/^#\s*\(deb.*\(main\|restricted\|universe\|multiverse\)\)/\1/' "$SOURCES_FILE"
+        CHANGES=$((CHANGES + 1))
+        echo "ENABLED_REPOS"
+    fi
+    
+    # Ensure security repos are enabled
+    if ! grep -qE '^deb.*security' "$SOURCES_FILE"; then
+        if [ -n "$CODENAME" ]; then
+            echo "deb http://security.ubuntu.com/ubuntu ${CODENAME}-security main restricted universe multiverse" >> "$SOURCES_FILE"
+            CHANGES=$((CHANGES + 1))
+            echo "ADDED_SECURITY"
+        fi
+    fi
+    
+    # Ensure updates repos are enabled
+    if ! grep -qE '^deb.*-updates' "$SOURCES_FILE"; then
+        if [ -n "$CODENAME" ]; then
+            echo "deb http://archive.ubuntu.com/ubuntu ${CODENAME}-updates main restricted universe multiverse" >> "$SOURCES_FILE"
+            CHANGES=$((CHANGES + 1))
+            echo "ADDED_UPDATES"
+        fi
+    fi
+fi
+`
+	// Only add 3rd party check if user didn't allow them
+	if !allow3rdParty {
+		script += `
+# Check for and disable 3rd party repos (unless allowed)
+if [ -d "$SOURCES_DIR" ]; then
+    for file in "$SOURCES_DIR"/*.list; do
+        [ -f "$file" ] || continue
+        filename=$(basename "$file")
+        # Skip official Ubuntu sources
+        case "$filename" in
+            ubuntu*.list|official*.list) continue ;;
+        esac
+        # Comment out 3rd party repos
+        if grep -qE '^deb\s' "$file"; then
+            sed -i 's/^deb/#deb/' "$file"
+            CHANGES=$((CHANGES + 1))
+            echo "DISABLED_3RD_PARTY: $filename"
+        fi
+    done
+fi
+`
+	}
+
+	script += `
+if [ $CHANGES -gt 0 ]; then
+    echo "SOURCES_FIXED: $CHANGES changes made"
+else
+    echo "SOURCES_OK"
+fi
+`
+
+	output, err := h.runBashSingle(ctx, script)
+	if err != nil {
+		addResult(result, "APT Sources", "Verify apt sources", false, "", err.Error())
+		fmt.Printf("  ✗ Failed to verify apt sources: %s\n", err.Error())
+		return
+	}
+
+	if strings.Contains(output, "SOURCES_OK") {
+		addResult(result, "APT Sources", "Apt sources verified - no changes needed", true, "", "")
+		fmt.Printf("  ✓ Apt sources verified (no changes needed)\n")
+	} else {
+		changes := []string{}
+		if strings.Contains(output, "ENABLED_REPOS") {
+			changes = append(changes, "uncommented main repos")
+		}
+		if strings.Contains(output, "ADDED_SECURITY") {
+			changes = append(changes, "added security repo")
+		}
+		if strings.Contains(output, "ADDED_UPDATES") {
+			changes = append(changes, "added updates repo")
+		}
+		if strings.Contains(output, "DISABLED_3RD_PARTY") {
+			changes = append(changes, "disabled 3rd party repos")
+		}
+		
+		changeStr := strings.Join(changes, ", ")
+		addResult(result, "APT Sources", "Fixed apt sources: "+changeStr, true, "", "")
+		fmt.Printf("  ✓ Apt sources fixed: %s\n", changeStr)
+	}
+}
+
 // runLinuxUpdates runs system updates.
-func runLinuxUpdates(ctx context.Context, h *Hardener, result *BaselineResult) {
+func runLinuxUpdates(ctx context.Context, h *Hardener, result *BaselineResult, allow3rdParty bool) {
+	// First, verify and fix apt sources
+	verifyAndFixAptSources(ctx, h, result, allow3rdParty)
+	
 	fmt.Println("  Running updates... (this may take several minutes)")
 
 	// Configure automatic updates first

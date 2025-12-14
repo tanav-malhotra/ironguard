@@ -924,6 +924,7 @@ func getDesktopPath() string {
 
 // resolveDesktopFile reads a .desktop file and returns the path it points to.
 // On Linux, CyberPatriot uses .desktop files that link to actual HTML files.
+// If the .desktop points to a web URL, it fetches the content and saves to a temp file.
 // Returns the original path if it's not a .desktop file or if parsing fails.
 func resolveDesktopFile(path string) string {
 	// Only handle .desktop files
@@ -941,34 +942,86 @@ func resolveDesktopFile(path string) string {
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		
-		// URL= points to the actual file (common for Link type)
+		// URL= points to the actual file or web URL (common for Link type)
 		if strings.HasPrefix(line, "URL=") {
 			url := strings.TrimPrefix(line, "URL=")
+			
 			// Handle file:// URLs
 			if strings.HasPrefix(url, "file://") {
 				return strings.TrimPrefix(url, "file://")
 			}
+			
+			// Handle http:// or https:// URLs (fetch from web, e.g., scoring server)
+			if strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "https://") {
+				if tempPath := fetchURLToTempFile(url); tempPath != "" {
+					return tempPath
+				}
+			}
+			
 			// Handle absolute paths
 			if strings.HasPrefix(url, "/") {
 				return url
 			}
 		}
 		
-		// Exec= might contain the path (for Application type that opens a file)
+		// Exec= might contain the path or URL (for Application type that opens a file)
 		if strings.HasPrefix(line, "Exec=") {
 			exec := strings.TrimPrefix(line, "Exec=")
-			// Look for a file path in the exec command
-			// Common patterns: xdg-open /path/to/file or firefox /path/to/file
 			parts := strings.Fields(exec)
 			for _, part := range parts {
+				// Handle local file paths
 				if strings.HasPrefix(part, "/") && (strings.HasSuffix(part, ".html") || strings.HasSuffix(part, ".htm") || strings.HasSuffix(part, ".txt")) {
 					return part
+				}
+				// Handle URLs in exec command (xdg-open http://...)
+				if strings.HasPrefix(part, "http://") || strings.HasPrefix(part, "https://") {
+					if tempPath := fetchURLToTempFile(part); tempPath != "" {
+						return tempPath
+					}
 				}
 			}
 		}
 	}
 
 	return path
+}
+
+// fetchURLToTempFile fetches content from a URL and saves to a temp file.
+// Used for scoring reports served by a local web server.
+func fetchURLToTempFile(url string) string {
+	// Use curl or wget to fetch (more reliable than Go's http in some environments)
+	var cmd *exec.Cmd
+	
+	// Create temp file
+	tmpFile, err := os.CreateTemp("", "ironguard-*.html")
+	if err != nil {
+		return ""
+	}
+	tmpPath := tmpFile.Name()
+	tmpFile.Close()
+	
+	// Try curl first (most common)
+	cmd = exec.Command("curl", "-s", "-L", "-o", tmpPath, "--connect-timeout", "5", url)
+	if err := cmd.Run(); err == nil {
+		// Verify file has content
+		info, err := os.Stat(tmpPath)
+		if err == nil && info.Size() > 0 {
+			return tmpPath
+		}
+	}
+	
+	// Fallback to wget
+	cmd = exec.Command("wget", "-q", "-O", tmpPath, "--timeout=5", url)
+	if err := cmd.Run(); err == nil {
+		info, err := os.Stat(tmpPath)
+		if err == nil && info.Size() > 0 {
+			return tmpPath
+		}
+	}
+	
+	// Clean up if failed
+	os.Remove(tmpPath)
+	return ""
 }
 
 // findFileWithDesktopFallback looks for a file, checking for .desktop variations on Linux.

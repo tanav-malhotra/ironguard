@@ -45,7 +45,8 @@ type BaselineConfig struct {
 	ExpireUserPasswords bool  // Force password change on next login
 
 	// APT Sources (Linux only)
-	Allow3rdPartyRepos bool // Allow 3rd party repos - default: false (ask user, README may require)
+	// ThirdPartyRepoAction: "keep" = allow and keep existing, "remove" = allow but remove existing, "disable" = comment out
+	ThirdPartyRepoAction string // Default: "disable"
 
 	// Interactive mode
 	Interactive bool // If false, use all defaults
@@ -218,7 +219,24 @@ func RunBaselineInteractive(ctx context.Context) (*BaselineResult, error) {
 	cfg.RunUpdates = askYesNo(reader, "Run system updates?", true)
 	if cfg.RunUpdates && runtime.GOOS != "windows" {
 		fmt.Println("  APT sources will be verified and fixed before updates.")
-		cfg.Allow3rdPartyRepos = askYesNo(reader, "  Allow 3rd party repos? (N disables PPAs, say Y if README requires)", false)
+		fmt.Println("  3rd party repos (PPAs) options:")
+		fmt.Println("    1. Keep   - Allow and keep existing 3rd party repos")
+		fmt.Println("    2. Remove - Allow but remove existing (you'll add new ones)")
+		fmt.Println("    3. Disable - Comment out/disable all 3rd party repos [default]")
+		fmt.Print("  Choice [3]: ")
+		choice, _ := reader.ReadString('\n')
+		choice = strings.TrimSpace(choice)
+		switch choice {
+		case "1":
+			cfg.ThirdPartyRepoAction = "keep"
+			fmt.Println("  → Will keep existing 3rd party repos")
+		case "2":
+			cfg.ThirdPartyRepoAction = "remove"
+			fmt.Println("  → Will remove existing 3rd party repos")
+		default:
+			cfg.ThirdPartyRepoAction = "disable"
+			fmt.Println("  → Will disable 3rd party repos")
+		}
 	}
 	fmt.Println()
 

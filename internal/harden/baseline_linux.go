@@ -132,7 +132,7 @@ func runPlatformBaseline(ctx context.Context, cfg BaselineConfig, result *Baseli
 	// 20. System Updates (if requested)
 	if cfg.RunUpdates {
 		fmt.Println("\n━━━ Running System Updates (this may take a while...) ━━━")
-		runLinuxUpdates(ctx, h, result, cfg.Allow3rdPartyRepos)
+		runLinuxUpdates(ctx, h, result, cfg.ThirdPartyRepoAction)
 	} else {
 		addSkipped(result, "Updates", "System updates", "user chose to skip (run manually: sudo apt update && sudo apt upgrade -y)")
 	}
@@ -1049,7 +1049,8 @@ echo "TOTAL_SUSPICIOUS=$SUSPICIOUS"
 }
 
 // verifyAndFixAptSources ensures apt sources are correctly configured before updates.
-func verifyAndFixAptSources(ctx context.Context, h *Hardener, result *BaselineResult, allow3rdParty bool) {
+// thirdPartyAction: "keep" = allow and keep, "remove" = delete files, "disable" = comment out
+func verifyAndFixAptSources(ctx context.Context, h *Hardener, result *BaselineResult, thirdPartyAction string) {
 	fmt.Println("  Verifying apt sources...")
 
 	// Script to check and fix apt sources
@@ -1098,10 +1099,35 @@ if [ -f "$SOURCES_FILE" ]; then
     fi
 fi
 `
-	// Only add 3rd party check if user didn't allow them
-	if !allow3rdParty {
+	// Handle 3rd party repos based on user choice
+	switch thirdPartyAction {
+	case "keep":
+		// Do nothing - keep existing 3rd party repos
 		script += `
-# Check for and disable 3rd party repos (unless allowed)
+echo "3RD_PARTY_KEPT"
+`
+	case "remove":
+		// Remove (delete) 3rd party repo files
+		script += `
+# Remove 3rd party repo files
+if [ -d "$SOURCES_DIR" ]; then
+    for file in "$SOURCES_DIR"/*.list; do
+        [ -f "$file" ] || continue
+        filename=$(basename "$file")
+        # Skip official Ubuntu sources
+        case "$filename" in
+            ubuntu*.list|official*.list) continue ;;
+        esac
+        rm -f "$file"
+        CHANGES=$((CHANGES + 1))
+        echo "REMOVED_3RD_PARTY: $filename"
+    done
+fi
+`
+	default: // "disable" or empty
+		// Comment out 3rd party repos
+		script += `
+# Disable (comment out) 3rd party repos
 if [ -d "$SOURCES_DIR" ]; then
     for file in "$SOURCES_DIR"/*.list; do
         [ -f "$file" ] || continue
@@ -1136,7 +1162,7 @@ fi
 		return
 	}
 
-	if strings.Contains(output, "SOURCES_OK") {
+	if strings.Contains(output, "SOURCES_OK") && !strings.Contains(output, "SOURCES_FIXED") {
 		addResult(result, "APT Sources", "Apt sources verified - no changes needed", true, "", "")
 		fmt.Printf("  ✓ Apt sources verified (no changes needed)\n")
 	} else {
@@ -1153,17 +1179,28 @@ fi
 		if strings.Contains(output, "DISABLED_3RD_PARTY") {
 			changes = append(changes, "disabled 3rd party repos")
 		}
+		if strings.Contains(output, "REMOVED_3RD_PARTY") {
+			changes = append(changes, "removed 3rd party repos")
+		}
+		if strings.Contains(output, "3RD_PARTY_KEPT") {
+			changes = append(changes, "kept 3rd party repos")
+		}
 		
-		changeStr := strings.Join(changes, ", ")
-		addResult(result, "APT Sources", "Fixed apt sources: "+changeStr, true, "", "")
-		fmt.Printf("  ✓ Apt sources fixed: %s\n", changeStr)
+		if len(changes) > 0 {
+			changeStr := strings.Join(changes, ", ")
+			addResult(result, "APT Sources", "Fixed apt sources: "+changeStr, true, "", "")
+			fmt.Printf("  ✓ Apt sources fixed: %s\n", changeStr)
+		} else {
+			addResult(result, "APT Sources", "Apt sources verified", true, "", "")
+			fmt.Printf("  ✓ Apt sources verified\n")
+		}
 	}
 }
 
 // runLinuxUpdates runs system updates.
-func runLinuxUpdates(ctx context.Context, h *Hardener, result *BaselineResult, allow3rdParty bool) {
+func runLinuxUpdates(ctx context.Context, h *Hardener, result *BaselineResult, thirdPartyAction string) {
 	// First, verify and fix apt sources
-	verifyAndFixAptSources(ctx, h, result, allow3rdParty)
+	verifyAndFixAptSources(ctx, h, result, thirdPartyAction)
 	
 	fmt.Println("  Running updates... (this may take several minutes)")
 

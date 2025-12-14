@@ -686,15 +686,37 @@ func hardenOrDisableSSH(ctx context.Context, h *Hardener, result *BaselineResult
 
 // disableServiceIfExists disables a service if it exists.
 func disableServiceIfExists(ctx context.Context, h *Hardener, result *BaselineResult, service, description string) {
-	// Check if service exists
-	_, err := h.runBashSingle(ctx, fmt.Sprintf("systemctl list-unit-files | grep -q '^%s'", service))
+	// Check if service exists using multiple methods for reliability
+	// Method 1: Check unit files (catches enabled/disabled services)
+	// Method 2: Check if service is known to systemd at all
+	checkScript := fmt.Sprintf(`
+		systemctl list-unit-files '%s.service' 2>/dev/null | grep -q '%s.service' || \
+		systemctl status '%s' 2>/dev/null | grep -q 'Loaded:' || \
+		test -f /etc/init.d/%s
+	`, service, service, service, service)
+	
+	_, err := h.runBashSingle(ctx, checkScript)
 	if err != nil {
-		// Service doesn't exist
+		// Service doesn't exist anywhere
 		return
 	}
 
-	// Service exists - disable it
-	script := fmt.Sprintf("systemctl stop %s 2>/dev/null; systemctl disable %s 2>/dev/null", service, service)
+	// Service exists - try to disable it using multiple methods
+	script := fmt.Sprintf(`
+		# Try systemctl first (most systems)
+		systemctl stop '%s' 2>/dev/null
+		systemctl disable '%s' 2>/dev/null
+		# Also try with .service suffix
+		systemctl stop '%s.service' 2>/dev/null
+		systemctl disable '%s.service' 2>/dev/null
+		# Try init.d for older systems
+		if [ -f /etc/init.d/%s ]; then
+			/etc/init.d/%s stop 2>/dev/null
+			update-rc.d %s disable 2>/dev/null || chkconfig %s off 2>/dev/null
+		fi
+		exit 0
+	`, service, service, service, service, service, service, service, service)
+	
 	_, err = h.runBashSingle(ctx, script)
 	if err != nil {
 		addResult(result, "Services", fmt.Sprintf("Disable %s", description), false, "", err.Error())

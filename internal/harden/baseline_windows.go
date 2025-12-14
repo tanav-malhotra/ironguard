@@ -69,7 +69,15 @@ func runPlatformBaseline(ctx context.Context, cfg BaselineConfig, result *Baseli
 		addSkipped(result, "SMB", "SMB hardening", "SMB marked as required")
 		fmt.Println("\n━━━ Skipping SMB Hardening (required) ━━━")
 	}
-	
+
+	// 11. Additional Security Settings (commonly scored in CyberPatriot)
+	fmt.Println("\n━━━ Applying Additional Security Settings ━━━")
+	applyAdditionalSecuritySettings(ctx, h, cfg, result)
+
+	// 12. Ensure Critical Services
+	fmt.Println("\n━━━ Ensuring Critical Services ━━━")
+	ensureCriticalServices(ctx, h, result)
+
 	result.PrintResults()
 	return result, nil
 }
@@ -474,6 +482,142 @@ Set-SmbServerConfiguration -EncryptData $true -Force -ErrorAction SilentlyContin
 	} else {
 		addResult(result, "SMB", "Disabled SMBv1, enabled signing and encryption", true, "", "")
 		fmt.Printf("  ✓ SMB hardened (v1 disabled, signing/encryption enabled)\n")
+	}
+}
+
+// applyAdditionalSecuritySettings applies commonly scored security settings.
+func applyAdditionalSecuritySettings(ctx context.Context, h *Hardener, cfg BaselineConfig, result *BaselineResult) {
+	// These are commonly scored in CyberPatriot and rarely conflict with README
+
+	policies := []struct {
+		name   string
+		script string
+	}{
+		// FIPS compliant algorithms - commonly scored
+		{
+			"Enable FIPS compliant algorithms",
+			`Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\FipsAlgorithmPolicy" -Name "Enabled" -Value 1 -Type DWord -Force`,
+		},
+		// Disable downloading print drivers over HTTP - commonly scored
+		{
+			"Disable downloading print drivers over HTTP",
+			`Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Printers" -Name "DisableWebPnPDownload" -Value 1 -Type DWord -Force -ErrorAction SilentlyContinue
+			 New-Item -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Printers" -Force -ErrorAction SilentlyContinue | Out-Null
+			 Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Printers" -Name "DisableWebPnPDownload" -Value 1 -Type DWord -Force`,
+		},
+		// Shell protocol protected mode - commonly scored
+		{
+			"Enable Shell protocol protected mode",
+			`Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer" -Name "PreXPSP2ShellProtocolBehavior" -Value 0 -Type DWord -Force -ErrorAction SilentlyContinue`,
+		},
+		// Prevent users from installing printer drivers - commonly scored
+		{
+			"Prevent users from installing printer drivers",
+			`Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Print\Providers\LanMan Print Services\Servers" -Name "AddPrinterDrivers" -Value 1 -Type DWord -Force -ErrorAction SilentlyContinue`,
+		},
+		// Require logon to shutdown - commonly scored
+		{
+			"Require logon to shutdown system",
+			`Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name "ShutdownWithoutLogon" -Value 0 -Type DWord -Force`,
+		},
+		// Web-based programs security prompt for Windows installer - commonly scored
+		{
+			"Enable security prompt for web-based Windows installer scripts",
+			`Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Installer" -Name "SafeForScripting" -Value 0 -Type DWord -Force -ErrorAction SilentlyContinue
+			 New-Item -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Installer" -Force -ErrorAction SilentlyContinue | Out-Null
+			 Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Installer" -Name "SafeForScripting" -Value 0 -Type DWord -Force`,
+		},
+		// Disable storing passwords using reversible encryption
+		{
+			"Disable storing passwords with reversible encryption",
+			`# This is typically set via secedit/secpol but we reinforce it
+			 Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" -Name "ClearTextPassword" -Value 0 -Type DWord -Force -ErrorAction SilentlyContinue`,
+		},
+		// Disable anonymous SID enumeration
+		{
+			"Disable anonymous SID enumeration",
+			`Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" -Name "RestrictAnonymousSAM" -Value 1 -Type DWord -Force`,
+		},
+		// Restrict null session access
+		{
+			"Restrict null session access to named pipes and shares",
+			`Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\LanManServer\Parameters" -Name "RestrictNullSessAccess" -Value 1 -Type DWord -Force`,
+		},
+		// Disable anonymous enumeration of shares
+		{
+			"Disable anonymous enumeration of shares",
+			`Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" -Name "RestrictAnonymous" -Value 1 -Type DWord -Force`,
+		},
+	}
+
+	for _, policy := range policies {
+		_, err := h.runPowerShellSingle(ctx, policy.script)
+		if err != nil {
+			addResult(result, "Security Settings", policy.name, false, "", err.Error())
+		} else {
+			addResult(result, "Security Settings", policy.name, true, "", "")
+			fmt.Printf("  ✓ %s\n", policy.name)
+		}
+	}
+
+	// WinRM - only disable if not required
+	if !isServiceRequired(cfg.RequiredServices, "winrm") {
+		script := `
+Stop-Service WinRM -Force -ErrorAction SilentlyContinue
+Set-Service WinRM -StartupType Disabled -ErrorAction SilentlyContinue
+Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WinRM\Service" -Name "AllowAutoConfig" -Value 0 -Type DWord -Force -ErrorAction SilentlyContinue
+`
+		_, err := h.runPowerShellSingle(ctx, script)
+		if err != nil {
+			addResult(result, "Security Settings", "Disable Windows Remote Management (WinRM)", false, "", err.Error())
+		} else {
+			addResult(result, "Security Settings", "Disabled Windows Remote Management (WinRM)", true, "", "")
+			fmt.Printf("  ✓ Disabled WinRM (no remote shell connections)\n")
+		}
+	} else {
+		addSkipped(result, "Security Settings", "Disable WinRM", "WinRM marked as required")
+	}
+}
+
+// ensureCriticalServices ensures security-related services are running.
+func ensureCriticalServices(ctx context.Context, h *Hardener, result *BaselineResult) {
+	services := []struct {
+		name        string
+		displayName string
+	}{
+		{"EventLog", "Windows Event Log"},
+		{"MpsSvc", "Windows Defender Firewall"},
+		{"WinDefend", "Windows Defender Antivirus"},
+		{"wscsvc", "Security Center"},
+		{"wuauserv", "Windows Update"},
+	}
+
+	for _, svc := range services {
+		script := fmt.Sprintf(`
+$svc = Get-Service -Name "%s" -ErrorAction SilentlyContinue
+if ($svc) {
+    Set-Service -Name "%s" -StartupType Automatic -ErrorAction SilentlyContinue
+    Start-Service -Name "%s" -ErrorAction SilentlyContinue
+    "Enabled"
+} else {
+    "NotFound"
+}
+`, svc.name, svc.name, svc.name)
+
+		output, err := h.runPowerShellSingle(ctx, script)
+		output = strings.TrimSpace(output)
+
+		if output == "NotFound" {
+			// Service doesn't exist on this system (e.g., WinDefend on Server)
+			continue
+		}
+
+		if err != nil {
+			addResult(result, "Critical Services", fmt.Sprintf("Enable %s service", svc.displayName), false, "", err.Error())
+		} else {
+			addResult(result, "Critical Services", fmt.Sprintf("Enabled %s service (automatic start)", svc.displayName), true, "", "")
+			fmt.Printf("  ✓ %s service enabled\n", svc.displayName)
+		}
 	}
 }
 

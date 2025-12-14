@@ -3,11 +3,13 @@ package tui
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/tanav-malhotra/ironguard/internal/agent"
 	"github.com/tanav-malhotra/ironguard/internal/config"
+	"github.com/tanav-malhotra/ironguard/internal/harden"
 	"github.com/tanav-malhotra/ironguard/internal/llm"
 	"github.com/tanav-malhotra/ironguard/internal/tools"
 )
@@ -99,6 +101,13 @@ func (r *CommandRegistry) registerDefaults() {
 			Args:        "<windows|windows-server|linux|cisco|auto>",
 			ArgOptions:  []string{"windows", "windows-server", "linux", "cisco", "auto"},
 			Handler:     cmdHarden,
+		},
+		{
+			Name:        "baseline",
+			Description: "Run baseline hardening (password policy, firewall, kernel, etc.)",
+			Args:        "[auto]",
+			ArgOptions:  []string{"auto"},
+			Handler:     cmdBaseline,
 		},
 		{
 			Name:        "start",
@@ -775,6 +784,103 @@ The AI will now AUTOMATICALLY:
 
 Use /stop to cancel at any time.
 Ctrl+C also pauses the AI (doesn't quit the app).`, strings.ToUpper(mode), osDesc, targetScore)
+}
+
+func cmdBaseline(m *model, args string) string {
+	// Check if running as admin
+	if !m.cfg.RunningAsAdmin && !m.cfg.AdminCheckSkipped {
+		return `⚠️ BASELINE HARDENING REQUIRES ADMIN/ROOT
+
+Please restart IronGuard with administrator/root privileges:
+  - Windows: Right-click → Run as administrator
+  - Linux: sudo ./ironguard
+
+Or use the command-line flag:
+  ironguard --baseline       (interactive prompts)
+  ironguard --baseline-auto  (use all defaults)`
+	}
+
+	auto := strings.TrimSpace(strings.ToLower(args)) == "auto"
+	
+	// Run baseline hardening
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+	
+	var result *harden.BaselineResult
+	var err error
+	
+	if auto {
+		cfg := harden.DefaultBaselineConfig()
+		cfg.Interactive = false
+		result, err = harden.RunBaseline(ctx, cfg)
+	} else {
+		// In TUI mode, we can't do interactive prompts easily
+		// So we'll use defaults but show what's being done
+		cfg := harden.DefaultBaselineConfig()
+		cfg.Interactive = false
+		result, err = harden.RunBaseline(ctx, cfg)
+	}
+	
+	if err != nil {
+		return fmt.Sprintf("❌ Baseline hardening failed: %v", err)
+	}
+	
+	// Save results for AI
+	if result != nil {
+		saveBaselineResultsForAI(result)
+		
+		// Notify the AI about what was done
+		aiNotification := result.FormatResultsForAI()
+		m.agent.QueueSystemMessage(aiNotification)
+	}
+	
+	// Count results
+	successCount := 0
+	failCount := 0
+	for _, action := range result.Actions {
+		if action.Skipped {
+			continue
+		}
+		if action.Success {
+			successCount++
+		} else {
+			failCount++
+		}
+	}
+	
+	return fmt.Sprintf(`✅ BASELINE HARDENING COMPLETE
+
+Applied %d security configurations (%d failed)
+
+Changes include:
+  • Password policy (max=%d days, min=%d, length=%d)
+  • Kernel/registry hardening
+  • Firewall enabled
+  • Security tools configured
+  • Guest account disabled
+  • And more...
+
+The AI has been notified of these changes.
+These configurations are ALREADY DONE - AI will focus on other tasks.
+
+Use /harden to start AI-assisted hardening now.`, 
+		successCount, failCount,
+		result.Config.MaxPasswordAge, result.Config.MinPasswordAge, result.Config.MinPasswordLen)
+}
+
+func saveBaselineResultsForAI(result *harden.BaselineResult) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	
+	configDir := homeDir + "/.ironguard"
+	os.MkdirAll(configDir, 0755)
+	
+	resultsFile := configDir + "/baseline_results.txt"
+	content := result.FormatResultsForAI()
+	
+	os.WriteFile(resultsFile, []byte(content), 0644)
 }
 
 func cmdKey(m *model, args string) string {

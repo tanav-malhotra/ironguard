@@ -174,6 +174,9 @@ func New(cfg *config.Config) *Agent {
 	timerAdapter := NewTimerManagerAdapter(a)
 	tools.SetTimerManager(timerAdapter)
 	
+	// Load baseline results if they exist (from previous --baseline run)
+	a.loadBaselineResults()
+	
 	return a
 }
 
@@ -1410,5 +1413,33 @@ func (a *Agent) parseAndSendScoreUpdate(output string) {
 // Checkpoints returns the checkpoint manager for TUI access.
 func (a *Agent) Checkpoints() *CheckpointManager {
 	return a.checkpoints
+}
+
+// loadBaselineResults loads baseline hardening results if they exist.
+func (a *Agent) loadBaselineResults() {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	
+	resultsFile := homeDir + "/.ironguard/baseline_results.txt"
+	content, err := os.ReadFile(resultsFile)
+	if err != nil {
+		return // No baseline results file
+	}
+	
+	// Add as a system message so AI knows what was done
+	a.mu.Lock()
+	a.messages = append(a.messages, llm.Message{
+		Role:    "user",
+		Content: string(content),
+	})
+	a.mu.Unlock()
+	
+	// Notify via event
+	a.events <- Event{
+		Type:    EventStatusUpdate,
+		Content: "📋 Loaded baseline hardening results from previous run",
+	}
 }
 

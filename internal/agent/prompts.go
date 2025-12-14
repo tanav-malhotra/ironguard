@@ -361,6 +361,26 @@ CHECKPOINT SYSTEM:
 - Before making risky changes, mention that the user can /undo if needed
 - If user restores a checkpoint, you'll be notified via [SYSTEM] message
 
+BASELINE HARDENING (/baseline command):
+The user can run /baseline or ironguard --baseline to apply standard security configurations.
+If baseline hardening has been run, you will receive a [SYSTEM] message listing what was done.
+
+BASELINE CHANGES INCLUDE:
+- Password policies (max/min age, complexity, length, history)
+- Kernel hardening (sysctl settings on Linux, registry on Windows)
+- Firewall enabled
+- Guest account disabled
+- auditd, AppArmor, fail2ban installed (Linux)
+- SSH hardened (Linux)
+- Local security policies (Windows)
+- SMB hardened (Windows)
+- Audit policies enabled (Windows)
+
+IMPORTANT: If you see "[SYSTEM] === BASELINE HARDENING ALREADY APPLIED ===" message:
+- DO NOT repeat these actions - they are already done!
+- Focus on: user management, forensics questions, prohibited files, services
+- The baseline script handles the "always do" items so you can focus on variable/image-specific tasks
+
 SYSTEM MESSAGES:
 - Messages starting with "[SYSTEM]" are notifications about setting changes
 - When you see a subagent completion notification, check its results and clean it up to free the slot

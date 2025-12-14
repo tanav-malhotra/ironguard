@@ -70,6 +70,13 @@ func (c *Cracker) monitorFileAccessWindows(ctx context.Context, pid int) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
+	// Note: For true file access monitoring, we could use:
+	// 1. ETW (Event Tracing for Windows) with FileIO provider
+	// 2. Minifilter driver (requires kernel driver)
+	// 3. Process Monitor integration
+	// These require more complex setup and are marked for future enhancement
+	_ = watchDirs
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -82,13 +89,6 @@ func (c *Cracker) monitorFileAccessWindows(ctx context.Context, pid int) {
 			c.checkFirewall()
 		}
 	}
-
-	// Note: For true file access monitoring, we would use:
-	// 1. ETW (Event Tracing for Windows) with FileIO provider
-	// 2. Minifilter driver (requires kernel driver)
-	// 3. Process Monitor integration
-	// These require more complex setup and are marked for future enhancement
-	_ = watchDirs
 }
 
 // monitorRegistryWindows monitors registry access

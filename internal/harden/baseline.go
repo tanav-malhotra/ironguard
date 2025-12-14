@@ -36,12 +36,12 @@ type BaselineConfig struct {
 // LinuxServices is the list of services users can mark as required on Linux.
 var LinuxServices = []ServiceOption{
 	{ID: "1", Name: "ssh", Description: "SSH Server (OpenSSH)"},
-	{ID: "2", Name: "apache", Description: "Apache Web Server"},
+	{ID: "2", Name: "apache", Description: "Apache/Apache2 Web Server (httpd)"},
 	{ID: "3", Name: "nginx", Description: "Nginx Web Server"},
 	{ID: "4", Name: "mysql", Description: "MySQL Database"},
 	{ID: "5", Name: "mariadb", Description: "MariaDB Database"},
 	{ID: "6", Name: "postgresql", Description: "PostgreSQL Database"},
-	{ID: "7", Name: "ftp", Description: "FTP Server (vsftpd)"},
+	{ID: "7", Name: "ftp", Description: "FTP Server (vsftpd/proftpd)"},
 	{ID: "8", Name: "samba", Description: "Samba File Sharing (SMB)"},
 	{ID: "9", Name: "nfs", Description: "NFS File Sharing"},
 	{ID: "10", Name: "docker", Description: "Docker Containers"},
@@ -55,6 +55,11 @@ var LinuxServices = []ServiceOption{
 	{ID: "18", Name: "mongodb", Description: "MongoDB Database"},
 	{ID: "19", Name: "redis", Description: "Redis Cache"},
 	{ID: "20", Name: "tomcat", Description: "Apache Tomcat"},
+	{ID: "21", Name: "squid", Description: "Squid Proxy"},
+	{ID: "22", Name: "openvpn", Description: "OpenVPN"},
+	{ID: "23", Name: "wireguard", Description: "WireGuard VPN"},
+	{ID: "24", Name: "ldap", Description: "LDAP Server (OpenLDAP)"},
+	{ID: "25", Name: "jenkins", Description: "Jenkins CI/CD"},
 }
 
 // WindowsServices is the list of services users can mark as required on Windows.
@@ -79,6 +84,11 @@ var WindowsServices = []ServiceOption{
 	{ID: "18", Name: "winrm", Description: "Windows Remote Management"},
 	{ID: "19", Name: "wds", Description: "Windows Deployment Services"},
 	{ID: "20", Name: "nfs", Description: "NFS Client/Server"},
+	{ID: "21", Name: "ca", Description: "Certificate Authority (AD CS)"},
+	{ID: "22", Name: "rras", Description: "Routing and Remote Access"},
+	{ID: "23", Name: "npas", Description: "Network Policy Server (RADIUS)"},
+	{ID: "24", Name: "wms", Description: "Windows Media Services"},
+	{ID: "25", Name: "tftp", Description: "TFTP Server"},
 }
 
 // ServiceOption represents a service that can be marked as required.

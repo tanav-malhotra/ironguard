@@ -153,7 +153,7 @@ func DefaultBaselineConfig() BaselineConfig {
 		MinPasswordAge:   1,
 		PasswordWarnAge:  7,
 		MinPasswordLen:   12,
-		DisableIPv6:      false, // Don't disable by default - ask user
+		DisableIPv6:      true, // Disable by default - more secure
 		EnableFirewall:   true,
 		InstallAuditd:    true,
 		InstallApparmor:  true,
@@ -173,10 +173,10 @@ func RunBaseline(ctx context.Context, cfg BaselineConfig) (*BaselineResult, erro
 	}
 	
 	fmt.Println()
-	fmt.Println("╔══════════════════════════════════════════════════════════════╗")
-	fmt.Println("║            IRONGUARD BASELINE HARDENING                      ║")
-	fmt.Println("║   Applying standard security configurations                  ║")
-	fmt.Println("╚══════════════════════════════════════════════════════════════╝")
+	fmt.Println("══════════════════════════════════════════════════════════════")
+	fmt.Println("IRONGUARD BASELINE HARDENING")
+	fmt.Println("Applying standard security configurations")
+	fmt.Println("══════════════════════════════════════════════════════════════")
 	fmt.Println()
 	
 	return runPlatformBaseline(ctx, cfg, result)
@@ -188,10 +188,10 @@ func RunBaselineInteractive(ctx context.Context) (*BaselineResult, error) {
 	cfg.Interactive = true
 
 	fmt.Println()
-	fmt.Println("╔══════════════════════════════════════════════════════════════╗")
-	fmt.Println("║            IRONGUARD BASELINE HARDENING                      ║")
-	fmt.Println("║   Interactive Setup - Press Enter for defaults              ║")
-	fmt.Println("╚══════════════════════════════════════════════════════════════╝")
+	fmt.Println("══════════════════════════════════════════════════════════════")
+	fmt.Println("IRONGUARD BASELINE HARDENING")
+	fmt.Println("Interactive Setup - Press Enter for defaults")
+	fmt.Println("══════════════════════════════════════════════════════════════")
 	fmt.Println()
 
 	reader := bufio.NewReader(os.Stdin)
@@ -206,7 +206,7 @@ func RunBaselineInteractive(ctx context.Context) (*BaselineResult, error) {
 
 	// Network
 	fmt.Println("━━━ NETWORK ━━━")
-	cfg.DisableIPv6 = askYesNo(reader, "Disable IPv6? (some systems need it, say N if unsure)", false)
+	cfg.DisableIPv6 = askYesNo(reader, "Disable IPv6? (recommended, say N only if README requires IPv6)", true)
 	cfg.EnableFirewall = askYesNo(reader, "Enable firewall?", true)
 	fmt.Println()
 
@@ -244,7 +244,7 @@ func RunBaselineInteractive(ctx context.Context) (*BaselineResult, error) {
 	fmt.Println("━━━ REQUIRED SERVICES ━━━")
 	fmt.Println("Select services that ARE REQUIRED by the README.")
 	fmt.Println("These will NOT be disabled or hardened restrictively.")
-	fmt.Println("Enter numbers WITHOUT spaces (e.g., '135' for options 1,3,5)")
+	fmt.Println("Enter numbers separated by SPACES or COMMAS (e.g., '1 3 5' or '1,3,16')")
 	fmt.Println("Press Enter for none.")
 	fmt.Println()
 
@@ -360,45 +360,20 @@ func askServiceSelection(reader *bufio.Reader, services []ServiceOption) []strin
 		idToName[svc.ID] = svc.Name
 	}
 
-	// Parse input - each character/number group is an ID
+	// Parse input - ALWAYS split by space, comma, or semicolon
+	// This ensures "16" is treated as service 16, not 1 and 6
 	var selected []string
 	seen := make(map[string]bool)
 
-	// Handle both single digits and multi-digit IDs
-	// Input like "135" means 1, 3, 5
-	// Input like "1 3 5" or "1,3,5" also works
-	// For IDs >= 10, user must use spaces or commas
-	
-	// First, try splitting by common delimiters
 	parts := strings.FieldsFunc(input, func(r rune) bool {
 		return r == ' ' || r == ',' || r == ';'
 	})
 
-	if len(parts) > 1 {
-		// User used delimiters
-		for _, part := range parts {
-			part = strings.TrimSpace(part)
-			if name, ok := idToName[part]; ok && !seen[name] {
-				selected = append(selected, name)
-				seen[name] = true
-			}
-		}
-	} else {
-		// No delimiters - treat each character as an ID (only works for 1-9)
-		// For 10+, they need to use the full number with delimiter
-		for _, ch := range input {
-			id := string(ch)
-			if name, ok := idToName[id]; ok && !seen[name] {
-				selected = append(selected, name)
-				seen[name] = true
-			}
-		}
-		
-		// Also check if the whole input is a valid ID (for two-digit numbers)
-		if len(selected) == 0 {
-			if name, ok := idToName[input]; ok {
-				selected = append(selected, name)
-			}
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if name, ok := idToName[part]; ok && !seen[name] {
+			selected = append(selected, name)
+			seen[name] = true
 		}
 	}
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 	"time"
 
@@ -794,40 +795,52 @@ Ctrl+C also pauses the AI (doesn't quit the app).`, strings.ToUpper(mode), osDes
 func cmdBaseline(m *model, args string) string {
 	// Check if running as admin
 	if !m.cfg.RunningAsAdmin && !m.cfg.AdminCheckSkipped {
-		return `⚠️ BASELINE HARDENING REQUIRES ADMIN/ROOT
+		return `BASELINE HARDENING REQUIRES ADMIN/ROOT
 
 Please restart IronGuard with administrator/root privileges:
-  - Windows: Right-click → Run as administrator
+  - Windows: Right-click -> Run as administrator
   - Linux: sudo ./ironguard
 
-Or use the command-line flag:
+Or use the command-line flag for interactive mode:
   ironguard --baseline       (interactive prompts)
   ironguard --baseline-auto  (use all defaults)`
 	}
 
-	auto := strings.TrimSpace(strings.ToLower(args)) == "auto"
+	argLower := strings.TrimSpace(strings.ToLower(args))
 	
-	// Run baseline hardening
+	// Show info and require confirmation
+	if argLower != "confirm" && argLower != "auto" {
+		osType := "Linux"
+		if runtime.GOOS == "windows" {
+			osType = "Windows"
+		}
+		return fmt.Sprintf(`BASELINE HARDENING (TUI Mode)
+
+In TUI mode, baseline runs with secure defaults.
+For interactive prompts with custom options, use: ironguard --baseline
+
+TUI mode will apply these defaults on %s:
+  - Password policy: max=30 days, min=1 day, length=12
+  - Firewall: ENABLED
+  - IPv6: DISABLED
+  - System updates: ENABLED (may take time!)
+  - No services marked as required (all will be secured)
+  - Security tools installed (Linux: auditd, AppArmor, fail2ban, ClamAV)
+
+Type '/baseline confirm' to proceed with these defaults.
+Type '/baseline auto' to run immediately (same as confirm).`, osType)
+	}
+	
+	// Run baseline hardening with defaults
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
 	
-	var result *harden.BaselineResult
-	var err error
-	
-	if auto {
-		cfg := harden.DefaultBaselineConfig()
-		cfg.Interactive = false
-		result, err = harden.RunBaseline(ctx, cfg)
-	} else {
-		// In TUI mode, we can't do interactive prompts easily
-		// So we'll use defaults but show what's being done
-		cfg := harden.DefaultBaselineConfig()
-		cfg.Interactive = false
-		result, err = harden.RunBaseline(ctx, cfg)
-	}
+	cfg := harden.DefaultBaselineConfig()
+	cfg.Interactive = false
+	result, err := harden.RunBaseline(ctx, cfg)
 	
 	if err != nil {
-		return fmt.Sprintf("❌ Baseline hardening failed: %v", err)
+		return fmt.Sprintf("Baseline hardening failed: %v", err)
 	}
 	
 	// Save results for AI
@@ -853,17 +866,18 @@ Or use the command-line flag:
 		}
 	}
 	
-	return fmt.Sprintf(`✅ BASELINE HARDENING COMPLETE
+	return fmt.Sprintf(`BASELINE HARDENING COMPLETE
 
 Applied %d security configurations (%d failed)
 
 Changes include:
-  • Password policy (max=%d days, min=%d, length=%d)
-  • Kernel/registry hardening
-  • Firewall enabled
-  • Security tools configured
-  • Guest account disabled
-  • And more...
+  - Password policy (max=%d days, min=%d, length=%d)
+  - Kernel/registry hardening
+  - Firewall enabled
+  - IPv6 disabled
+  - Security tools configured
+  - Guest account disabled
+  - And more...
 
 The AI has been notified of these changes.
 These configurations are ALREADY DONE - AI will focus on other tasks.
@@ -891,10 +905,10 @@ func saveBaselineResultsForAI(result *harden.BaselineResult) {
 func cmdCrack(m *model, args string) string {
 	// Check if running as admin
 	if !m.cfg.RunningAsAdmin && !m.cfg.AdminCheckSkipped {
-		return `⚠️ SCORING ENGINE CRACKER REQUIRES ADMIN/ROOT
+		return `SCORING ENGINE CRACKER REQUIRES ADMIN/ROOT
 
 Please restart IronGuard with administrator/root privileges:
-  - Windows: Right-click → Run as administrator
+  - Windows: Right-click -> Run as administrator
   - Linux: sudo ./ironguard
 
 Or use the command-line flag directly:
@@ -906,16 +920,16 @@ Or use the command-line flag directly:
 		Description: "Start scoring engine cracker",
 	}
 	
-	return `🔓 SCORING ENGINE CRACKER
-═══════════════════════════════════════════════════════════════════
+	return `SCORING ENGINE CRACKER
+============================================================
 
 Starting real-time interception of the CyberPatriot scoring engine...
 
 The cracker will:
-  ✓ Find the scoring engine process (CCSClient)
-  ✓ Attach to intercept file/registry reads
-  ✓ Identify what vulnerabilities are being checked
-  ✓ Show you the EXACT fixes needed for points
+  - Find the scoring engine process (CCSClient)
+  - Attach to intercept file/registry reads
+  - Identify what vulnerabilities are being checked
+  - Show you the EXACT fixes needed for points
 
 Findings will appear in the sidebar panel.
 The AI will automatically receive these findings to take action.
@@ -947,10 +961,13 @@ func cmdKey(m *model, args string) string {
 	
 	// If we updated the active provider, reset validation state
 	if targetProvider == string(m.cfg.Provider) {
-	m.apiKeyValidated = false
-	m.apiKeyErr = nil
+		m.apiKeyValidated = false
+		m.apiKeyErr = nil
 		m.checkingConn = true
 	}
+	
+	// Load any stored baseline/cracker results so AI can see them
+	m.agent.LoadStoredResults()
 	
 	return "API key set for " + targetProvider + "\nUse /check to validate connectivity."
 }

@@ -1452,18 +1452,20 @@ func (a *Agent) loadBaselineResults() {
 		return // No baseline results file
 	}
 	
-	// Add as a system message so AI knows what was done
-	a.mu.Lock()
-	a.messages = append(a.messages, llm.Message{
-		Role:    "user",
-		Content: string(content),
-	})
-	a.mu.Unlock()
+	// Queue as a system message so AI knows what was done
+	// This ensures it's processed correctly even if loaded before API key is set
+	a.QueueSystemMessage(string(content))
 	
 	// Notify via event
 	a.events <- Event{
 		Type:    EventStatusUpdate,
-		Content: "📋 Loaded baseline hardening results from previous run",
+		Content: "Loaded baseline hardening results from previous run",
 	}
+}
+
+// LoadStoredResults reloads any stored baseline or cracker results.
+// Call this when an API key is set to ensure AI can see previous results.
+func (a *Agent) LoadStoredResults() {
+	a.loadBaselineResults()
 }
 

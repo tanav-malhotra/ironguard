@@ -172,10 +172,10 @@ func (c *Cracker) addFinding(f Finding) {
 
 // RunStandalone runs the cracker in standalone console mode
 func RunStandalone(ctx context.Context) error {
-	fmt.Println("╔══════════════════════════════════════════════════════════════════╗")
-	fmt.Println("║           IRONGUARD SCORING ENGINE CRACKER                       ║")
-	fmt.Println("║                Real-time Answer Key Extractor                    ║")
-	fmt.Println("╚══════════════════════════════════════════════════════════════════╝")
+	fmt.Println("═══════════════════════════════════════════════════════════════════")
+	fmt.Println("IRONGUARD SCORING ENGINE CRACKER")
+	fmt.Println("Real-time Answer Key Extractor")
+	fmt.Println("═══════════════════════════════════════════════════════════════════")
 	fmt.Println()
 
 	cracker := New()
@@ -194,7 +194,7 @@ func RunStandalone(ctx context.Context) error {
 	fmt.Println("[*] Intercepting... Press Ctrl+C to stop")
 	fmt.Println()
 	fmt.Println("═══════════════════════════════════════════════════════════════════")
-	fmt.Println("                         LIVE FINDINGS")
+	fmt.Println("LIVE FINDINGS")
 	fmt.Println("═══════════════════════════════════════════════════════════════════")
 	fmt.Println()
 

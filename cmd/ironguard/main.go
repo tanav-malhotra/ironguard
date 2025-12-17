@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
@@ -106,11 +107,17 @@ func isAdmin() bool {
 
 // runBaselineHardening runs the baseline hardening script outside the TUI.
 func runBaselineHardening(auto bool) {
+	// Format version string - avoid double "v" if version already has it
+	versionStr := version
+	if !strings.HasPrefix(version, "v") {
+		versionStr = "v" + version
+	}
+	
 	fmt.Println()
-	fmt.Println("╔══════════════════════════════════════════════════════════════╗")
-	fmt.Println("║                    IRONGUARD v" + version + "                          ║")
-	fmt.Println("║              Baseline Hardening Script                       ║")
-	fmt.Println("╚══════════════════════════════════════════════════════════════╝")
+	fmt.Println("══════════════════════════════════════════════════════════════")
+	fmt.Println("IRONGUARD " + versionStr)
+	fmt.Println("Baseline Hardening Script")
+	fmt.Println("══════════════════════════════════════════════════════════════")
 	fmt.Println()
 	
 	// Check for admin privileges

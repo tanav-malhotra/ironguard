@@ -36,7 +36,21 @@ func (ca *CrackerAdapter) Start(ctx context.Context) error {
 	// Notify AI that cracker is starting
 	ca.agent.QueueSystemMessage("[SCORING ENGINE CRACKER] Starting real-time interception...")
 
-	return ca.cracker.Start(ctx)
+	err := ca.cracker.Start(ctx)
+	if err != nil {
+		return err
+	}
+	
+	// Notify about discovered process (send through event system, not fmt.Printf)
+	processName := ca.cracker.GetProcessName()
+	pid := ca.cracker.GetPID()
+	ca.agent.SendEvent(Event{
+		Type:    EventStatusUpdate,
+		Content: fmt.Sprintf("[CRACKER] Found scoring engine: %s (PID %d)", processName, pid),
+	})
+	ca.agent.QueueSystemMessage(fmt.Sprintf("[SCORING ENGINE CRACKER] Found process: %s (PID %d). Now intercepting file/registry access...", processName, pid))
+	
+	return nil
 }
 
 // Stop stops the cracker

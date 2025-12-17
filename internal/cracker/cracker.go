@@ -54,6 +54,7 @@ type Cracker struct {
 	mu          sync.RWMutex
 	running     bool
 	pid         int
+	processName string
 	findings    []Finding
 	seenPaths   map[string]bool // Track what we've already seen
 	onFinding   func(Finding)   // Callback for new findings
@@ -96,9 +97,11 @@ func (c *Cracker) Start(ctx context.Context) error {
 
 	c.mu.Lock()
 	c.pid = pid
+	c.processName = processName
 	c.mu.Unlock()
 
-	fmt.Printf("[CRACKER] Found scoring engine: %s (PID %d)\n", processName, pid)
+	// NOTE: Don't use fmt.Printf here - it breaks the TUI
+	// The adapter sends events through the proper channel
 
 	// Create cancellable context
 	ctx, cancel := context.WithCancel(ctx)
@@ -111,6 +114,13 @@ func (c *Cracker) Start(ctx context.Context) error {
 		return c.startWindowsInterception(ctx, pid)
 	}
 	return c.startLinuxInterception(ctx, pid)
+}
+
+// GetProcessName returns the discovered scoring engine process name
+func (c *Cracker) GetProcessName() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.processName
 }
 
 // Stop stops the cracker
@@ -178,19 +188,21 @@ func RunStandalone(ctx context.Context) error {
 	fmt.Println("═══════════════════════════════════════════════════════════════════")
 	fmt.Println()
 
-	cracker := New()
+	c := New()
 	
 	// Set up callback to print findings
-	cracker.SetFindingCallback(func(f Finding) {
+	c.SetFindingCallback(func(f Finding) {
 		PrintFinding(f)
 	})
 
 	fmt.Println("[*] Searching for scoring engine process...")
 	
-	if err := cracker.Start(ctx); err != nil {
+	if err := c.Start(ctx); err != nil {
 		return err
 	}
-
+	
+	// Print discovered process info (OK to use fmt.Printf here - standalone CLI mode)
+	fmt.Printf("[*] Found scoring engine: %s (PID %d)\n", c.GetProcessName(), c.GetPID())
 	fmt.Println("[*] Intercepting... Press Ctrl+C to stop")
 	fmt.Println()
 	fmt.Println("═══════════════════════════════════════════════════════════════════")
@@ -201,11 +213,11 @@ func RunStandalone(ctx context.Context) error {
 	// Wait for context cancellation
 	<-ctx.Done()
 	
-	cracker.Stop()
+	c.Stop()
 	
 	fmt.Println()
 	fmt.Println("═══════════════════════════════════════════════════════════════════")
-	fmt.Printf("[*] Cracker stopped. Found %d unique checks.\n", len(cracker.GetFindings()))
+	fmt.Printf("[*] Cracker stopped. Found %d unique checks.\n", len(c.GetFindings()))
 	
 	return nil
 }

@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/tanav-malhotra/ironguard/internal/agent"
 	"github.com/tanav-malhotra/ironguard/internal/config"
+	"github.com/tanav-malhotra/ironguard/internal/harden"
 	"github.com/tanav-malhotra/ironguard/internal/llm"
 	"github.com/tanav-malhotra/ironguard/internal/tools"
 )
@@ -16,6 +18,17 @@ import (
 // syncScreenMode syncs the screen mode between config and tools package.
 func syncScreenMode(mode config.ScreenMode) {
 	tools.SetScreenMode(mode)
+}
+
+// BaselineProgressMsg is sent from the baseline goroutine to update progress.
+type BaselineProgressMsg struct {
+	Message string
+}
+
+// BaselineCompleteMsg is sent when baseline finishes (success or error).
+type BaselineCompleteMsg struct {
+	Result *harden.BaselineResult
+	Err    error
 }
 
 // SlashCommand represents a TUI slash command.
@@ -110,7 +123,9 @@ func (r *CommandRegistry) registerDefaults() {
 		},
 		{
 			Name:        "crack",
-			Description: "Start scoring engine cracker (real-time answer key extraction)",
+			Description: "Scoring engine cracker (real-time answer key extraction)",
+			Args:        "[start|stop|status] [duration]",
+			ArgOptions:  []string{"start", "stop", "status"},
 			Handler:     cmdCrack,
 		},
 		{
@@ -791,42 +806,388 @@ Ctrl+C also pauses the AI (doesn't quit the app).`, strings.ToUpper(mode), osDes
 }
 
 func cmdBaseline(m *model, args string) string {
-	// Baseline hardening cannot run inside the TUI because it uses fmt.Println()
-	// which breaks the terminal UI. Direct user to use command-line flag instead.
+	args = strings.TrimSpace(args)
+	parts := strings.Fields(args)
 	
-	osType := "Linux"
-	if runtime.GOOS == "windows" {
-		osType = "Windows"
+	// If no subcommand, show current config (alias for "show")
+	if len(parts) == 0 || parts[0] == "show" {
+		return cmdBaselineShow(m)
+	}
+	
+	subcmd := strings.ToLower(parts[0])
+	subargs := ""
+	if len(parts) > 1 {
+		subargs = strings.Join(parts[1:], " ")
+	}
+	
+	switch subcmd {
+	case "services":
+		return cmdBaselineServices(m, subargs)
+	case "ipv6":
+		return cmdBaselineIPv6(m, subargs)
+	case "updates":
+		return cmdBaselineUpdates(m, subargs)
+	case "password":
+		return cmdBaselinePassword(m, subargs)
+	case "run":
+		return cmdBaselineRun(m)
+	case "stop":
+		return cmdBaselineStop(m)
+	case "reset":
+		return cmdBaselineReset(m)
+	default:
+		return `Unknown subcommand: ` + subcmd + `
+
+Usage:
+  /baseline              Show current baseline configuration
+  /baseline show         Show current baseline configuration
+  /baseline services <ids|names...>  Set required services (won't disable)
+  /baseline ipv6 on|off  on=keep IPv6, off=disable IPv6
+  /baseline updates on|off  on=run updates, off=skip updates
+  /baseline password <max> <min> <len> [warn]  Set password policy
+  /baseline run          Execute baseline with current config
+  /baseline stop         Cancel a running baseline
+  /baseline reset        Reset config to secure defaults`
+	}
+}
+
+func cmdBaselineShow(m *model) string {
+	cfg := m.baselineConfig
+	osType := runtime.GOOS
+	
+	// Format services list for display
+	services := harden.DefaultServiceOptions()
+	servicesStr := ""
+	for _, svc := range services {
+		marker := "   "
+		for _, req := range cfg.RequiredServices {
+			if strings.EqualFold(req, svc.ID) || strings.EqualFold(req, svc.Name) {
+				marker = " ✓ "
+				break
+			}
+		}
+		servicesStr += fmt.Sprintf("  %s[%2s] %s\n", marker, svc.ID, svc.Description)
+	}
+	
+	ipv6Status := "KEEP ENABLED"
+	if cfg.DisableIPv6 {
+		ipv6Status = "DISABLE"
+	}
+	
+	updatesStatus := "SKIP"
+	if cfg.RunUpdates {
+		updatesStatus = "RUN (may take 10-30+ min)"
+	}
+	
+	// Running status
+	runningStatus := ""
+	if m.baselineCancel != nil {
+		runningStatus = "\n⏳ BASELINE IS CURRENTLY RUNNING\n"
 	}
 	
 	adminNote := ""
 	if !m.cfg.RunningAsAdmin && !m.cfg.AdminCheckSkipped {
-		adminNote = "\nNOTE: You'll need admin/root privileges to run baseline.\n"
+		adminNote = "\n⚠️  NOTE: Admin/root privileges required to run baseline.\n"
 	}
 	
-	return fmt.Sprintf(`BASELINE HARDENING
+	return fmt.Sprintf(`BASELINE CONFIGURATION (Current State)
+═══════════════════════════════════════════════════════════════
+%s%s
+OS: %s
 
-Baseline hardening must be run from the command line (not inside this TUI).
-Exit the TUI and run one of these commands:%s
+Password Policy:
+  Maximum age: %d days
+  Minimum age: %d days
+  Minimum length: %d chars
+  Warning days: %d days
 
-  ironguard --baseline       Interactive mode with prompts
-  ironguard --baseline-auto  Use secure defaults (no prompts)
+Network:
+  IPv6: %s
+  Firewall: ENABLE (always)
 
-Secure defaults for %s:
-  - Password policy: max=30 days, min=1 day, length=12
-  - Firewall: ENABLED
-  - IPv6: DISABLED  
-  - System updates: RUN (takes 10-30 minutes)
-  - All services secured unless marked as required
-  - Security tools installed
+Updates:
+  Run updates: %s
 
-After baseline completes, run 'ironguard' again.
-The AI will automatically see what was configured.
+Required Services (won't disable/harden restrictively):
+%s
+Commands:
+  /baseline services 1 3 5   Mark services #1, #3, #5 as required
+  /baseline services clear   Clear required services
+  /baseline ipv6 off         Disable IPv6
+  /baseline updates on       Enable running updates
+  /baseline password 30 1 12 7   Set password policy
+  /baseline run              Execute baseline
+  /baseline reset            Reset to defaults`,
+		runningStatus, adminNote, osType,
+		cfg.MaxPasswordAge, cfg.MinPasswordAge, cfg.MinPasswordLen, cfg.PasswordWarnAge,
+		ipv6Status, updatesStatus, servicesStr)
+}
 
-For AI-driven hardening (runs individual commands), use /harden instead.`, adminNote, osType)
+func cmdBaselineServices(m *model, args string) string {
+	args = strings.TrimSpace(args)
+	
+	if args == "" {
+		return "Usage: /baseline services <ids|names...>\n" +
+			"Examples:\n" +
+			"  /baseline services 1 3 5\n" +
+			"  /baseline services ssh apache mysql\n" +
+			"  /baseline services clear   (remove all required services)"
+	}
+	
+	if strings.ToLower(args) == "clear" {
+		m.baselineConfig.RequiredServices = []string{}
+		return "✓ Cleared all required services. All services will be secured/disabled."
+	}
+	
+	// Parse space/comma separated list
+	args = strings.ReplaceAll(args, ",", " ")
+	parts := strings.Fields(args)
+	
+	services := harden.DefaultServiceOptions()
+	selected := []string{}
+	
+	for _, part := range parts {
+		// Try to match by ID or name
+		found := false
+		for _, svc := range services {
+			if strings.EqualFold(part, svc.ID) || strings.EqualFold(part, svc.Name) {
+				selected = append(selected, svc.Name)
+				found = true
+				break
+			}
+		}
+		if !found {
+			// Just add as-is (user knows what they're doing)
+			selected = append(selected, part)
+		}
+	}
+	
+	m.baselineConfig.RequiredServices = selected
+	return fmt.Sprintf("✓ Required services set: %v\nThese services will NOT be disabled or hardened restrictively.", selected)
+}
+
+func cmdBaselineIPv6(m *model, args string) string {
+	args = strings.TrimSpace(strings.ToLower(args))
+	
+	switch args {
+	case "on":
+		m.baselineConfig.DisableIPv6 = false
+		return "✓ IPv6 will be KEPT ENABLED"
+	case "off":
+		m.baselineConfig.DisableIPv6 = true
+		return "✓ IPv6 will be DISABLED (more secure)"
+	default:
+		return "Usage: /baseline ipv6 on|off\n  on  = keep IPv6 enabled\n  off = disable IPv6 (default, more secure)"
+	}
+}
+
+func cmdBaselineUpdates(m *model, args string) string {
+	args = strings.TrimSpace(strings.ToLower(args))
+	
+	switch args {
+	case "on":
+		m.baselineConfig.RunUpdates = true
+		return "✓ System updates WILL be run (may take 10-30+ minutes)"
+	case "off":
+		m.baselineConfig.RunUpdates = false
+		return "✓ System updates will be SKIPPED"
+	default:
+		return "Usage: /baseline updates on|off\n  on  = run system updates (takes time)\n  off = skip updates (default)"
+	}
+}
+
+func cmdBaselinePassword(m *model, args string) string {
+	args = strings.TrimSpace(args)
+	parts := strings.Fields(args)
+	
+	if len(parts) < 3 {
+		return "Usage: /baseline password <max> <min> <length> [warn]\n" +
+			"Example: /baseline password 30 1 12 7\n" +
+			"  max    = Maximum password age in days\n" +
+			"  min    = Minimum password age in days\n" +
+			"  length = Minimum password length\n" +
+			"  warn   = Warning days before expiry (optional, default 7)"
+	}
+	
+	var max, min, length, warn int
+	var err error
+	
+	if max, err = strconv.Atoi(parts[0]); err != nil {
+		return "Invalid max age: " + parts[0]
+	}
+	if min, err = strconv.Atoi(parts[1]); err != nil {
+		return "Invalid min age: " + parts[1]
+	}
+	if length, err = strconv.Atoi(parts[2]); err != nil {
+		return "Invalid length: " + parts[2]
+	}
+	
+	warn = 7 // default
+	if len(parts) >= 4 {
+		if warn, err = strconv.Atoi(parts[3]); err != nil {
+			return "Invalid warn days: " + parts[3]
+		}
+	}
+	
+	// Validate
+	if max < 1 || max > 365 {
+		return "Max age must be 1-365 days"
+	}
+	if min < 0 || min > 30 {
+		return "Min age must be 0-30 days"
+	}
+	if length < 8 || length > 128 {
+		return "Length must be 8-128 characters"
+	}
+	if warn < 0 || warn > 30 {
+		return "Warn days must be 0-30"
+	}
+	
+	m.baselineConfig.MaxPasswordAge = max
+	m.baselineConfig.MinPasswordAge = min
+	m.baselineConfig.MinPasswordLen = length
+	m.baselineConfig.PasswordWarnAge = warn
+	
+	return fmt.Sprintf("✓ Password policy set:\n  Max age: %d days\n  Min age: %d days\n  Min length: %d chars\n  Warn: %d days", max, min, length, warn)
+}
+
+func cmdBaselineRun(m *model) string {
+	// Check if already running
+	if m.baselineCancel != nil {
+		return "⚠️ Baseline is already running. Use /baseline stop first."
+	}
+	
+	// Check admin
+	if !m.cfg.RunningAsAdmin && !m.cfg.AdminCheckSkipped {
+		return "⚠️ Admin/root privileges required to run baseline.\n" +
+			"Restart IronGuard with administrator/root privileges:\n" +
+			"  - Windows: Right-click -> Run as administrator\n" +
+			"  - Linux: sudo ./ironguard"
+	}
+	
+	// Set up progress callback to send messages to TUI
+	m.baselineConfig.ProgressCallback = func(msg string) {
+		if m.program != nil {
+			m.program.Send(BaselineProgressMsg{Message: msg})
+		}
+	}
+	
+	// Create cancellable context
+	ctx, cancel := context.WithCancel(context.Background())
+	m.baselineCancel = cancel
+	
+	// Start baseline in goroutine
+	cfg := *m.baselineConfig // Copy config
+	go func() {
+		result, err := harden.RunBaseline(ctx, cfg)
+		if m.program != nil {
+			m.program.Send(BaselineCompleteMsg{Result: result, Err: err})
+		}
+	}()
+	
+	return "⏳ Starting baseline hardening...\nProgress will appear in chat. Use /baseline stop to cancel."
+}
+
+func cmdBaselineStop(m *model) string {
+	if m.baselineCancel == nil {
+		return "No baseline is currently running."
+	}
+	
+	m.baselineCancel()
+	m.baselineCancel = nil
+	return "⏹️ Baseline hardening cancelled."
+}
+
+func cmdBaselineReset(m *model) string {
+	cfg := harden.DefaultBaselineConfig()
+	m.baselineConfig = &cfg
+	return "✓ Baseline configuration reset to secure defaults."
 }
 
 func cmdCrack(m *model, args string) string {
+	args = strings.TrimSpace(args)
+	parts := strings.Fields(args)
+	
+	// If no subcommand, show status (alias for "status")
+	if len(parts) == 0 || parts[0] == "status" {
+		return cmdCrackStatus(m)
+	}
+	
+	subcmd := strings.ToLower(parts[0])
+	subargs := ""
+	if len(parts) > 1 {
+		subargs = strings.Join(parts[1:], " ")
+	}
+	
+	switch subcmd {
+	case "start":
+		return cmdCrackStart(m, subargs)
+	case "stop":
+		return cmdCrackStop(m)
+	default:
+		return `Unknown subcommand: ` + subcmd + `
+
+Usage:
+  /crack              Show cracker status
+  /crack status       Show cracker status
+  /crack start [dur]  Start cracker (dur: 60s, 2m, 0=indefinite)
+  /crack stop         Stop the cracker`
+	}
+}
+
+func cmdCrackStatus(m *model) string {
+	crackerAdapter := m.agent.GetCrackerAdapter()
+	if crackerAdapter == nil {
+		return "Cracker not initialized."
+	}
+	
+	if crackerAdapter.IsRunning() {
+		findings := crackerAdapter.GetFindings()
+		return fmt.Sprintf(`SCORING ENGINE CRACKER STATUS
+═══════════════════════════════════════════════════════════════
+
+⏳ RUNNING
+
+Findings: %d unique checks discovered
+
+Use /crack stop to stop the cracker.`, len(findings))
+	}
+	
+	// Not running - show summary of past findings if any
+	findings := crackerAdapter.GetFindings()
+	if len(findings) > 0 {
+		return fmt.Sprintf(`SCORING ENGINE CRACKER STATUS
+═══════════════════════════════════════════════════════════════
+
+⏹️ STOPPED
+
+Previous findings: %d unique checks discovered
+
+Use /crack start to start intercepting again.`, len(findings))
+	}
+	
+	// Never run
+	adminNote := ""
+	if !m.cfg.RunningAsAdmin && !m.cfg.AdminCheckSkipped {
+		adminNote = "\n⚠️  NOTE: Admin/root privileges required to run cracker.\n"
+	}
+	
+	return fmt.Sprintf(`SCORING ENGINE CRACKER STATUS
+═══════════════════════════════════════════════════════════════
+%s
+⏹️ NOT STARTED
+
+The cracker intercepts the CyberPatriot scoring engine in real-time
+to discover EXACTLY what vulnerabilities are being checked.
+
+Commands:
+  /crack start        Start with default duration (65s)
+  /crack start 2m     Start for 2 minutes
+  /crack start 0      Start indefinitely (until /crack stop)
+  /crack stop         Stop the cracker`, adminNote)
+}
+
+func cmdCrackStart(m *model, args string) string {
 	// Check if running as admin
 	if !m.cfg.RunningAsAdmin && !m.cfg.AdminCheckSkipped {
 		return `SCORING ENGINE CRACKER REQUIRES ADMIN/ROOT
@@ -838,27 +1199,110 @@ Please restart IronGuard with administrator/root privileges:
 Or use the command-line flag directly:
   sudo ironguard --crack`
 	}
-
+	
+	// Check if already running
+	crackerAdapter := m.agent.GetCrackerAdapter()
+	if crackerAdapter != nil && crackerAdapter.IsRunning() {
+		return "⚠️ Cracker is already running. Use /crack stop first."
+	}
+	
+	// Parse duration (default: 65 seconds)
+	duration := 65 * time.Second
+	if args != "" {
+		args = strings.TrimSpace(args)
+		if args == "0" || args == "indefinite" || args == "forever" {
+			duration = 0 // No timeout
+		} else {
+			// Try to parse as duration string (e.g., "60s", "2m", "120")
+			parsed, err := time.ParseDuration(args)
+			if err != nil {
+				// Try as plain number (seconds)
+				if secs, parseErr := strconv.Atoi(args); parseErr == nil {
+					duration = time.Duration(secs) * time.Second
+				} else {
+					return fmt.Sprintf("Invalid duration: %s\nUse: 60s, 2m, 120 (seconds), or 0 (indefinite)", args)
+				}
+			} else {
+				duration = parsed
+			}
+		}
+	}
+	
+	// Create context with timeout if duration > 0
+	var ctx context.Context
+	var cancel context.CancelFunc
+	if duration > 0 {
+		ctx, cancel = context.WithTimeout(context.Background(), duration)
+	} else {
+		ctx, cancel = context.WithCancel(context.Background())
+	}
+	m.crackerCancel = cancel
+	
+	// Start cracker in goroutine via pending action
 	m.pendingAction = &PendingAction{
 		Type:        ActionCracker,
 		Description: "Start scoring engine cracker",
+		Args:        fmt.Sprintf("%d", int(duration.Seconds())),
 	}
 	
-	return `SCORING ENGINE CRACKER
-============================================================
+	durationStr := "indefinitely"
+	if duration > 0 {
+		durationStr = fmt.Sprintf("for %s", duration)
+	}
+	
+	// Set up a goroutine to save findings when context is done
+	go func() {
+		<-ctx.Done()
+		if crackerAdapter != nil {
+			crackerAdapter.SaveFindings()
+		}
+	}()
+	
+	return fmt.Sprintf(`SCORING ENGINE CRACKER
+═══════════════════════════════════════════════════════════════
 
-Starting real-time interception of the CyberPatriot scoring engine...
+⏳ Starting real-time interception %s...
 
 The cracker will:
-  - Find the scoring engine process (CCSClient)
-  - Attach to intercept file/registry reads
-  - Identify what vulnerabilities are being checked
-  - Show you the EXACT fixes needed for points
+  ✓ Find the scoring engine process (CCSClient)
+  ✓ Attach to intercept file/registry reads
+  ✓ Identify what vulnerabilities are being checked
+  ✓ Show you the EXACT fixes needed for points
 
 Findings will appear in the sidebar panel.
 The AI will automatically receive these findings to take action.
 
-Press Ctrl+C to stop the cracker.`
+Use /crack stop to stop early.`, durationStr)
+}
+
+func cmdCrackStop(m *model) string {
+	crackerAdapter := m.agent.GetCrackerAdapter()
+	
+	if m.crackerCancel == nil && (crackerAdapter == nil || !crackerAdapter.IsRunning()) {
+		return "No cracker is currently running."
+	}
+	
+	// Cancel context
+	if m.crackerCancel != nil {
+		m.crackerCancel()
+		m.crackerCancel = nil
+	}
+	
+	// Stop the cracker
+	if crackerAdapter != nil {
+		crackerAdapter.Stop()
+	}
+	
+	// Get finding count
+	findingCount := 0
+	if crackerAdapter != nil {
+		findingCount = len(crackerAdapter.GetFindings())
+	}
+	
+	return fmt.Sprintf(`⏹️ Scoring engine cracker stopped.
+
+Captured %d unique checks.
+Findings saved to ~/.ironguard/cracker_results.txt`, findingCount)
 }
 
 func cmdKey(m *model, args string) string {

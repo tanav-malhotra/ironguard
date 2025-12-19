@@ -63,6 +63,9 @@ func FormatFindingForAI(f Finding) string {
 	if f.CurrentVal != "" {
 		sb.WriteString(fmt.Sprintf("Current: %s\n", f.CurrentVal))
 	}
+	if f.ReadContent != "" {
+		sb.WriteString(fmt.Sprintf("Read Content: %s\n", f.ReadContent))
+	}
 	if f.ExpectedVal != "" && f.CurrentVal != f.ExpectedVal {
 		sb.WriteString(fmt.Sprintf("Expected: %s\n", f.ExpectedVal))
 		sb.WriteString("ACTION NEEDED: Fix this to earn points!\n")
@@ -153,6 +156,9 @@ func FormatAllFindings(findings []Finding) string {
 			sb.WriteString(fmt.Sprintf("  %s %s\n", status, f.Path))
 			if f.CurrentVal != "" {
 				sb.WriteString(fmt.Sprintf("    Current: %s\n", f.CurrentVal))
+			}
+			if f.ReadContent != "" {
+				sb.WriteString(fmt.Sprintf("    Read: %s\n", f.ReadContent))
 			}
 			if f.FixHint != "" && (f.ExpectedVal == "" || f.CurrentVal != f.ExpectedVal) {
 				sb.WriteString(fmt.Sprintf("    Hint: %s\n", f.FixHint))

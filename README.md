@@ -169,13 +169,16 @@ Configure the maximum number of concurrent sub-agents with `/subagents <max>` (d
 
 | Command | Description |
 |---------|-------------|
-| `/baseline` | Run interactive baseline hardening (prompts for options) |
-| `/baseline auto` | Run baseline with secure defaults (no prompts) |
+| `/baseline` | Show current baseline configuration |
+| `/baseline run` | Execute baseline with current settings |
+| `/baseline services <ids>` | Set required services (won't disable these) |
+| `/baseline ipv6 on\|off` | Configure IPv6 (off = disable) |
+| `/baseline updates on\|off` | Configure whether to run system updates |
+| `/baseline reset` | Reset to secure defaults |
 
-**CLI Flags:**
+**CLI Flag:**
 ```bash
 ironguard --baseline       # Run interactive baseline before TUI
-ironguard --baseline-auto  # Run with defaults before TUI
 ```
 
 The baseline script applies standard security configurations. Interactive mode asks about:

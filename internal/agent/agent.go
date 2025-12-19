@@ -1463,9 +1463,33 @@ func (a *Agent) loadBaselineResults() {
 	}
 }
 
+// loadCrackerResults loads scoring engine cracker results if they exist.
+func (a *Agent) loadCrackerResults() {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	
+	resultsFile := homeDir + "/.ironguard/cracker_results.txt"
+	content, err := os.ReadFile(resultsFile)
+	if err != nil {
+		return // No cracker results file
+	}
+	
+	// Queue as a system message so AI knows what was found
+	a.QueueSystemMessage(string(content))
+	
+	// Notify via event
+	a.events <- Event{
+		Type:    EventStatusUpdate,
+		Content: "Loaded scoring engine cracker results from previous run",
+	}
+}
+
 // LoadStoredResults reloads any stored baseline or cracker results.
 // Call this when an API key is set to ensure AI can see previous results.
 func (a *Agent) LoadStoredResults() {
 	a.loadBaselineResults()
+	a.loadCrackerResults()
 }
 

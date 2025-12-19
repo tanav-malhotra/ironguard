@@ -9,7 +9,9 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"strconv"
 	"strings"
+	"sync"
 )
 
 // startLinuxInterception starts strace-based interception on Linux
@@ -69,9 +71,13 @@ func (c *Cracker) startLinuxInterception(ctx context.Context, pid int) error {
 // Regex patterns for parsing strace output
 var (
 	// Match: openat(AT_FDCWD, "/etc/passwd", O_RDONLY|O_CLOEXEC) = 4
+	// Captures: path, fd
+	openatPatternFull = regexp.MustCompile(`openat\(AT_FDCWD,\s*"([^"]+)"[^)]*\)\s*=\s*(\d+)`)
 	openatPattern = regexp.MustCompile(`openat\(AT_FDCWD,\s*"([^"]+)"`)
 	
 	// Match: open("/etc/passwd", O_RDONLY) = 4
+	// Captures: path, fd
+	openPatternFull = regexp.MustCompile(`open\("([^"]+)"[^)]*\)\s*=\s*(\d+)`)
 	openPattern = regexp.MustCompile(`open\("([^"]+)"`)
 	
 	// Match: stat("/etc/passwd", {st_mode=...}) = 0
@@ -81,11 +87,51 @@ var (
 	accessPattern = regexp.MustCompile(`access\("([^"]+)"`)
 	
 	// Match: read(4, "root:x:0:0:root...", 4096) = 3604
+	// Captures: fd, content
+	readPatternFull = regexp.MustCompile(`read\((\d+),\s*"([^"]*)"`)
 	readPattern = regexp.MustCompile(`read\(\d+,\s*"([^"]*)"`)
+	
+	// Match: close(4) = 0
+	// Captures: fd
+	closePattern = regexp.MustCompile(`close\((\d+)\)\s*=\s*0`)
 	
 	// Match process cmdline reads: /proc/1234/cmdline
 	procCmdlinePattern = regexp.MustCompile(`/proc/(\d+)/cmdline`)
 )
+
+// fdTracker tracks file descriptor to path mappings
+type fdTracker struct {
+	mu    sync.RWMutex
+	fdMap map[int]string // fd -> file path
+}
+
+func newFDTracker() *fdTracker {
+	return &fdTracker{
+		fdMap: make(map[int]string),
+	}
+}
+
+func (t *fdTracker) Set(fd int, path string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.fdMap[fd] = path
+}
+
+func (t *fdTracker) Get(fd int) (string, bool) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	path, ok := t.fdMap[fd]
+	return path, ok
+}
+
+func (t *fdTracker) Delete(fd int) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	delete(t.fdMap, fd)
+}
+
+// Global FD tracker for the strace parser
+var globalFDTracker = newFDTracker()
 
 // Files to ignore (noise)
 var ignoredPaths = map[string]bool{
@@ -108,12 +154,45 @@ func (c *Cracker) parseStraceLine(line string) {
 		return
 	}
 
-	// Try to extract file path
+	// Handle close() - remove FD mapping
+	if matches := closePattern.FindStringSubmatch(line); len(matches) > 1 {
+		if fd, err := strconv.Atoi(matches[1]); err == nil {
+			globalFDTracker.Delete(fd)
+		}
+		return
+	}
+
+	// Handle read() - attribute content to file via FD mapping
+	if matches := readPatternFull.FindStringSubmatch(line); len(matches) > 2 {
+		if fd, err := strconv.Atoi(matches[1]); err == nil {
+			content := matches[2]
+			if path, ok := globalFDTracker.Get(fd); ok && content != "" {
+				// We have a read from a known file - enhance the finding
+				c.handleReadContent(path, content)
+			}
+		}
+		return
+	}
+
+	// Try to extract file path and track FD
 	var path string
+	var fd int = -1
 	var findingType FindingType
 
-	// Check for openat
-	if matches := openatPattern.FindStringSubmatch(line); len(matches) > 1 {
+	// Check for openat with FD result
+	if matches := openatPatternFull.FindStringSubmatch(line); len(matches) > 2 {
+		path = matches[1]
+		if fdNum, err := strconv.Atoi(matches[2]); err == nil {
+			fd = fdNum
+		}
+		findingType = FindingTypeFile
+	} else if matches := openPatternFull.FindStringSubmatch(line); len(matches) > 2 {
+		path = matches[1]
+		if fdNum, err := strconv.Atoi(matches[2]); err == nil {
+			fd = fdNum
+		}
+		findingType = FindingTypeFile
+	} else if matches := openatPattern.FindStringSubmatch(line); len(matches) > 1 {
 		path = matches[1]
 		findingType = FindingTypeFile
 	} else if matches := openPattern.FindStringSubmatch(line); len(matches) > 1 {
@@ -130,6 +209,11 @@ func (c *Cracker) parseStraceLine(line string) {
 	// Skip if no path found
 	if path == "" {
 		return
+	}
+
+	// Track FD → path mapping
+	if fd >= 0 {
+		globalFDTracker.Set(fd, path)
 	}
 
 	// Skip ignored paths
@@ -167,6 +251,38 @@ func (c *Cracker) parseStraceLine(line string) {
 	}
 
 	c.addFinding(finding)
+}
+
+// handleReadContent processes content read from a file and enhances findings
+func (c *Cracker) handleReadContent(path, content string) {
+	// Skip noise paths
+	for ignored := range ignoredPaths {
+		if strings.HasPrefix(path, ignored) {
+			return
+		}
+	}
+
+	// Skip library files
+	if strings.HasSuffix(path, ".so") || strings.Contains(path, ".so.") {
+		return
+	}
+
+	// This provides additional context about what the scoring engine actually read
+	// Try to enhance an existing finding with the read content
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// Look for an existing finding for this path
+	for i := range c.findings {
+		if c.findings[i].Path == path && c.findings[i].ReadContent == "" {
+			// Store the first 200 chars of content for context
+			if len(content) > 200 {
+				content = content[:200] + "..."
+			}
+			c.findings[i].ReadContent = content
+			return
+		}
+	}
 }
 
 // handleProcessCheck handles when the scoring engine reads a process cmdline

@@ -348,7 +348,6 @@ The AI is trained to answer forensic questions FIRST, then run baseline sections
 **CLI Flags:**
 ```bash
 ironguard --baseline       # Interactive baseline before TUI
-ironguard --baseline-auto  # Defaults baseline before TUI
 ```
 
 **Example AI Workflow:**

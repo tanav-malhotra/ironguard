@@ -39,10 +39,10 @@ type BaselineConfig struct {
 	SelectedDisplayManager string
 
 	// User Password Management (Linux only)
-	SetUserPasswords   bool   // Set all user passwords to a standard password
-	StandardPassword   string // Default: "CyberPatr!0t"
-	LockUserAccounts   bool   // Lock accounts after setting password
-	ExpireUserPasswords bool  // Force password change on next login
+	SetUserPasswords    bool   // Set all user passwords to a standard password
+	StandardPassword    string // Default: "CyberPatr!0t"
+	LockUserAccounts    bool   // Lock accounts after setting password
+	ExpireUserPasswords bool   // Force password change on next login
 
 	// APT Sources (Linux only)
 	// ThirdPartyRepoAction: "keep" = allow and keep existing, "remove" = allow but remove existing, "disable" = comment out
@@ -50,6 +50,20 @@ type BaselineConfig struct {
 
 	// Interactive mode
 	Interactive bool // If false, use all defaults
+
+	// Progress callback for TUI-safe output (if nil, uses fmt.Println)
+	// This allows baseline to run inside BubbleTea without corrupting the UI
+	ProgressCallback func(string)
+}
+
+// progress outputs a message using the configured callback or fmt.Println
+func (cfg *BaselineConfig) progress(format string, args ...interface{}) {
+	msg := fmt.Sprintf(format, args...)
+	if cfg.ProgressCallback != nil {
+		cfg.ProgressCallback(msg)
+	} else {
+		fmt.Println(msg)
+	}
 }
 
 // LinuxServices is the list of services users can mark as required on Linux.
@@ -127,6 +141,14 @@ func isServiceRequired(required []string, service string) bool {
 	return false
 }
 
+// DefaultServiceOptions returns the service options for the current OS.
+func DefaultServiceOptions() []ServiceOption {
+	if runtime.GOOS == "windows" {
+		return WindowsServices
+	}
+	return LinuxServices
+}
+
 // BaselineResult tracks what was changed during baseline hardening.
 type BaselineResult struct {
 	Actions   []ActionResult
@@ -171,15 +193,15 @@ func RunBaseline(ctx context.Context, cfg BaselineConfig) (*BaselineResult, erro
 		Config: cfg,
 		OSType: runtime.GOOS,
 	}
-	
-	fmt.Println()
-	fmt.Println("══════════════════════════════════════════════════════════════")
-	fmt.Println("IRONGUARD BASELINE HARDENING")
-	fmt.Println("Applying standard security configurations")
-	fmt.Println("══════════════════════════════════════════════════════════════")
-	fmt.Println()
-	
-	return runPlatformBaseline(ctx, cfg, result)
+
+	cfg.progress("")
+	cfg.progress("══════════════════════════════════════════════════════════════")
+	cfg.progress("IRONGUARD BASELINE HARDENING")
+	cfg.progress("Applying standard security configurations")
+	cfg.progress("══════════════════════════════════════════════════════════════")
+	cfg.progress("")
+
+	return runPlatformBaseline(ctx, &cfg, result)
 }
 
 // RunBaselineInteractive runs baseline with interactive prompts.
@@ -560,46 +582,56 @@ func (r *BaselineResult) FormatResultsForAI() string {
 	return sb.String()
 }
 
-// PrintResults prints results to console.
-func (r *BaselineResult) PrintResults() {
-	fmt.Println()
-	fmt.Println("╔══════════════════════════════════════════════════════════════╗")
-	fmt.Println("║            BASELINE HARDENING COMPLETE                       ║")
-	fmt.Println("╚══════════════════════════════════════════════════════════════╝")
-	fmt.Println()
-	
+// PrintResults prints results to console or via callback.
+func (r *BaselineResult) PrintResults(callback func(string)) {
+	print := func(format string, args ...interface{}) {
+		msg := fmt.Sprintf(format, args...)
+		if callback != nil {
+			callback(msg)
+		} else {
+			fmt.Println(msg)
+		}
+	}
+
+	print("")
+	print("╔══════════════════════════════════════════════════════════════╗")
+	print("║            BASELINE HARDENING COMPLETE                       ║")
+	print("╚══════════════════════════════════════════════════════════════╝")
+	print("")
+
 	successCount := 0
 	failCount := 0
 	skipCount := 0
-	
+
 	currentCategory := ""
 	for _, action := range r.Actions {
 		if action.Category != currentCategory {
 			currentCategory = action.Category
-			fmt.Printf("\n━━━ %s ━━━\n", strings.ToUpper(currentCategory))
+			print("")
+			print("━━━ %s ━━━", strings.ToUpper(currentCategory))
 		}
-		
+
 		if action.Skipped {
 			skipCount++
-			fmt.Printf("  ⊘ %s (skipped: %s)\n", action.Action, action.SkipReason)
+			print("  ⊘ %s (skipped: %s)", action.Action, action.SkipReason)
 		} else if action.Success {
 			successCount++
-			fmt.Printf("  ✓ %s\n", action.Action)
+			print("  ✓ %s", action.Action)
 		} else {
 			failCount++
-			fmt.Printf("  ✗ %s\n", action.Action)
+			print("  ✗ %s", action.Action)
 			if action.Error != "" {
-				fmt.Printf("    Error: %s\n", action.Error)
+				print("    Error: %s", action.Error)
 			}
 		}
 	}
-	
-	fmt.Println()
-	fmt.Println("━━━ SUMMARY ━━━")
-	fmt.Printf("  Successful: %d\n", successCount)
-	fmt.Printf("  Failed:     %d\n", failCount)
-	fmt.Printf("  Skipped:    %d\n", skipCount)
-	fmt.Println()
+
+	print("")
+	print("━━━ SUMMARY ━━━")
+	print("  Successful: %d", successCount)
+	print("  Failed:     %d", failCount)
+	print("  Skipped:    %d", skipCount)
+	print("")
 }
 
 // Helper functions

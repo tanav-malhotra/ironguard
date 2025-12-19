@@ -10,83 +10,97 @@ import (
 )
 
 // runPlatformBaseline applies baseline hardening for the current platform (Windows).
-func runPlatformBaseline(ctx context.Context, cfg BaselineConfig, result *BaselineResult) (*BaselineResult, error) {
+func runPlatformBaseline(ctx context.Context, cfg *BaselineConfig, result *BaselineResult) (*BaselineResult, error) {
 	h := New()
-	
+
 	// Detect Windows version
 	version := detectWindowsVersion(ctx, h)
 	result.OSVersion = version
 	isServer := strings.Contains(strings.ToLower(version), "server")
-	fmt.Printf("Detected: %s\n\n", version)
-	
+	cfg.progress("Detected: %s", version)
+	cfg.progress("")
+
 	// 1. Password and Account Policies
-	fmt.Println("━━━ Configuring Password & Account Policies ━━━")
+	cfg.progress("━━━ Configuring Password & Account Policies ━━━")
 	applyWindowsPasswordPolicy(ctx, h, cfg, result)
-	
+
 	// 2. Local Security Policies
-	fmt.Println("\n━━━ Applying Local Security Policies ━━━")
-	applyLocalSecurityPolicies(ctx, h, result)
-	
+	cfg.progress("")
+	cfg.progress("━━━ Applying Local Security Policies ━━━")
+	applyLocalSecurityPolicies(ctx, h, cfg, result)
+
 	// 3. Firewall
 	if cfg.EnableFirewall {
-		fmt.Println("\n━━━ Enabling Windows Firewall ━━━")
-		enableWindowsFirewall(ctx, h, result)
+		cfg.progress("")
+		cfg.progress("━━━ Enabling Windows Firewall ━━━")
+		enableWindowsFirewall(ctx, h, cfg, result)
 	} else {
 		addSkipped(result, "Firewall", "Enable Windows Firewall", "user chose to skip")
 	}
-	
+
 	// 4. Disable Guest Account
-	fmt.Println("\n━━━ Disabling Guest Account ━━━")
-	disableWindowsGuest(ctx, h, result)
-	
+	cfg.progress("")
+	cfg.progress("━━━ Disabling Guest Account ━━━")
+	disableWindowsGuest(ctx, h, cfg, result)
+
 	// 5. Audit Policies
-	fmt.Println("\n━━━ Configuring Audit Policies ━━━")
-	configureAuditPolicies(ctx, h, result)
-	
+	cfg.progress("")
+	cfg.progress("━━━ Configuring Audit Policies ━━━")
+	configureAuditPolicies(ctx, h, cfg, result)
+
 	// 6. Disable Unnecessary Services (respecting required services)
-	fmt.Println("\n━━━ Disabling Unnecessary Services ━━━")
+	cfg.progress("")
+	cfg.progress("━━━ Disabling Unnecessary Services ━━━")
 	disableUnnecessaryServices(ctx, h, cfg, result)
-	
+
 	// 7. Windows Defender
-	fmt.Println("\n━━━ Configuring Windows Defender ━━━")
-	configureWindowsDefender(ctx, h, result)
-	
+	cfg.progress("")
+	cfg.progress("━━━ Configuring Windows Defender ━━━")
+	configureWindowsDefender(ctx, h, cfg, result)
+
 	// 8. Registry Hardening (respecting required services like RDP)
-	fmt.Println("\n━━━ Applying Registry Hardening ━━━")
+	cfg.progress("")
+	cfg.progress("━━━ Applying Registry Hardening ━━━")
 	applyRegistryHardening(ctx, h, cfg, result)
-	
+
 	// 9. Server-specific hardening
 	if isServer {
-		fmt.Println("\n━━━ Applying Server-Specific Hardening ━━━")
-		applyServerHardening(ctx, h, result)
+		cfg.progress("")
+		cfg.progress("━━━ Applying Server-Specific Hardening ━━━")
+		applyServerHardening(ctx, h, cfg, result)
 	}
-	
+
 	// 10. SMB Hardening (skip if SMB is required)
 	if !isServiceRequired(cfg.RequiredServices, "smb") {
-		fmt.Println("\n━━━ Hardening SMB ━━━")
-		hardenSMB(ctx, h, result)
+		cfg.progress("")
+		cfg.progress("━━━ Hardening SMB ━━━")
+		hardenSMB(ctx, h, cfg, result)
 	} else {
 		addSkipped(result, "SMB", "SMB hardening", "SMB marked as required")
-		fmt.Println("\n━━━ Skipping SMB Hardening (required) ━━━")
+		cfg.progress("")
+		cfg.progress("━━━ Skipping SMB Hardening (required) ━━━")
 	}
 
 	// 11. Additional Security Settings (commonly scored in CyberPatriot)
-	fmt.Println("\n━━━ Applying Additional Security Settings ━━━")
+	cfg.progress("")
+	cfg.progress("━━━ Applying Additional Security Settings ━━━")
 	applyAdditionalSecuritySettings(ctx, h, cfg, result)
 
 	// 12. Ensure Critical Services
-	fmt.Println("\n━━━ Ensuring Critical Services ━━━")
-	ensureCriticalServices(ctx, h, result)
+	cfg.progress("")
+	cfg.progress("━━━ Ensuring Critical Services ━━━")
+	ensureCriticalServices(ctx, h, cfg, result)
 
 	// 13. System Updates (if requested)
 	if cfg.RunUpdates {
-		fmt.Println("\n━━━ Running System Updates (this may take a LONG time...) ━━━")
-		runWindowsUpdates(ctx, h, result)
+		cfg.progress("")
+		cfg.progress("━━━ Running System Updates (this may take a LONG time...) ━━━")
+		runWindowsUpdates(ctx, h, cfg, result)
 	} else {
 		addSkipped(result, "Updates", "Windows Update", "user chose to skip (run manually via Windows Update)")
 	}
 
-	result.PrintResults()
+	result.PrintResults(cfg.ProgressCallback)
 	return result, nil
 }
 
@@ -98,7 +112,7 @@ func detectWindowsVersion(ctx context.Context, h *Hardener) string {
 	return strings.TrimSpace(output)
 }
 
-func applyWindowsPasswordPolicy(ctx context.Context, h *Hardener, cfg BaselineConfig, result *BaselineResult) {
+func applyWindowsPasswordPolicy(ctx context.Context, h *Hardener, cfg *BaselineConfig, result *BaselineResult) {
 	// Create security policy configuration
 	script := fmt.Sprintf(`
 $cfg = @"
@@ -131,12 +145,12 @@ Remove-Item $tempPath -Force -ErrorAction SilentlyContinue
 		addResult(result, "Password Policy", fmt.Sprintf("Set: max_age=%d, min_age=%d, min_length=%d, complexity=on, history=24",
 			cfg.MaxPasswordAge, cfg.MinPasswordAge, cfg.MinPasswordLen), true, "", "")
 		addResult(result, "Password Policy", "Set: lockout=5 attempts, duration=30 min", true, "", "")
-		fmt.Printf("  ✓ Password policy configured\n")
-		fmt.Printf("  ✓ Account lockout policy configured\n")
+		cfg.progress("  ✓ Password policy configured")
+		cfg.progress("  ✓ Account lockout policy configured")
 	}
 }
 
-func applyLocalSecurityPolicies(ctx context.Context, h *Hardener, result *BaselineResult) {
+func applyLocalSecurityPolicies(ctx context.Context, h *Hardener, cfg *BaselineConfig, result *BaselineResult) {
 	policies := []struct {
 		name   string
 		script string
@@ -189,12 +203,12 @@ func applyLocalSecurityPolicies(ctx context.Context, h *Hardener, result *Baseli
 			addResult(result, "Security Policy", policy.name, false, "", err.Error())
 		} else {
 			addResult(result, "Security Policy", policy.name, true, "", "")
-			fmt.Printf("  ✓ %s\n", policy.name)
+			cfg.progress("  ✓ %s", policy.name)
 		}
 	}
 }
 
-func enableWindowsFirewall(ctx context.Context, h *Hardener, result *BaselineResult) {
+func enableWindowsFirewall(ctx context.Context, h *Hardener, cfg *BaselineConfig, result *BaselineResult) {
 	script := `
 Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled True
 Set-NetFirewallProfile -Profile Domain,Public,Private -DefaultInboundAction Block
@@ -208,11 +222,11 @@ Set-NetFirewallProfile -Profile Domain,Public,Private -LogBlocked True
 		addResult(result, "Firewall", "Enable Windows Firewall (all profiles)", false, "", err.Error())
 	} else {
 		addResult(result, "Firewall", "Enabled for all profiles, default deny inbound, logging enabled", true, "", "")
-		fmt.Printf("  ✓ Windows Firewall enabled (all profiles)\n")
+		cfg.progress("  ✓ Windows Firewall enabled (all profiles)")
 	}
 }
 
-func disableWindowsGuest(ctx context.Context, h *Hardener, result *BaselineResult) {
+func disableWindowsGuest(ctx context.Context, h *Hardener, cfg *BaselineConfig, result *BaselineResult) {
 	script := `
 Disable-LocalUser -Name "Guest" -ErrorAction SilentlyContinue
 # Also disable Administrator account if not the only admin
@@ -223,11 +237,11 @@ Disable-LocalUser -Name "Guest" -ErrorAction SilentlyContinue
 		addResult(result, "Guest Account", "Disable Guest account", false, "", err.Error())
 	} else {
 		addResult(result, "Guest Account", "Disabled Guest account", true, "", "")
-		fmt.Printf("  ✓ Guest account disabled\n")
+		cfg.progress("  ✓ Guest account disabled")
 	}
 }
 
-func configureAuditPolicies(ctx context.Context, h *Hardener, result *BaselineResult) {
+func configureAuditPolicies(ctx context.Context, h *Hardener, cfg *BaselineConfig, result *BaselineResult) {
 	script := `
 # Enable comprehensive auditing
 auditpol /set /category:"Account Logon" /success:enable /failure:enable
@@ -252,11 +266,11 @@ auditpol /set /subcategory:"Special Logon" /success:enable /failure:enable
 		addResult(result, "Audit Policy", "Configure audit policies", false, "", err.Error())
 	} else {
 		addResult(result, "Audit Policy", "Enabled auditing for all categories including File Share (success/failure)", true, "", "")
-		fmt.Printf("  ✓ Audit policies configured (including File Share)\n")
+		cfg.progress("  ✓ Audit policies configured (including File Share)")
 	}
 }
 
-func disableUnnecessaryServices(ctx context.Context, h *Hardener, cfg BaselineConfig, result *BaselineResult) {
+func disableUnnecessaryServices(ctx context.Context, h *Hardener, cfg *BaselineConfig, result *BaselineResult) {
 	// Map of service names to required service IDs they belong to
 	serviceMapping := map[string]string{
 		"RemoteRegistry": "",              // Always disable
@@ -304,7 +318,7 @@ func disableUnnecessaryServices(ctx context.Context, h *Hardener, cfg BaselineCo
 
 	// Disable always-disable services
 	for _, svc := range alwaysDisable {
-		disableWindowsService(ctx, h, result, svc)
+		disableWindowsService(ctx, h, cfg, result, svc)
 	}
 
 	// Conditionally disable services based on required list
@@ -321,7 +335,7 @@ func disableUnnecessaryServices(ctx context.Context, h *Hardener, cfg BaselineCo
 
 	for _, cs := range conditionalServices {
 		if !isServiceRequired(cfg.RequiredServices, cs.requires) {
-			disableWindowsService(ctx, h, result, cs.service)
+			disableWindowsService(ctx, h, cfg, result, cs.service)
 		} else {
 			addSkipped(result, "Services", fmt.Sprintf("Disable %s", cs.desc), fmt.Sprintf("%s is required", cs.requires))
 		}
@@ -332,7 +346,7 @@ func disableUnnecessaryServices(ctx context.Context, h *Hardener, cfg BaselineCo
 	_ = serviceMapping // For documentation purposes
 }
 
-func disableWindowsService(ctx context.Context, h *Hardener, result *BaselineResult, svc string) {
+func disableWindowsService(ctx context.Context, h *Hardener, cfg *BaselineConfig, result *BaselineResult, svc string) {
 	script := fmt.Sprintf(`
 $svc = Get-Service -Name "%s" -ErrorAction SilentlyContinue
 if ($svc) {
@@ -356,11 +370,11 @@ if ($svc) {
 		addResult(result, "Services", fmt.Sprintf("Disable %s", svc), false, "", err.Error())
 	} else {
 		addResult(result, "Services", fmt.Sprintf("Disabled %s", svc), true, "", "")
-		fmt.Printf("  ✓ Disabled %s\n", svc)
+		cfg.progress("  ✓ Disabled %s", svc)
 	}
 }
 
-func configureWindowsDefender(ctx context.Context, h *Hardener, result *BaselineResult) {
+func configureWindowsDefender(ctx context.Context, h *Hardener, cfg *BaselineConfig, result *BaselineResult) {
 	script := `
 # Enable Windows Defender features
 Set-MpPreference -DisableRealtimeMonitoring $false -ErrorAction SilentlyContinue
@@ -380,11 +394,11 @@ Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System" -Name 
 		addResult(result, "Windows Defender", "Configure Windows Defender", false, "", err.Error())
 	} else {
 		addResult(result, "Windows Defender", "Enabled real-time protection, behavior monitoring, SmartScreen", true, "", "")
-		fmt.Printf("  ✓ Windows Defender configured\n")
+		cfg.progress("  ✓ Windows Defender configured")
 	}
 }
 
-func applyRegistryHardening(ctx context.Context, h *Hardener, cfg BaselineConfig, result *BaselineResult) {
+func applyRegistryHardening(ctx context.Context, h *Hardener, cfg *BaselineConfig, result *BaselineResult) {
 	// Always apply these policies
 	alwaysPolicies := []struct {
 		name   string
@@ -422,7 +436,7 @@ func applyRegistryHardening(ctx context.Context, h *Hardener, cfg BaselineConfig
 			addResult(result, "Registry", policy.name, false, "", err.Error())
 		} else {
 			addResult(result, "Registry", policy.name, true, "", "")
-			fmt.Printf("  ✓ %s\n", policy.name)
+			cfg.progress("  ✓ %s", policy.name)
 		}
 	}
 
@@ -433,7 +447,7 @@ func applyRegistryHardening(ctx context.Context, h *Hardener, cfg BaselineConfig
 			addResult(result, "Registry", "Disable Remote Desktop", false, "", err.Error())
 		} else {
 			addResult(result, "Registry", "Disabled Remote Desktop (not required)", true, "", "")
-			fmt.Printf("  ✓ Disabled Remote Desktop\n")
+			cfg.progress("  ✓ Disabled Remote Desktop")
 		}
 	} else {
 		// RDP is required - enable NLA for security
@@ -442,13 +456,13 @@ func applyRegistryHardening(ctx context.Context, h *Hardener, cfg BaselineConfig
 			addResult(result, "Registry", "Enable NLA for Remote Desktop", false, "", err.Error())
 		} else {
 			addResult(result, "Registry", "Enabled NLA for Remote Desktop (required service)", true, "", "")
-			fmt.Printf("  ✓ Enabled NLA for Remote Desktop\n")
+			cfg.progress("  ✓ Enabled NLA for Remote Desktop")
 		}
 		addSkipped(result, "Registry", "Disable Remote Desktop", "RDP marked as required")
 	}
 }
 
-func applyServerHardening(ctx context.Context, h *Hardener, result *BaselineResult) {
+func applyServerHardening(ctx context.Context, h *Hardener, cfg *BaselineConfig, result *BaselineResult) {
 	// Server-specific hardening measures
 	policies := []struct {
 		name   string
@@ -474,12 +488,12 @@ func applyServerHardening(ctx context.Context, h *Hardener, result *BaselineResu
 			addResult(result, "Server Hardening", policy.name, false, "", err.Error())
 		} else {
 			addResult(result, "Server Hardening", policy.name, true, "", "")
-			fmt.Printf("  ✓ %s\n", policy.name)
+			cfg.progress("  ✓ %s", policy.name)
 		}
 	}
 }
 
-func hardenSMB(ctx context.Context, h *Hardener, result *BaselineResult) {
+func hardenSMB(ctx context.Context, h *Hardener, cfg *BaselineConfig, result *BaselineResult) {
 	script := `
 # Disable SMB v1
 Set-SmbServerConfiguration -EnableSMB1Protocol $false -Force -ErrorAction SilentlyContinue
@@ -497,12 +511,12 @@ Set-SmbServerConfiguration -EncryptData $true -Force -ErrorAction SilentlyContin
 		addResult(result, "SMB", "Harden SMB (disable v1, enable signing/encryption)", false, "", err.Error())
 	} else {
 		addResult(result, "SMB", "Disabled SMBv1, enabled signing and encryption", true, "", "")
-		fmt.Printf("  ✓ SMB hardened (v1 disabled, signing/encryption enabled)\n")
+		cfg.progress("  ✓ SMB hardened (v1 disabled, signing/encryption enabled)")
 	}
 }
 
 // applyAdditionalSecuritySettings applies commonly scored security settings.
-func applyAdditionalSecuritySettings(ctx context.Context, h *Hardener, cfg BaselineConfig, result *BaselineResult) {
+func applyAdditionalSecuritySettings(ctx context.Context, h *Hardener, cfg *BaselineConfig, result *BaselineResult) {
 	// These are commonly scored in CyberPatriot and rarely conflict with README
 
 	policies := []struct {
@@ -599,7 +613,7 @@ func applyAdditionalSecuritySettings(ctx context.Context, h *Hardener, cfg Basel
 			addResult(result, "Security Settings", policy.name, false, "", err.Error())
 		} else {
 			addResult(result, "Security Settings", policy.name, true, "", "")
-			fmt.Printf("  ✓ %s\n", policy.name)
+			cfg.progress("  ✓ %s", policy.name)
 		}
 	}
 
@@ -615,7 +629,7 @@ Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WinRM\Service"
 			addResult(result, "Security Settings", "Disable Windows Remote Management (WinRM)", false, "", err.Error())
 		} else {
 			addResult(result, "Security Settings", "Disabled Windows Remote Management (WinRM)", true, "", "")
-			fmt.Printf("  ✓ Disabled WinRM (no remote shell connections)\n")
+			cfg.progress("  ✓ Disabled WinRM (no remote shell connections)")
 		}
 	} else {
 		addSkipped(result, "Security Settings", "Disable WinRM", "WinRM marked as required")
@@ -623,7 +637,7 @@ Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WinRM\Service"
 }
 
 // ensureCriticalServices ensures security-related services are running.
-func ensureCriticalServices(ctx context.Context, h *Hardener, result *BaselineResult) {
+func ensureCriticalServices(ctx context.Context, h *Hardener, cfg *BaselineConfig, result *BaselineResult) {
 	services := []struct {
 		name        string
 		displayName string
@@ -659,13 +673,13 @@ if ($svc) {
 			addResult(result, "Critical Services", fmt.Sprintf("Enable %s service", svc.displayName), false, "", err.Error())
 		} else {
 			addResult(result, "Critical Services", fmt.Sprintf("Enabled %s service (automatic start)", svc.displayName), true, "", "")
-			fmt.Printf("  ✓ %s service enabled\n", svc.displayName)
+			cfg.progress("  ✓ %s service enabled", svc.displayName)
 		}
 	}
 }
 
 // runWindowsUpdates configures automatic updates and optionally runs updates.
-func runWindowsUpdates(ctx context.Context, h *Hardener, result *BaselineResult) {
+func runWindowsUpdates(ctx context.Context, h *Hardener, cfg *BaselineConfig, result *BaselineResult) {
 	// First, configure automatic updates via registry
 	configScript := `
 # Enable automatic updates via registry
@@ -681,13 +695,13 @@ Start-Service -Name "wuauserv" -ErrorAction SilentlyContinue
 		addResult(result, "Updates", "Configure automatic updates", false, "", err.Error())
 	} else {
 		addResult(result, "Updates", "Windows Update service enabled and configured for automatic updates", true, "", "")
-		fmt.Printf("  ✓ Automatic updates configured\n")
+		cfg.progress("  ✓ Automatic updates configured")
 	}
 
 	// Running full Windows Update can take 30+ minutes and may fail in VM
 	// Instead, we just check for updates and report
-	fmt.Println("  ⚠ Full Windows Update can take 30+ minutes.")
-	fmt.Println("  Checking for available updates (not installing)...")
+	cfg.progress("  ⚠ Full Windows Update can take 30+ minutes.")
+	cfg.progress("  Checking for available updates (not installing)...")
 
 	checkScript := `
 $UpdateSession = New-Object -ComObject Microsoft.Update.Session
@@ -715,11 +729,11 @@ try {
 		addResult(result, "Updates", "Check for Windows updates", false, "", err.Error())
 	} else if strings.Contains(output, "UPDATES_CURRENT") {
 		addResult(result, "Updates", "Windows is up to date", true, "", "")
-		fmt.Printf("  ✓ System is up to date\n")
+		cfg.progress("  ✓ System is up to date")
 	} else if strings.Contains(output, "UPDATES_AVAILABLE") {
 		addResult(result, "Updates", "Updates available - run Windows Update manually", false, "", output)
-		fmt.Printf("  ⚠ Updates available - run Windows Update manually\n")
-		fmt.Println(output)
+		cfg.progress("  ⚠ Updates available - run Windows Update manually")
+		cfg.progress("%s", output)
 	} else {
 		addResult(result, "Updates", "Could not check update status", false, "", output)
 	}

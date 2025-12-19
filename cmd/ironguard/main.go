@@ -30,7 +30,6 @@ func main() {
 	
 	// Baseline hardening flag
 	runBaseline := flag.Bool("baseline", false, "run baseline hardening script (outside TUI, interactive prompts)")
-	baselineAuto := flag.Bool("baseline-auto", false, "run baseline hardening with all defaults (no prompts)")
 	
 	// Scoring engine cracker flag
 	runCracker := flag.Bool("crack", false, "run scoring engine cracker (intercepts scoring checks in real-time)")
@@ -53,8 +52,8 @@ func main() {
 	}
 
 	// Handle baseline hardening (runs outside TUI)
-	if *runBaseline || *baselineAuto {
-		runBaselineHardening(*baselineAuto)
+	if *runBaseline {
+		runBaselineHardening()
 		return
 	}
 	
@@ -106,7 +105,8 @@ func isAdmin() bool {
 }
 
 // runBaselineHardening runs the baseline hardening script outside the TUI.
-func runBaselineHardening(auto bool) {
+// Always runs interactively - user must select options.
+func runBaselineHardening() {
 	// Format version string - avoid double "v" if version already has it
 	versionStr := version
 	if !strings.HasPrefix(version, "v") {
@@ -134,18 +134,8 @@ func runBaselineHardening(auto bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
 	
-	var result *harden.BaselineResult
-	var err error
-	
-	if auto {
-		// Use all defaults, no prompts
-		cfg := harden.DefaultBaselineConfig()
-		cfg.Interactive = false
-		result, err = harden.RunBaseline(ctx, cfg)
-	} else {
-		// Interactive mode with prompts
-		result, err = harden.RunBaselineInteractive(ctx)
-	}
+	// Always run interactive mode - user must select options
+	result, err := harden.RunBaselineInteractive(ctx)
 	
 	if err != nil {
 		fmt.Printf("\nError: %v\n", err)

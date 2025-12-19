@@ -11,56 +11,61 @@ import (
 )
 
 // runPlatformBaseline applies baseline hardening for the current platform (Linux).
-func runPlatformBaseline(ctx context.Context, cfg BaselineConfig, result *BaselineResult) (*BaselineResult, error) {
+func runPlatformBaseline(ctx context.Context, cfg *BaselineConfig, result *BaselineResult) (*BaselineResult, error) {
 	h := New()
-	
+
 	// Detect distro
 	distro := detectDistro()
 	result.OSVersion = distro
-	fmt.Printf("Detected: %s\n\n", distro)
-	
+	cfg.progress("Detected: %s", distro)
+	cfg.progress("")
+
 	// 1. Password Policy
-	fmt.Println("━━━ Configuring Password Policy ━━━")
+	cfg.progress("━━━ Configuring Password Policy ━━━")
 	applyLinuxPasswordPolicy(ctx, h, cfg, result)
-	
+
 	// 2. Kernel Hardening (sysctl)
-	fmt.Println("\n━━━ Applying Kernel Hardening ━━━")
+	cfg.progress("")
+	cfg.progress("━━━ Applying Kernel Hardening ━━━")
 	applyKernelHardening(ctx, h, cfg, result)
-	
+
 	// 3. IPv6
 	if cfg.DisableIPv6 {
-		fmt.Println("\n━━━ Disabling IPv6 ━━━")
-		disableIPv6(ctx, h, result)
+		cfg.progress("")
+		cfg.progress("━━━ Disabling IPv6 ━━━")
+		disableIPv6(ctx, h, cfg, result)
 	} else {
 		addSkipped(result, "Network", "Disable IPv6", "user chose to keep enabled")
 	}
-	
+
 	// 4. Firewall
 	if cfg.EnableFirewall {
-		fmt.Println("\n━━━ Enabling Firewall ━━━")
-		enableLinuxFirewall(ctx, h, result)
+		cfg.progress("")
+		cfg.progress("━━━ Enabling Firewall ━━━")
+		enableLinuxFirewall(ctx, h, cfg, result)
 	} else {
 		addSkipped(result, "Firewall", "Enable UFW/firewalld", "user chose to skip")
 	}
-	
+
 	// 5. Security Tools
-	fmt.Println("\n━━━ Installing Security Tools ━━━")
+	cfg.progress("")
+	cfg.progress("━━━ Installing Security Tools ━━━")
 
 	if cfg.InstallAuditd {
-		installAuditd(ctx, h, result)
+		installAuditd(ctx, h, cfg, result)
 	} else {
 		addSkipped(result, "Security Tools", "Install auditd", "user chose to skip")
 	}
 
 	if cfg.InstallApparmor {
-		installApparmor(ctx, h, result)
+		installApparmor(ctx, h, cfg, result)
 	} else {
 		addSkipped(result, "Security Tools", "Install AppArmor", "user chose to skip")
 	}
 
 	if cfg.InstallFail2ban && !isServiceRequired(cfg.RequiredServices, "ssh") {
 		// Only install fail2ban if SSH is not a required service that might have specific config
-		installFail2ban(ctx, h, result)
+		installFail2ban(ctx, h, cfg, result)
 	} else if isServiceRequired(cfg.RequiredServices, "ssh") {
 		addSkipped(result, "Security Tools", "Install fail2ban", "SSH is required - configure manually if needed")
 	} else {
@@ -68,62 +73,76 @@ func runPlatformBaseline(ctx context.Context, cfg BaselineConfig, result *Baseli
 	}
 
 	// 6. Service-specific hardening (only if NOT required)
-	fmt.Println("\n━━━ Service Hardening ━━━")
+	cfg.progress("")
+	cfg.progress("━━━ Service Hardening ━━━")
 	hardenLinuxServices(ctx, h, cfg, result)
 
 	// 7. Disable Guest Account
-	fmt.Println("\n━━━ Disabling Guest Account ━━━")
-	disableLinuxGuest(ctx, h, result)
-	
+	cfg.progress("")
+	cfg.progress("━━━ Disabling Guest Account ━━━")
+	disableLinuxGuest(ctx, h, cfg, result)
+
 	// 8. Secure File Permissions
-	fmt.Println("\n━━━ Securing File Permissions ━━━")
-	secureFilePermissions(ctx, h, result)
-	
+	cfg.progress("")
+	cfg.progress("━━━ Securing File Permissions ━━━")
+	secureFilePermissions(ctx, h, cfg, result)
+
 	// 9. Disable Ctrl+Alt+Del
-	fmt.Println("\n━━━ Disabling Ctrl+Alt+Del Reboot ━━━")
-	disableCtrlAltDel(ctx, h, result)
+	cfg.progress("")
+	cfg.progress("━━━ Disabling Ctrl+Alt+Del Reboot ━━━")
+	disableCtrlAltDel(ctx, h, cfg, result)
 
 	// 10. Sudo Hardening
-	fmt.Println("\n━━━ Hardening Sudo Configuration ━━━")
-	hardenSudo(ctx, h, result)
+	cfg.progress("")
+	cfg.progress("━━━ Hardening Sudo Configuration ━━━")
+	hardenSudo(ctx, h, cfg, result)
 
 	// 11. Lock Root Account (if blank password)
-	fmt.Println("\n━━━ Securing Root Account ━━━")
-	secureRootAccount(ctx, h, result)
+	cfg.progress("")
+	cfg.progress("━━━ Securing Root Account ━━━")
+	secureRootAccount(ctx, h, cfg, result)
 
 	// 12. Install ClamAV (if requested)
 	if cfg.InstallClamAV {
-		fmt.Println("\n━━━ Installing ClamAV Antivirus ━━━")
-		installClamAV(ctx, h, result)
+		cfg.progress("")
+		cfg.progress("━━━ Installing ClamAV Antivirus ━━━")
+		installClamAV(ctx, h, cfg, result)
 	}
 
 	// 13. Audit SUID Binaries
-	fmt.Println("\n━━━ Auditing SUID Binaries ━━━")
-	auditSUIDBinaries(ctx, h, result)
+	cfg.progress("")
+	cfg.progress("━━━ Auditing SUID Binaries ━━━")
+	auditSUIDBinaries(ctx, h, cfg, result)
 
 	// 14. Check for Malicious Cron Jobs
-	fmt.Println("\n━━━ Checking Cron Jobs ━━━")
-	auditCronJobs(ctx, h, result)
+	cfg.progress("")
+	cfg.progress("━━━ Checking Cron Jobs ━━━")
+	auditCronJobs(ctx, h, cfg, result)
 
 	// 15. Screen Lock and Timeout Settings
-	fmt.Println("\n━━━ Configuring Screen Lock Settings ━━━")
-	configureScreenLock(ctx, h, result)
+	cfg.progress("")
+	cfg.progress("━━━ Configuring Screen Lock Settings ━━━")
+	configureScreenLock(ctx, h, cfg, result)
 
 	// 16. GDM/Display Manager Hardening
-	fmt.Println("\n━━━ Hardening Display Manager ━━━")
+	cfg.progress("")
+	cfg.progress("━━━ Hardening Display Manager ━━━")
 	hardenDisplayManager(ctx, h, cfg, result)
 
 	// 17. Process Limits
-	fmt.Println("\n━━━ Setting Process Limits ━━━")
-	setProcessLimits(ctx, h, result)
+	cfg.progress("")
+	cfg.progress("━━━ Setting Process Limits ━━━")
+	setProcessLimits(ctx, h, cfg, result)
 
 	// 18. GRUB Permissions
-	fmt.Println("\n━━━ Securing GRUB Configuration ━━━")
-	secureGrubPermissions(ctx, h, result)
+	cfg.progress("")
+	cfg.progress("━━━ Securing GRUB Configuration ━━━")
+	secureGrubPermissions(ctx, h, cfg, result)
 
 	// 19. User Password Management (if requested)
 	if cfg.SetUserPasswords {
-		fmt.Println("\n━━━ Setting User Passwords ━━━")
+		cfg.progress("")
+		cfg.progress("━━━ Setting User Passwords ━━━")
 		setAllUserPasswords(ctx, h, cfg, result)
 	} else {
 		addSkipped(result, "User Passwords", "Set standard password for all users", "user chose to skip")
@@ -131,13 +150,14 @@ func runPlatformBaseline(ctx context.Context, cfg BaselineConfig, result *Baseli
 
 	// 20. System Updates (if requested)
 	if cfg.RunUpdates {
-		fmt.Println("\n━━━ Running System Updates (this may take a while...) ━━━")
-		runLinuxUpdates(ctx, h, result, cfg.ThirdPartyRepoAction)
+		cfg.progress("")
+		cfg.progress("━━━ Running System Updates (this may take a while...) ━━━")
+		runLinuxUpdates(ctx, h, cfg, result)
 	} else {
 		addSkipped(result, "Updates", "System updates", "user chose to skip (run manually: sudo apt update && sudo apt upgrade -y)")
 	}
 
-	result.PrintResults()
+	result.PrintResults(cfg.ProgressCallback)
 	return result, nil
 }
 
@@ -158,7 +178,7 @@ func detectDistro() string {
 	return "Linux"
 }
 
-func applyLinuxPasswordPolicy(ctx context.Context, h *Hardener, cfg BaselineConfig, result *BaselineResult) {
+func applyLinuxPasswordPolicy(ctx context.Context, h *Hardener, cfg *BaselineConfig, result *BaselineResult) {
 	// 1. Configure login.defs
 	loginDefsContent := fmt.Sprintf(`# Configured by IronGuard baseline hardening
 PASS_MAX_DAYS   %d
@@ -169,7 +189,7 @@ LOG_UNKFAIL_ENAB YES
 SYSLOG_SU_ENAB  YES
 SYSLOG_SG_ENAB  YES
 `, cfg.MaxPasswordAge, cfg.MinPasswordAge, cfg.PasswordWarnAge)
-	
+
 	// Backup and update login.defs
 	_, err := h.runBashSingle(ctx, "cp /etc/login.defs /etc/login.defs.bak 2>/dev/null")
 	if err == nil {
@@ -183,13 +203,13 @@ grep -q "^LOG_UNKFAIL_ENAB" /etc/login.defs || echo "LOG_UNKFAIL_ENAB YES" >> /e
 `, cfg.MaxPasswordAge, cfg.MinPasswordAge, cfg.PasswordWarnAge)
 		_, err = h.runBashSingle(ctx, script)
 	}
-	
+
 	if err != nil {
 		addResult(result, "Password Policy", "Configure /etc/login.defs", false, "", err.Error())
 	} else {
-		addResult(result, "Password Policy", fmt.Sprintf("Set PASS_MAX_DAYS=%d, MIN=%d, WARN=%d", 
+		addResult(result, "Password Policy", fmt.Sprintf("Set PASS_MAX_DAYS=%d, MIN=%d, WARN=%d",
 			cfg.MaxPasswordAge, cfg.MinPasswordAge, cfg.PasswordWarnAge), true, "", "")
-		fmt.Printf("  ✓ login.defs configured\n")
+		cfg.progress("  ✓ login.defs configured")
 	}
 	
 	// 2. Install and configure PAM pwquality
@@ -212,7 +232,7 @@ enforce_for_root
 		addResult(result, "Password Policy", "Configure pwquality.conf", false, "", err.Error())
 	} else {
 		addResult(result, "Password Policy", fmt.Sprintf("Set minimum password length=%d with complexity", cfg.MinPasswordLen), true, "", "")
-		fmt.Printf("  ✓ pwquality.conf configured (minlen=%d, complexity enabled)\n", cfg.MinPasswordLen)
+		cfg.progress("  ✓ pwquality.conf configured (minlen=%d, complexity enabled)", cfg.MinPasswordLen)
 	}
 	
 	// 3. Configure PAM to remember passwords
@@ -236,9 +256,9 @@ fi
 		addResult(result, "Password Policy", "Configure PAM password history", false, "", err.Error())
 	} else {
 		addResult(result, "Password Policy", "Set password history=24, removed nullok", true, "", "")
-		fmt.Printf("  ✓ PAM configured (history=24, nullok removed)\n")
+		cfg.progress("  ✓ PAM configured (history=24, nullok removed)")
 	}
-	
+
 	// 4. Configure account lockout
 	lockoutScript := `
 # Add account lockout to PAM
@@ -252,13 +272,13 @@ fi
 		addResult(result, "Password Policy", "Configure account lockout", false, "", err.Error())
 	} else {
 		addResult(result, "Password Policy", "Set account lockout (5 attempts, 30 min)", true, "", "")
-		fmt.Printf("  ✓ Account lockout configured (5 attempts, 30 min lockout)\n")
+		cfg.progress("  ✓ Account lockout configured (5 attempts, 30 min lockout)")
 	}
-	
+
 	_ = loginDefsContent // Used for documentation
 }
 
-func applyKernelHardening(ctx context.Context, h *Hardener, cfg BaselineConfig, result *BaselineResult) {
+func applyKernelHardening(ctx context.Context, h *Hardener, cfg *BaselineConfig, result *BaselineResult) {
 	sysctlContent := `# IronGuard Kernel Hardening
 # Network security
 net.ipv4.tcp_syncookies = 1
@@ -300,19 +320,19 @@ fs.protected_symlinks = 1
 		return
 	}
 	addResult(result, "Kernel", "Created /etc/sysctl.d/99-ironguard-hardening.conf", true, "", "")
-	fmt.Printf("  ✓ Created sysctl hardening config\n")
-	
+	cfg.progress("  ✓ Created sysctl hardening config")
+
 	// Apply sysctl settings
 	_, err = h.runBashSingle(ctx, "sysctl --system")
 	if err != nil {
 		addResult(result, "Kernel", "Apply sysctl settings", false, "", err.Error())
 	} else {
 		addResult(result, "Kernel", "Applied kernel hardening (syncookies, rp_filter, ASLR, etc.)", true, "", "")
-		fmt.Printf("  ✓ Applied sysctl settings\n")
+		cfg.progress("  ✓ Applied sysctl settings")
 	}
 }
 
-func disableIPv6(ctx context.Context, h *Hardener, result *BaselineResult) {
+func disableIPv6(ctx context.Context, h *Hardener, cfg *BaselineConfig, result *BaselineResult) {
 	ipv6Config := `# Disable IPv6 - IronGuard
 net.ipv6.conf.all.disable_ipv6 = 1
 net.ipv6.conf.default.disable_ipv6 = 1
@@ -323,17 +343,17 @@ net.ipv6.conf.lo.disable_ipv6 = 1
 		addResult(result, "Network", "Disable IPv6", false, "", err.Error())
 		return
 	}
-	
+
 	_, err = h.runBashSingle(ctx, "sysctl --system")
 	if err != nil {
 		addResult(result, "Network", "Apply IPv6 disable", false, "", err.Error())
 	} else {
 		addResult(result, "Network", "Disabled IPv6", true, "", "")
-		fmt.Printf("  ✓ IPv6 disabled\n")
+		cfg.progress("  ✓ IPv6 disabled")
 	}
 }
 
-func enableLinuxFirewall(ctx context.Context, h *Hardener, result *BaselineResult) {
+func enableLinuxFirewall(ctx context.Context, h *Hardener, cfg *BaselineConfig, result *BaselineResult) {
 	// Try UFW first (Ubuntu/Debian), then firewalld (RHEL/Fedora)
 	_, err := h.runBashSingle(ctx, `
 		if command -v ufw &>/dev/null; then
@@ -349,16 +369,16 @@ func enableLinuxFirewall(ctx context.Context, h *Hardener, result *BaselineResul
 			apt-get install -y ufw && ufw --force enable && ufw default deny incoming && ufw default allow outgoing
 		fi
 	`)
-	
+
 	if err != nil {
 		addResult(result, "Firewall", "Enable firewall", false, "", err.Error())
 	} else {
 		addResult(result, "Firewall", "Enabled UFW/firewalld with default deny incoming", true, "", "")
-		fmt.Printf("  ✓ Firewall enabled\n")
+		cfg.progress("  ✓ Firewall enabled")
 	}
 }
 
-func installAuditd(ctx context.Context, h *Hardener, result *BaselineResult) {
+func installAuditd(ctx context.Context, h *Hardener, cfg *BaselineConfig, result *BaselineResult) {
 	script := `
 		apt-get install -y auditd audispd-plugins 2>/dev/null || \
 		dnf install -y audit 2>/dev/null || \
@@ -381,17 +401,17 @@ func installAuditd(ctx context.Context, h *Hardener, result *BaselineResult) {
 EOF
 		augenrules --load 2>/dev/null || service auditd restart
 	`
-	
+
 	_, err := h.runBashSingle(ctx, script)
 	if err != nil {
 		addResult(result, "Security Tools", "Install/configure auditd", false, "", err.Error())
 	} else {
 		addResult(result, "Security Tools", "Installed auditd with identity and sudoers monitoring", true, "", "")
-		fmt.Printf("  ✓ auditd installed and configured\n")
+		cfg.progress("  ✓ auditd installed and configured")
 	}
 }
 
-func installApparmor(ctx context.Context, h *Hardener, result *BaselineResult) {
+func installApparmor(ctx context.Context, h *Hardener, cfg *BaselineConfig, result *BaselineResult) {
 	script := `
 		apt-get install -y apparmor apparmor-utils 2>/dev/null || \
 		dnf install -y apparmor 2>/dev/null
@@ -402,17 +422,17 @@ func installApparmor(ctx context.Context, h *Hardener, result *BaselineResult) {
 		# Enforce all profiles
 		aa-enforce /etc/apparmor.d/* 2>/dev/null || true
 	`
-	
+
 	_, err := h.runBashSingle(ctx, script)
 	if err != nil {
 		addResult(result, "Security Tools", "Install/configure AppArmor", false, "", err.Error())
 	} else {
 		addResult(result, "Security Tools", "Installed AppArmor and enforced profiles", true, "", "")
-		fmt.Printf("  ✓ AppArmor installed and enforced\n")
+		cfg.progress("  ✓ AppArmor installed and enforced")
 	}
 }
 
-func installFail2ban(ctx context.Context, h *Hardener, result *BaselineResult) {
+func installFail2ban(ctx context.Context, h *Hardener, cfg *BaselineConfig, result *BaselineResult) {
 	script := `
 		apt-get install -y fail2ban 2>/dev/null || \
 		dnf install -y fail2ban 2>/dev/null || \
@@ -436,17 +456,17 @@ EOF
 		systemctl enable fail2ban
 		systemctl restart fail2ban
 	`
-	
+
 	_, err := h.runBashSingle(ctx, script)
 	if err != nil {
 		addResult(result, "Security Tools", "Install/configure fail2ban", false, "", err.Error())
 	} else {
 		addResult(result, "Security Tools", "Installed fail2ban with SSH protection", true, "", "")
-		fmt.Printf("  ✓ fail2ban installed and configured\n")
+		cfg.progress("  ✓ fail2ban installed and configured")
 	}
 }
 
-func disableLinuxGuest(ctx context.Context, h *Hardener, result *BaselineResult) {
+func disableLinuxGuest(ctx context.Context, h *Hardener, cfg *BaselineConfig, result *BaselineResult) {
 	script := `
 		# Disable guest account in LightDM
 		if [ -d /etc/lightdm ]; then
@@ -468,17 +488,17 @@ EOF
 		passwd -l guest 2>/dev/null || true
 		usermod -L guest 2>/dev/null || true
 	`
-	
+
 	_, err := h.runBashSingle(ctx, script)
 	if err != nil {
 		addResult(result, "Guest Account", "Disable guest account", false, "", err.Error())
 	} else {
 		addResult(result, "Guest Account", "Disabled guest in LightDM/GDM, locked account", true, "", "")
-		fmt.Printf("  ✓ Guest account disabled\n")
+		cfg.progress("  ✓ Guest account disabled")
 	}
 }
 
-func secureFilePermissions(ctx context.Context, h *Hardener, result *BaselineResult) {
+func secureFilePermissions(ctx context.Context, h *Hardener, cfg *BaselineConfig, result *BaselineResult) {
 	script := `
 		# Secure critical files
 		chmod 644 /etc/passwd
@@ -496,215 +516,215 @@ func secureFilePermissions(ctx context.Context, h *Hardener, result *BaselineRes
 		chmod 700 /etc/cron.monthly 2>/dev/null
 		chmod 600 /etc/crontab 2>/dev/null
 	`
-	
+
 	_, err := h.runBashSingle(ctx, script)
 	if err != nil {
 		addResult(result, "File Permissions", "Secure critical file permissions", false, "", err.Error())
 	} else {
 		addResult(result, "File Permissions", "Secured /etc/passwd, shadow, group, cron dirs", true, "", "")
-		fmt.Printf("  ✓ File permissions secured\n")
+		cfg.progress("  ✓ File permissions secured")
 	}
 }
 
-func disableCtrlAltDel(ctx context.Context, h *Hardener, result *BaselineResult) {
+func disableCtrlAltDel(ctx context.Context, h *Hardener, cfg *BaselineConfig, result *BaselineResult) {
 	_, err := h.runBashSingle(ctx, "systemctl mask ctrl-alt-del.target")
 	if err != nil {
 		addResult(result, "System", "Disable Ctrl+Alt+Del", false, "", err.Error())
 	} else {
 		addResult(result, "System", "Disabled Ctrl+Alt+Del reboot", true, "", "")
-		fmt.Printf("  ✓ Ctrl+Alt+Del disabled\n")
+		cfg.progress("  ✓ Ctrl+Alt+Del disabled")
 	}
 }
 
 // hardenLinuxServices hardens services that are NOT required.
-func hardenLinuxServices(ctx context.Context, h *Hardener, cfg BaselineConfig, result *BaselineResult) {
+func hardenLinuxServices(ctx context.Context, h *Hardener, cfg *BaselineConfig, result *BaselineResult) {
 	// SSH hardening (if not required)
 	if !isServiceRequired(cfg.RequiredServices, "ssh") {
-		hardenOrDisableSSH(ctx, h, result)
+		hardenOrDisableSSH(ctx, h, cfg, result)
 	} else {
 		addSkipped(result, "Services", "SSH hardening", "marked as required")
-		fmt.Printf("  ⊘ SSH skipped (required)\n")
+		cfg.progress("  ⊘ SSH skipped (required)")
 	}
 
 	// Apache/httpd (if not required) - handles both Debian and RHEL naming
 	if !isServiceRequired(cfg.RequiredServices, "apache") {
 		// Try both service names - apache2 (Debian/Ubuntu) and httpd (RHEL/CentOS)
-		disableServiceIfExists(ctx, h, result, "apache2", "Apache2 Web Server")
-		disableServiceIfExists(ctx, h, result, "httpd", "Apache httpd Web Server")
+		disableServiceIfExists(ctx, h, cfg, result, "apache2", "Apache2 Web Server")
+		disableServiceIfExists(ctx, h, cfg, result, "httpd", "Apache httpd Web Server")
 	} else {
 		addSkipped(result, "Services", "Apache/httpd", "marked as required")
-		fmt.Printf("  ⊘ Apache skipped (required)\n")
+		cfg.progress("  ⊘ Apache skipped (required)")
 	}
 
 	// Nginx (if not required)
 	if !isServiceRequired(cfg.RequiredServices, "nginx") {
-		disableServiceIfExists(ctx, h, result, "nginx", "Nginx Web Server")
+		disableServiceIfExists(ctx, h, cfg, result, "nginx", "Nginx Web Server")
 	} else {
 		addSkipped(result, "Services", "Nginx", "marked as required")
 	}
 
 	// MySQL (if not required)
 	if !isServiceRequired(cfg.RequiredServices, "mysql") {
-		disableServiceIfExists(ctx, h, result, "mysql", "MySQL Server")
-		disableServiceIfExists(ctx, h, result, "mysqld", "MySQL Server (mysqld)")
+		disableServiceIfExists(ctx, h, cfg, result, "mysql", "MySQL Server")
+		disableServiceIfExists(ctx, h, cfg, result, "mysqld", "MySQL Server (mysqld)")
 	} else {
 		addSkipped(result, "Services", "MySQL", "marked as required")
 	}
 
 	// MariaDB (if not required)
 	if !isServiceRequired(cfg.RequiredServices, "mariadb") {
-		disableServiceIfExists(ctx, h, result, "mariadb", "MariaDB Server")
+		disableServiceIfExists(ctx, h, cfg, result, "mariadb", "MariaDB Server")
 	} else {
 		addSkipped(result, "Services", "MariaDB", "marked as required")
 	}
 
 	// PostgreSQL (if not required)
 	if !isServiceRequired(cfg.RequiredServices, "postgresql") {
-		disableServiceIfExists(ctx, h, result, "postgresql", "PostgreSQL Server")
+		disableServiceIfExists(ctx, h, cfg, result, "postgresql", "PostgreSQL Server")
 	} else {
 		addSkipped(result, "Services", "PostgreSQL", "marked as required")
 	}
 
 	// SMB/Samba (if not required)
 	if !isServiceRequired(cfg.RequiredServices, "samba") {
-		disableServiceIfExists(ctx, h, result, "smbd", "Samba SMB")
-		disableServiceIfExists(ctx, h, result, "nmbd", "Samba NetBIOS")
+		disableServiceIfExists(ctx, h, cfg, result, "smbd", "Samba SMB")
+		disableServiceIfExists(ctx, h, cfg, result, "nmbd", "Samba NetBIOS")
 	} else {
 		addSkipped(result, "Services", "Samba hardening", "marked as required")
 	}
 
 	// FTP (if not required)
 	if !isServiceRequired(cfg.RequiredServices, "ftp") {
-		disableServiceIfExists(ctx, h, result, "vsftpd", "FTP Server (vsftpd)")
-		disableServiceIfExists(ctx, h, result, "proftpd", "FTP Server (ProFTPD)")
-		disableServiceIfExists(ctx, h, result, "pure-ftpd", "FTP Server (Pure-FTPd)")
+		disableServiceIfExists(ctx, h, cfg, result, "vsftpd", "FTP Server (vsftpd)")
+		disableServiceIfExists(ctx, h, cfg, result, "proftpd", "FTP Server (ProFTPD)")
+		disableServiceIfExists(ctx, h, cfg, result, "pure-ftpd", "FTP Server (Pure-FTPd)")
 	} else {
 		addSkipped(result, "Services", "FTP hardening", "marked as required")
 	}
 
 	// NFS (if not required)
 	if !isServiceRequired(cfg.RequiredServices, "nfs") {
-		disableServiceIfExists(ctx, h, result, "nfs-server", "NFS Server")
-		disableServiceIfExists(ctx, h, result, "nfs-kernel-server", "NFS Kernel Server")
-		disableServiceIfExists(ctx, h, result, "rpcbind", "RPC Bind")
+		disableServiceIfExists(ctx, h, cfg, result, "nfs-server", "NFS Server")
+		disableServiceIfExists(ctx, h, cfg, result, "nfs-kernel-server", "NFS Kernel Server")
+		disableServiceIfExists(ctx, h, cfg, result, "rpcbind", "RPC Bind")
 	} else {
 		addSkipped(result, "Services", "NFS hardening", "marked as required")
 	}
 
 	// DNS/BIND (if not required)
 	if !isServiceRequired(cfg.RequiredServices, "dns") {
-		disableServiceIfExists(ctx, h, result, "named", "BIND DNS (named)")
-		disableServiceIfExists(ctx, h, result, "bind9", "BIND9 DNS")
+		disableServiceIfExists(ctx, h, cfg, result, "named", "BIND DNS (named)")
+		disableServiceIfExists(ctx, h, cfg, result, "bind9", "BIND9 DNS")
 	} else {
 		addSkipped(result, "Services", "DNS/BIND", "marked as required")
 	}
 
 	// Mail servers (if not required)
 	if !isServiceRequired(cfg.RequiredServices, "mail") {
-		disableServiceIfExists(ctx, h, result, "postfix", "Postfix Mail")
-		disableServiceIfExists(ctx, h, result, "dovecot", "Dovecot IMAP/POP3")
-		disableServiceIfExists(ctx, h, result, "sendmail", "Sendmail")
-		disableServiceIfExists(ctx, h, result, "exim4", "Exim Mail")
+		disableServiceIfExists(ctx, h, cfg, result, "postfix", "Postfix Mail")
+		disableServiceIfExists(ctx, h, cfg, result, "dovecot", "Dovecot IMAP/POP3")
+		disableServiceIfExists(ctx, h, cfg, result, "sendmail", "Sendmail")
+		disableServiceIfExists(ctx, h, cfg, result, "exim4", "Exim Mail")
 	} else {
 		addSkipped(result, "Services", "Mail servers", "marked as required")
 	}
 
 	// Docker (if not required)
 	if !isServiceRequired(cfg.RequiredServices, "docker") {
-		disableServiceIfExists(ctx, h, result, "docker", "Docker")
-		disableServiceIfExists(ctx, h, result, "containerd", "containerd")
+		disableServiceIfExists(ctx, h, cfg, result, "docker", "Docker")
+		disableServiceIfExists(ctx, h, cfg, result, "containerd", "containerd")
 	} else {
 		addSkipped(result, "Services", "Docker", "marked as required")
 	}
 
 	// MongoDB (if not required)
 	if !isServiceRequired(cfg.RequiredServices, "mongodb") {
-		disableServiceIfExists(ctx, h, result, "mongod", "MongoDB")
+		disableServiceIfExists(ctx, h, cfg, result, "mongod", "MongoDB")
 	} else {
 		addSkipped(result, "Services", "MongoDB", "marked as required")
 	}
 
 	// Redis (if not required)
 	if !isServiceRequired(cfg.RequiredServices, "redis") {
-		disableServiceIfExists(ctx, h, result, "redis-server", "Redis Server")
-		disableServiceIfExists(ctx, h, result, "redis", "Redis")
+		disableServiceIfExists(ctx, h, cfg, result, "redis-server", "Redis Server")
+		disableServiceIfExists(ctx, h, cfg, result, "redis", "Redis")
 	} else {
 		addSkipped(result, "Services", "Redis", "marked as required")
 	}
 
 	// VNC (if not required)
 	if !isServiceRequired(cfg.RequiredServices, "vnc") {
-		disableServiceIfExists(ctx, h, result, "vncserver", "VNC Server")
-		disableServiceIfExists(ctx, h, result, "x11vnc", "X11 VNC")
-		disableServiceIfExists(ctx, h, result, "tigervnc", "TigerVNC")
+		disableServiceIfExists(ctx, h, cfg, result, "vncserver", "VNC Server")
+		disableServiceIfExists(ctx, h, cfg, result, "x11vnc", "X11 VNC")
+		disableServiceIfExists(ctx, h, cfg, result, "tigervnc", "TigerVNC")
 	} else {
 		addSkipped(result, "Services", "VNC hardening", "marked as required")
 	}
 
 	// XRDP (if not required)
 	if !isServiceRequired(cfg.RequiredServices, "xrdp") {
-		disableServiceIfExists(ctx, h, result, "xrdp", "XRDP Remote Desktop")
+		disableServiceIfExists(ctx, h, cfg, result, "xrdp", "XRDP Remote Desktop")
 	} else {
 		addSkipped(result, "Services", "XRDP", "marked as required")
 	}
 
 	// Tomcat (if not required)
 	if !isServiceRequired(cfg.RequiredServices, "tomcat") {
-		disableServiceIfExists(ctx, h, result, "tomcat", "Apache Tomcat")
-		disableServiceIfExists(ctx, h, result, "tomcat9", "Tomcat 9")
-		disableServiceIfExists(ctx, h, result, "tomcat8", "Tomcat 8")
+		disableServiceIfExists(ctx, h, cfg, result, "tomcat", "Apache Tomcat")
+		disableServiceIfExists(ctx, h, cfg, result, "tomcat9", "Tomcat 9")
+		disableServiceIfExists(ctx, h, cfg, result, "tomcat8", "Tomcat 8")
 	} else {
 		addSkipped(result, "Services", "Tomcat", "marked as required")
 	}
 
 	// Squid proxy (if not required)
 	if !isServiceRequired(cfg.RequiredServices, "squid") {
-		disableServiceIfExists(ctx, h, result, "squid", "Squid Proxy")
+		disableServiceIfExists(ctx, h, cfg, result, "squid", "Squid Proxy")
 	} else {
 		addSkipped(result, "Services", "Squid", "marked as required")
 	}
 
 	// OpenVPN (if not required)
 	if !isServiceRequired(cfg.RequiredServices, "openvpn") {
-		disableServiceIfExists(ctx, h, result, "openvpn", "OpenVPN")
+		disableServiceIfExists(ctx, h, cfg, result, "openvpn", "OpenVPN")
 	} else {
 		addSkipped(result, "Services", "OpenVPN", "marked as required")
 	}
 
 	// LDAP (if not required)
 	if !isServiceRequired(cfg.RequiredServices, "ldap") {
-		disableServiceIfExists(ctx, h, result, "slapd", "OpenLDAP Server")
+		disableServiceIfExists(ctx, h, cfg, result, "slapd", "OpenLDAP Server")
 	} else {
 		addSkipped(result, "Services", "LDAP", "marked as required")
 	}
 
 	// Telnet (almost never required in CyberPatriot)
 	if !isServiceRequired(cfg.RequiredServices, "telnet") {
-		disableServiceIfExists(ctx, h, result, "telnetd", "Telnet Server")
-		disableServiceIfExists(ctx, h, result, "inetd", "inetd")
-		disableServiceIfExists(ctx, h, result, "xinetd", "xinetd")
+		disableServiceIfExists(ctx, h, cfg, result, "telnetd", "Telnet Server")
+		disableServiceIfExists(ctx, h, cfg, result, "inetd", "inetd")
+		disableServiceIfExists(ctx, h, cfg, result, "xinetd", "xinetd")
 	}
 
 	// CUPS (if not required)
 	if !isServiceRequired(cfg.RequiredServices, "cups") {
-		disableServiceIfExists(ctx, h, result, "cups", "CUPS Printing")
-		disableServiceIfExists(ctx, h, result, "cups-browsed", "CUPS Browsed")
+		disableServiceIfExists(ctx, h, cfg, result, "cups", "CUPS Printing")
+		disableServiceIfExists(ctx, h, cfg, result, "cups-browsed", "CUPS Browsed")
 	} else {
 		addSkipped(result, "Services", "CUPS", "marked as required")
 	}
 
 	// Always disable these (security risks, rarely needed)
-	disableServiceIfExists(ctx, h, result, "avahi-daemon", "Avahi mDNS")
-	disableServiceIfExists(ctx, h, result, "rsh-server", "RSH Server")
-	disableServiceIfExists(ctx, h, result, "rlogin", "rlogin")
-	disableServiceIfExists(ctx, h, result, "rexec", "rexec")
-	disableServiceIfExists(ctx, h, result, "talk", "talk")
-	disableServiceIfExists(ctx, h, result, "ntalk", "ntalk")
-	disableServiceIfExists(ctx, h, result, "tftp", "TFTP Server")
+	disableServiceIfExists(ctx, h, cfg, result, "avahi-daemon", "Avahi mDNS")
+	disableServiceIfExists(ctx, h, cfg, result, "rsh-server", "RSH Server")
+	disableServiceIfExists(ctx, h, cfg, result, "rlogin", "rlogin")
+	disableServiceIfExists(ctx, h, cfg, result, "rexec", "rexec")
+	disableServiceIfExists(ctx, h, cfg, result, "talk", "talk")
+	disableServiceIfExists(ctx, h, cfg, result, "ntalk", "ntalk")
+	disableServiceIfExists(ctx, h, cfg, result, "tftp", "TFTP Server")
 }
 
 // hardenOrDisableSSH hardens SSH if installed, disables if not required.
-func hardenOrDisableSSH(ctx context.Context, h *Hardener, result *BaselineResult) {
+func hardenOrDisableSSH(ctx context.Context, h *Hardener, cfg *BaselineConfig, result *BaselineResult) {
 	// Check if SSH is installed
 	_, err := exec.LookPath("sshd")
 	if err != nil {
@@ -736,12 +756,12 @@ func hardenOrDisableSSH(ctx context.Context, h *Hardener, result *BaselineResult
 		addResult(result, "Services", "Harden SSH (not required, securing)", false, "", err.Error())
 	} else {
 		addResult(result, "Services", "SSH hardened (PermitRootLogin=no, X11=no, etc.)", true, "", "")
-		fmt.Printf("  ✓ SSH hardened\n")
+		cfg.progress("  ✓ SSH hardened")
 	}
 }
 
 // disableServiceIfExists disables a service if it exists.
-func disableServiceIfExists(ctx context.Context, h *Hardener, result *BaselineResult, service, description string) {
+func disableServiceIfExists(ctx context.Context, h *Hardener, cfg *BaselineConfig, result *BaselineResult, service, description string) {
 	// Check if service exists using multiple methods for reliability
 	// Method 1: Check unit files (catches enabled/disabled services)
 	// Method 2: Check if service is known to systemd at all
@@ -750,7 +770,7 @@ func disableServiceIfExists(ctx context.Context, h *Hardener, result *BaselineRe
 		systemctl status '%s' 2>/dev/null | grep -q 'Loaded:' || \
 		test -f /etc/init.d/%s
 	`, service, service, service, service)
-	
+
 	_, err := h.runBashSingle(ctx, checkScript)
 	if err != nil {
 		// Service doesn't exist anywhere
@@ -772,18 +792,18 @@ func disableServiceIfExists(ctx context.Context, h *Hardener, result *BaselineRe
 		fi
 		exit 0
 	`, service, service, service, service, service, service, service, service)
-	
+
 	_, err = h.runBashSingle(ctx, script)
 	if err != nil {
 		addResult(result, "Services", fmt.Sprintf("Disable %s", description), false, "", err.Error())
 	} else {
 		addResult(result, "Services", fmt.Sprintf("Disabled %s", description), true, "", "")
-		fmt.Printf("  ✓ Disabled %s\n", description)
+		cfg.progress("  ✓ Disabled %s", description)
 	}
 }
 
 // hardenSudo configures sudo securely.
-func hardenSudo(ctx context.Context, h *Hardener, result *BaselineResult) {
+func hardenSudo(ctx context.Context, h *Hardener, cfg *BaselineConfig, result *BaselineResult) {
 	// First, remove NOPASSWD and !authenticate from all sudoers files
 	removeInsecureScript := `
 REMOVED=0
@@ -836,10 +856,10 @@ echo "REMOVED_COUNT=$REMOVED"
 		addResult(result, "Sudo", "Remove NOPASSWD/!authenticate", false, "", err.Error())
 	} else if strings.Contains(output, "RESTORED_BACKUP") {
 		addResult(result, "Sudo", "Remove NOPASSWD/!authenticate", false, "", "Had to restore backup - manual review needed")
-		fmt.Printf("  ⚠ Sudoers changes caused syntax error - restored backup\n")
+		cfg.progress("  ⚠ Sudoers changes caused syntax error - restored backup")
 	} else {
 		addResult(result, "Sudo", "Removed NOPASSWD and !authenticate from sudoers", true, "", "")
-		fmt.Printf("  ✓ NOPASSWD and !authenticate removed (sudo will require password)\n")
+		cfg.progress("  ✓ NOPASSWD and !authenticate removed (sudo will require password)")
 	}
 
 	// Now add our secure defaults
@@ -873,12 +893,12 @@ visudo -c -f /etc/sudoers.d/99-ironguard-hardening 2>/dev/null || rm /etc/sudoer
 		addResult(result, "Sudo", "Harden sudo configuration", false, "", err.Error())
 	} else {
 		addResult(result, "Sudo", "Enabled env_reset, authenticate, disabled coredumps, added logging", true, "", "")
-		fmt.Printf("  ✓ Sudo hardened (env_reset, authenticate required, no coredumps, logging)\n")
+		cfg.progress("  ✓ Sudo hardened (env_reset, authenticate required, no coredumps, logging)")
 	}
 }
 
 // secureRootAccount ensures root account is properly secured.
-func secureRootAccount(ctx context.Context, h *Hardener, result *BaselineResult) {
+func secureRootAccount(ctx context.Context, h *Hardener, cfg *BaselineConfig, result *BaselineResult) {
 	script := `
 # Check if root has blank password and lock it
 ROOT_HASH=$(getent shadow root | cut -d: -f2)
@@ -915,16 +935,16 @@ fi
 	} else {
 		if strings.Contains(output, "locked") {
 			addResult(result, "Root Account", "Locked root account (was blank/invalid)", true, "", "")
-			fmt.Printf("  ✓ Root account locked\n")
+			cfg.progress("  ✓ Root account locked")
 		} else {
 			addResult(result, "Root Account", "Root account has password, disabled greeter login", true, "", "")
-			fmt.Printf("  ✓ Root greeter login disabled\n")
+			cfg.progress("  ✓ Root greeter login disabled")
 		}
 	}
 }
 
 // installClamAV installs and configures ClamAV antivirus.
-func installClamAV(ctx context.Context, h *Hardener, result *BaselineResult) {
+func installClamAV(ctx context.Context, h *Hardener, cfg *BaselineConfig, result *BaselineResult) {
 	script := `
 # Install ClamAV
 apt-get install -y clamav clamav-daemon 2>/dev/null || \
@@ -950,12 +970,12 @@ systemctl start clamav-freshclam 2>/dev/null
 		addResult(result, "Antivirus", "Install ClamAV", false, "", err.Error())
 	} else {
 		addResult(result, "Antivirus", "Installed ClamAV, updating virus definitions", true, "", "")
-		fmt.Printf("  ✓ ClamAV installed (definitions updating in background)\n")
+		cfg.progress("  ✓ ClamAV installed (definitions updating in background)")
 	}
 }
 
 // auditSUIDBinaries checks for potentially dangerous SUID binaries.
-func auditSUIDBinaries(ctx context.Context, h *Hardener, result *BaselineResult) {
+func auditSUIDBinaries(ctx context.Context, h *Hardener, cfg *BaselineConfig, result *BaselineResult) {
 	// These are commonly exploited SUID binaries that shouldn't have SUID in most cases
 	script := `
 # Check for dangerous SUID bits and remove them
@@ -984,16 +1004,16 @@ find /usr -type f -perm -4000 2>/dev/null | head -20
 	} else {
 		if strings.Contains(output, "Removed SUID") {
 			addResult(result, "SUID Audit", "Removed dangerous SUID bits (date, editors, scripting languages)", true, "", "")
-			fmt.Printf("  ✓ Removed dangerous SUID bits\n")
+			cfg.progress("  ✓ Removed dangerous SUID bits")
 		} else {
 			addResult(result, "SUID Audit", "No dangerous SUID binaries found", true, "", "")
-			fmt.Printf("  ✓ SUID binaries audited (none dangerous)\n")
+			cfg.progress("  ✓ SUID binaries audited (none dangerous)")
 		}
 	}
 }
 
 // auditCronJobs checks for suspicious cron jobs.
-func auditCronJobs(ctx context.Context, h *Hardener, result *BaselineResult) {
+func auditCronJobs(ctx context.Context, h *Hardener, cfg *BaselineConfig, result *BaselineResult) {
 	script := `
 SUSPICIOUS=0
 
@@ -1037,21 +1057,21 @@ echo "TOTAL_SUSPICIOUS=$SUSPICIOUS"
 			lines := strings.Split(output, "\n")
 			for _, line := range lines {
 				if strings.HasPrefix(line, "SUSPICIOUS:") {
-					fmt.Printf("  ⚠ %s\n", line)
+					cfg.progress("  ⚠ %s", line)
 				}
 			}
 			addResult(result, "Cron Audit", "Found suspicious cron/startup scripts - MANUAL REVIEW NEEDED", false, "", "Review the files listed above for backdoors")
 		} else {
 			addResult(result, "Cron Audit", "No obviously suspicious cron jobs found", true, "", "")
-			fmt.Printf("  ✓ Cron jobs audited (no obvious backdoors)\n")
+			cfg.progress("  ✓ Cron jobs audited (no obvious backdoors)")
 		}
 	}
 }
 
 // verifyAndFixAptSources ensures apt sources are correctly configured before updates.
 // thirdPartyAction: "keep" = allow and keep, "remove" = delete files, "disable" = comment out
-func verifyAndFixAptSources(ctx context.Context, h *Hardener, result *BaselineResult, thirdPartyAction string) {
-	fmt.Println("  Verifying apt sources...")
+func verifyAndFixAptSources(ctx context.Context, h *Hardener, cfg *BaselineConfig, result *BaselineResult, thirdPartyAction string) {
+	cfg.progress("  Verifying apt sources...")
 
 	// Script to check and fix apt sources
 	script := `
@@ -1158,13 +1178,13 @@ fi
 	output, err := h.runBashSingle(ctx, script)
 	if err != nil {
 		addResult(result, "APT Sources", "Verify apt sources", false, "", err.Error())
-		fmt.Printf("  ✗ Failed to verify apt sources: %s\n", err.Error())
+		cfg.progress("  ✗ Failed to verify apt sources: %s", err.Error())
 		return
 	}
 
 	if strings.Contains(output, "SOURCES_OK") && !strings.Contains(output, "SOURCES_FIXED") {
 		addResult(result, "APT Sources", "Apt sources verified - no changes needed", true, "", "")
-		fmt.Printf("  ✓ Apt sources verified (no changes needed)\n")
+		cfg.progress("  ✓ Apt sources verified (no changes needed)")
 	} else {
 		changes := []string{}
 		if strings.Contains(output, "ENABLED_REPOS") {
@@ -1185,24 +1205,24 @@ fi
 		if strings.Contains(output, "3RD_PARTY_KEPT") {
 			changes = append(changes, "kept 3rd party repos")
 		}
-		
+
 		if len(changes) > 0 {
 			changeStr := strings.Join(changes, ", ")
 			addResult(result, "APT Sources", "Fixed apt sources: "+changeStr, true, "", "")
-			fmt.Printf("  ✓ Apt sources fixed: %s\n", changeStr)
+			cfg.progress("  ✓ Apt sources fixed: %s", changeStr)
 		} else {
 			addResult(result, "APT Sources", "Apt sources verified", true, "", "")
-			fmt.Printf("  ✓ Apt sources verified\n")
+			cfg.progress("  ✓ Apt sources verified")
 		}
 	}
 }
 
 // runLinuxUpdates runs system updates.
-func runLinuxUpdates(ctx context.Context, h *Hardener, result *BaselineResult, thirdPartyAction string) {
+func runLinuxUpdates(ctx context.Context, h *Hardener, cfg *BaselineConfig, result *BaselineResult) {
 	// First, verify and fix apt sources
-	verifyAndFixAptSources(ctx, h, result, thirdPartyAction)
-	
-	fmt.Println("  Running updates... (this may take several minutes)")
+	verifyAndFixAptSources(ctx, h, cfg, result, cfg.ThirdPartyRepoAction)
+
+	cfg.progress("  Running updates... (this may take several minutes)")
 
 	// Configure automatic updates first
 	autoUpdateScript := `
@@ -1217,7 +1237,7 @@ fi
 `
 	h.runBashSingle(ctx, autoUpdateScript)
 	addResult(result, "Updates", "Configured automatic security updates", true, "", "")
-	fmt.Printf("  ✓ Automatic updates configured\n")
+	cfg.progress("  ✓ Automatic updates configured")
 
 	// Run the actual update
 	script := `
@@ -1235,18 +1255,18 @@ echo "UPDATE_COMPLETE"
 	output, err := h.runBashSingle(ctx, script)
 	if err != nil {
 		addResult(result, "Updates", "Run system updates", false, "", err.Error())
-		fmt.Printf("  ✗ Updates failed: %s\n", err.Error())
+		cfg.progress("  ✗ Updates failed: %s", err.Error())
 	} else if strings.Contains(output, "UPDATE_COMPLETE") {
 		addResult(result, "Updates", "System packages updated", true, "", "")
-		fmt.Printf("  ✓ System updates completed\n")
+		cfg.progress("  ✓ System updates completed")
 	} else {
 		addResult(result, "Updates", "Updates may have partially completed", false, "", output)
-		fmt.Printf("  ⚠ Updates may have partially completed\n")
+		cfg.progress("  ⚠ Updates may have partially completed")
 	}
 }
 
 // configureScreenLock sets screen timeout and lock for multiple desktop environments.
-func configureScreenLock(ctx context.Context, h *Hardener, result *BaselineResult) {
+func configureScreenLock(ctx context.Context, h *Hardener, cfg *BaselineConfig, result *BaselineResult) {
 	// This script handles GNOME, Cinnamon (Mint), MATE, XFCE, and KDE
 	script := `
 CONFIGURED=0
@@ -1346,31 +1366,31 @@ echo "CONFIGURED=$CONFIGURED"
 	output, err := h.runBashSingle(ctx, script)
 	if err != nil {
 		addResult(result, "Screen Lock", "Configure screen timeout and lock", false, "", err.Error())
-		fmt.Printf("  ⚠ Screen lock configuration had errors\n")
+		cfg.progress("  ⚠ Screen lock configuration had errors")
 	} else {
 		addResult(result, "Screen Lock", "Set 5-minute idle timeout, auto-lock enabled (GNOME/Cinnamon/MATE/XFCE/KDE)", true, "", "")
-		fmt.Printf("  ✓ Screen lock configured (5 min timeout, lock on idle)\n")
+		cfg.progress("  ✓ Screen lock configured (5 min timeout, lock on idle)")
 		// Print which DEs were configured
 		if strings.Contains(output, "GNOME configured") {
-			fmt.Printf("    → GNOME settings applied\n")
+			cfg.progress("    → GNOME settings applied")
 		}
 		if strings.Contains(output, "Cinnamon configured") {
-			fmt.Printf("    → Cinnamon (Mint) settings applied\n")
+			cfg.progress("    → Cinnamon (Mint) settings applied")
 		}
 		if strings.Contains(output, "MATE configured") {
-			fmt.Printf("    → MATE settings applied\n")
+			cfg.progress("    → MATE settings applied")
 		}
 		if strings.Contains(output, "XFCE configured") {
-			fmt.Printf("    → XFCE settings applied\n")
+			cfg.progress("    → XFCE settings applied")
 		}
 		if strings.Contains(output, "KDE configured") {
-			fmt.Printf("    → KDE Plasma settings applied\n")
+			cfg.progress("    → KDE Plasma settings applied")
 		}
 	}
 }
 
 // hardenDisplayManager configures GDM/LightDM/SDDM security settings and removes unselected DMs.
-func hardenDisplayManager(ctx context.Context, h *Hardener, cfg BaselineConfig, result *BaselineResult) {
+func hardenDisplayManager(ctx context.Context, h *Hardener, cfg *BaselineConfig, result *BaselineResult) {
 	selectedDM := cfg.SelectedDisplayManager
 
 	// First, remove unselected display managers if user selected one
@@ -1442,11 +1462,11 @@ echo "REMOVED:$REMOVED"
 						removed := strings.TrimSpace(parts[1])
 						if removed != "" {
 							addResult(result, "Display Manager", fmt.Sprintf("Removed: %s (keeping %s)", removed, selectedDM), true, "", "")
-							fmt.Printf("  ✓ Removed unused display managers: %s\n", removed)
+							cfg.progress("  ✓ Removed unused display managers: %s", removed)
 						}
 					}
 				} else {
-					fmt.Printf("  ✓ Only %s was installed (nothing to remove)\n", selectedDM)
+					cfg.progress("  ✓ Only %s was installed (nothing to remove)", selectedDM)
 				}
 			}
 		}
@@ -1540,21 +1560,21 @@ echo "HARDENED=$HARDENED"
 		addResult(result, "Display Manager", "Harden display manager settings", false, "", err.Error())
 	} else {
 		addResult(result, "Display Manager", "Disabled TCP, guest login, autologin in display managers", true, "", "")
-		fmt.Printf("  ✓ Display manager hardened (TCP disabled, no guest/autologin)\n")
+		cfg.progress("  ✓ Display manager hardened (TCP disabled, no guest/autologin)")
 		if strings.Contains(output, "GDM3 hardened") {
-			fmt.Printf("    → GDM3 configured\n")
+			cfg.progress("    → GDM3 configured")
 		}
 		if strings.Contains(output, "LightDM hardened") {
-			fmt.Printf("    → LightDM configured\n")
+			cfg.progress("    → LightDM configured")
 		}
 		if strings.Contains(output, "SDDM hardened") {
-			fmt.Printf("    → SDDM (KDE) configured\n")
+			cfg.progress("    → SDDM (KDE) configured")
 		}
 	}
 }
 
 // setProcessLimits configures secure process limits.
-func setProcessLimits(ctx context.Context, h *Hardener, result *BaselineResult) {
+func setProcessLimits(ctx context.Context, h *Hardener, cfg *BaselineConfig, result *BaselineResult) {
 	script := `
 # Set hard process limit (prevents fork bombs)
 if ! grep -q '^\* hard nproc' /etc/security/limits.conf; then
@@ -1591,12 +1611,12 @@ echo "LIMITS_SET"
 		addResult(result, "Process Limits", "Set secure process limits", false, "", err.Error())
 	} else if strings.Contains(output, "LIMITS_SET") {
 		addResult(result, "Process Limits", "Set nproc=2500, nofile=65535 hard limits", true, "", "")
-		fmt.Printf("  ✓ Process limits configured (nproc=2500, nofile=65535)\n")
+		cfg.progress("  ✓ Process limits configured (nproc=2500, nofile=65535)")
 	}
 }
 
 // secureGrubPermissions sets secure permissions on GRUB configuration.
-func secureGrubPermissions(ctx context.Context, h *Hardener, result *BaselineResult) {
+func secureGrubPermissions(ctx context.Context, h *Hardener, cfg *BaselineConfig, result *BaselineResult) {
 	script := `
 SECURED=0
 
@@ -1625,15 +1645,15 @@ echo "SECURED=$SECURED"
 		addResult(result, "GRUB", "Secure GRUB configuration permissions", false, "", err.Error())
 	} else if strings.Contains(output, "Secured:") {
 		addResult(result, "GRUB", "Set GRUB config to 600 (root only)", true, "", "")
-		fmt.Printf("  ✓ GRUB configuration secured (chmod 600)\n")
+		cfg.progress("  ✓ GRUB configuration secured (chmod 600)")
 	} else {
 		addResult(result, "GRUB", "No GRUB config files found", true, "", "May be using different bootloader")
-		fmt.Printf("  ✓ No GRUB config found (may use different bootloader)\n")
+		cfg.progress("  ✓ No GRUB config found (may use different bootloader)")
 	}
 }
 
 // setAllUserPasswords sets a standard password for all human users.
-func setAllUserPasswords(ctx context.Context, h *Hardener, cfg BaselineConfig, result *BaselineResult) {
+func setAllUserPasswords(ctx context.Context, h *Hardener, cfg *BaselineConfig, result *BaselineResult) {
 	password := cfg.StandardPassword
 	if password == "" {
 		password = "CyberPatr!0t"
@@ -1685,7 +1705,7 @@ echo "FAILED=$FAILED"
 	output, err := h.runBashSingle(ctx, script)
 	if err != nil {
 		addResult(result, "User Passwords", "Set standard password for all users", false, "", err.Error())
-		fmt.Printf("  ✗ Failed to set user passwords: %s\n", err.Error())
+		cfg.progress("  ✗ Failed to set user passwords: %s", err.Error())
 	} else {
 		// Count successes
 		var changed, failed int
@@ -1712,15 +1732,15 @@ echo "FAILED=$FAILED"
 			addResult(result, "User Passwords", desc, true, "", "")
 		}
 
-		fmt.Printf("  ✓ Password set for %d users\n", changed)
+		cfg.progress("  ✓ Password set for %d users", changed)
 		if cfg.LockUserAccounts {
-			fmt.Printf("    → Accounts locked\n")
+			cfg.progress("    → Accounts locked")
 		}
 		if cfg.ExpireUserPasswords {
-			fmt.Printf("    → Passwords expired (must change on next login)\n")
+			cfg.progress("    → Passwords expired (must change on next login)")
 		}
 		if failed > 0 {
-			fmt.Printf("  ⚠ Failed for %d users\n", failed)
+			cfg.progress("  ⚠ Failed for %d users", failed)
 		}
 	}
 }

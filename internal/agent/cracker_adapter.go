@@ -3,7 +3,10 @@ package agent
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/tanav-malhotra/ironguard/internal/cracker"
 )
@@ -53,14 +56,58 @@ func (ca *CrackerAdapter) Start(ctx context.Context) error {
 	return nil
 }
 
-// Stop stops the cracker
+// Stop stops the cracker and saves findings to disk
 func (ca *CrackerAdapter) Stop() {
 	ca.mu.Lock()
 	defer ca.mu.Unlock()
 	
 	if ca.cracker != nil {
 		ca.cracker.Stop()
+		// Save findings to disk so AI can see them even after restart
+		ca.saveFindings()
 	}
+}
+
+// SaveFindings persists current findings to disk
+// This is called automatically on Stop() and can be called periodically
+func (ca *CrackerAdapter) SaveFindings() {
+	ca.mu.RLock()
+	defer ca.mu.RUnlock()
+	ca.saveFindings()
+}
+
+// saveFindings is the internal method (must hold lock)
+func (ca *CrackerAdapter) saveFindings() {
+	if ca.cracker == nil {
+		return
+	}
+	
+	findings := ca.cracker.GetFindings()
+	if len(findings) == 0 {
+		return
+	}
+	
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	
+	// Ensure directory exists
+	dir := filepath.Join(homeDir, ".ironguard")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return
+	}
+	
+	// Format findings for storage
+	content := fmt.Sprintf("[SCORING ENGINE CRACKER RESULTS]\n")
+	content += fmt.Sprintf("Captured at: %s\n", time.Now().Format(time.RFC3339))
+	content += fmt.Sprintf("Process: %s (PID %d)\n", ca.cracker.GetProcessName(), ca.cracker.GetPID())
+	content += fmt.Sprintf("Total findings: %d\n\n", len(findings))
+	content += cracker.FormatAllFindings(findings)
+	
+	// Write to file
+	resultsFile := filepath.Join(dir, "cracker_results.txt")
+	os.WriteFile(resultsFile, []byte(content), 0644)
 }
 
 // IsRunning returns whether the cracker is active

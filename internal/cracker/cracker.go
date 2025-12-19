@@ -17,6 +17,7 @@ type Finding struct {
 	CurrentVal  string    // Current value found
 	ExpectedVal string    // Expected value (from heuristics)
 	FixHint     string    // Suggested fix
+	ReadContent string    // Content read from file (from FD tracking on Linux)
 	Timestamp   time.Time
 	IsNew       bool      // True if this is a newly discovered check
 }

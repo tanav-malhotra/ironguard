@@ -17,6 +17,7 @@ import (
 	"github.com/tanav-malhotra/ironguard/internal/agent"
 	"github.com/tanav-malhotra/ironguard/internal/audio"
 	"github.com/tanav-malhotra/ironguard/internal/config"
+	"github.com/tanav-malhotra/ironguard/internal/harden"
 	"github.com/tanav-malhotra/ironguard/internal/llm"
 	"github.com/tanav-malhotra/ironguard/internal/mcp"
 	"github.com/tanav-malhotra/ironguard/internal/tools"
@@ -186,6 +187,13 @@ type model struct {
 
 	// Program reference for sending commands
 	program *tea.Program
+
+	// Baseline configuration (for TUI /baseline commands)
+	baselineConfig *harden.BaselineConfig
+	baselineCancel context.CancelFunc // Cancel function for running baseline
+
+	// Cracker state (for TUI /crack commands)
+	crackerCancel context.CancelFunc // Cancel function for running cracker
 }
 
 func newModel(cfg config.Config) model {
@@ -219,21 +227,25 @@ func newModel(cfg config.Config) model {
 	// Sync screen mode with tools package on startup
 	tools.SetScreenMode(cfg.ScreenMode)
 
+	// Initialize baseline config with defaults
+	baselineCfg := harden.DefaultBaselineConfig()
+
 	m := model{
-		cfg:           cfg,
-		messages:      []Message{},
-		input:         ti,
-		apiKeys:       make(map[string]string),
-		sidebarWidth:  40, // Wider for manual tasks
-		theme:         theme,
-		styles:        styles,
-		cmdRegistry:   NewCommandRegistry(),
-		agent:         ag,
-		manualTasks:   NewManualTaskManager(),
-		mcpManager:    mcpMgr,
-		checkingConn:  true, // Will be set to false when connectivity check completes
-		cwd:           cwd,
-		lastScrollMax: 0,
+		cfg:            cfg,
+		messages:       []Message{},
+		input:          ti,
+		apiKeys:        make(map[string]string),
+		sidebarWidth:   40, // Wider for manual tasks
+		theme:          theme,
+		styles:         styles,
+		cmdRegistry:    NewCommandRegistry(),
+		agent:          ag,
+		manualTasks:    NewManualTaskManager(),
+		mcpManager:     mcpMgr,
+		checkingConn:   true, // Will be set to false when connectivity check completes
+		cwd:            cwd,
+		lastScrollMax:  0,
+		baselineConfig: &baselineCfg,
 	}
 
 	// Generate welcome message here (Init uses value receiver so changes wouldn't persist)
@@ -471,6 +483,40 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.internetErr = msg.InternetErr
 		m.apiKeyValidated = msg.APIKeyOK
 		m.apiKeyErr = msg.APIKeyErr
+		return m, nil
+	case BaselineProgressMsg:
+		// Add progress message to chat
+		if msg.Message != "" {
+			m.messages = append(m.messages, NewSystemMessage(msg.Message))
+			m.scrollOffset = 0 // Auto-scroll to bottom
+		}
+		return m, nil
+	case BaselineCompleteMsg:
+		// Clean up baseline cancel
+		m.baselineCancel = nil
+		
+		if msg.Err != nil {
+			m.messages = append(m.messages, NewSystemMessage("❌ Baseline hardening failed: "+msg.Err.Error()))
+		} else if msg.Result != nil {
+			// Count results
+			successCount := 0
+			failCount := 0
+			for _, action := range msg.Result.Actions {
+				if action.Success {
+					successCount++
+				} else if !action.Skipped {
+					failCount++
+				}
+			}
+			m.messages = append(m.messages, NewSystemMessage(fmt.Sprintf(
+				"✓ Baseline hardening complete!\n  Successful: %d\n  Failed: %d\n\nResults have been stored. The AI will see them when you chat.",
+				successCount, failCount,
+			)))
+			
+			// Store results for AI
+			m.agent.LoadStoredResults()
+		}
+		m.scrollOffset = 0 // Auto-scroll to bottom
 		return m, nil
 	}
 
